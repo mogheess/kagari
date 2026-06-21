@@ -72,71 +72,75 @@ export function DiscoverScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
+      <View
+        style={[
+          styles.stickyHeader,
+          {
+            paddingTop: insets.top + 8,
+            paddingHorizontal: sidePad,
+            backgroundColor: theme.colors.bg,
+          },
+        ]}
+      >
+        <Text style={[theme.typography.title, { color: theme.colors.text }]}>
+          Discover
+        </Text>
+
+        <View
+          style={[
+            styles.searchBar,
+            {
+              backgroundColor: theme.colors.surface,
+              borderColor: theme.colors.border,
+            },
+          ]}
+        >
+          <Icon name="search" size={18} color={theme.colors.textMuted} />
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Search manga"
+            placeholderTextColor={theme.colors.textFaint}
+            style={[styles.input, { color: theme.colors.text }]}
+            returnKeyType="search"
+          />
+        </View>
+
+        {sources.length > 0 ? (
+          <Pressable
+            onPress={() => setPickerOpen(true)}
+            style={({ pressed }) => [
+              styles.sourceSelect,
+              {
+                backgroundColor: theme.colors.surface,
+                borderColor: theme.colors.border,
+                opacity: pressed ? 0.85 : 1,
+              },
+            ]}
+          >
+            <Icon name="globe" size={16} color={theme.colors.accent} />
+            <View style={{ flex: 1 }}>
+              <Text numberOfLines={1} style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>
+                {activeSource?.name ?? 'Select source'}
+              </Text>
+            </View>
+            {activeSource ? (
+              <Text style={[styles.selLang, { color: theme.colors.textMuted, borderColor: theme.colors.border }]}>
+                {langLabel(activeSource.lang)}
+              </Text>
+            ) : null}
+            <Icon name="chevronDown" size={16} color={theme.colors.textMuted} />
+          </Pressable>
+        ) : null}
+      </View>
+
       <FlatList
         data={loading ? [] : data ?? []}
         numColumns={cols}
         keyExtractor={(m, i) => `${m.url}:${i}`}
         showsVerticalScrollIndicator={false}
         columnWrapperStyle={{ paddingHorizontal: sidePad, gap }}
-        contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: TAB_BAR_SPACE, gap: 16 }}
-        ListHeaderComponent={
-          <View style={{ marginBottom: 16 }}>
-            <Text
-              style={[theme.typography.title, { color: theme.colors.text, paddingHorizontal: sidePad }]}
-            >
-              Discover
-            </Text>
-
-            <View
-              style={[
-                styles.searchBar,
-                {
-                  marginHorizontal: sidePad,
-                  backgroundColor: theme.colors.surface,
-                  borderColor: theme.colors.border,
-                },
-              ]}
-            >
-              <Icon name="search" size={18} color={theme.colors.textMuted} />
-              <TextInput
-                value={query}
-                onChangeText={setQuery}
-                placeholder="Search manga"
-                placeholderTextColor={theme.colors.textFaint}
-                style={[styles.input, { color: theme.colors.text }]}
-                returnKeyType="search"
-              />
-            </View>
-
-            {sources.length > 0 ? (
-              <Pressable
-                onPress={() => setPickerOpen(true)}
-                style={({ pressed }) => [
-                  styles.sourceSelect,
-                  {
-                    marginHorizontal: sidePad,
-                    backgroundColor: theme.colors.surface,
-                    borderColor: theme.colors.border,
-                    opacity: pressed ? 0.85 : 1,
-                  },
-                ]}
-              >
-                <Icon name="globe" size={16} color={theme.colors.accent} />
-                <View style={{ flex: 1 }}>
-                  <Text numberOfLines={1} style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>
-                    {activeSource?.name ?? 'Select source'}
-                  </Text>
-                </View>
-                {activeSource ? (
-                  <Text style={[styles.selLang, { color: theme.colors.textMuted, borderColor: theme.colors.border }]}>
-                    {langLabel(activeSource.lang)}
-                  </Text>
-                ) : null}
-                <Icon name="chevronDown" size={16} color={theme.colors.textMuted} />
-              </Pressable>
-            ) : null}
-          </View>
-        }
+        contentContainerStyle={{ paddingTop: 14, paddingBottom: TAB_BAR_SPACE, gap: 16 }}
         renderItem={({ item }) => (
           <Cover
             manga={item}
@@ -242,6 +246,9 @@ export function DiscoverScreen() {
 }
 
 const styles = StyleSheet.create({
+  stickyHeader: {
+    paddingBottom: 14,
+  },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
