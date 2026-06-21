@@ -77,76 +77,59 @@ class EngineFacade(context: Context) {
 
     suspend fun getPopular(sourceId: String, page: Int): MangasPageDto {
         val source = catalogue(sourceId)
-        val result = runCatching { source.getPopularManga(page) }
-            .getOrElse {
-                @Suppress("DEPRECATION")
-                source.fetchPopularManga(page).awaitSingle()
-            }
+        val result = source.fetchPopularManga(page).awaitSingle()
         return Mappers.mangasPageToDto(source.id, result)
     }
 
     suspend fun getLatest(sourceId: String, page: Int): MangasPageDto {
         val source = catalogue(sourceId)
-        val result = runCatching { source.getLatestUpdates(page) }
-            .getOrElse {
-                @Suppress("DEPRECATION")
-                source.fetchLatestUpdates(page).awaitSingle()
-            }
+        val result = source.fetchLatestUpdates(page).awaitSingle()
         return Mappers.mangasPageToDto(source.id, result)
     }
 
     suspend fun search(sourceId: String, query: String, page: Int): MangasPageDto {
         val source = catalogue(sourceId)
         val filters: FilterList = source.getFilterList()
-        val result = runCatching { source.getSearchManga(page, query, filters) }
-            .getOrElse {
-                @Suppress("DEPRECATION")
-                source.fetchSearchManga(page, query, filters).awaitSingle()
-            }
+        val result = source.fetchSearchManga(page, query, filters).awaitSingle()
         return Mappers.mangasPageToDto(source.id, result)
     }
 
     suspend fun getMangaDetails(sourceId: String, mangaUrl: String): MangaDto {
         val source = source(sourceId)
         val stub = SManga.create().apply { url = mangaUrl; title = "" }
-        val result = runCatching { source.getMangaDetails(stub) }
-            .getOrElse {
-                @Suppress("DEPRECATION")
-                source.fetchMangaDetails(stub).awaitSingle()
-            }
+        // `mangaDetailsParse` typically returns a partial SManga without `url`
+        // (the app already knows it). Re-attach the known url so the mapper
+        // doesn't hit an uninitialized lateinit.
+        val result = source.fetchMangaDetails(stub).awaitSingle().apply { url = mangaUrl }
         return Mappers.mangaToDto(source.id, result)
     }
 
     suspend fun getChapters(sourceId: String, mangaUrl: String): List<ChapterDto> {
         val source = source(sourceId)
         val stub = SManga.create().apply { url = mangaUrl; title = "" }
-        val result: List<SChapter> = runCatching { source.getChapterList(stub) }
-            .getOrElse {
-                @Suppress("DEPRECATION")
-                source.fetchChapterList(stub).awaitSingle()
-            }
+        val result: List<SChapter> = source.fetchChapterList(stub).awaitSingle()
         return result.map { Mappers.chapterToDto(source.id, mangaUrl, it) }
     }
 
     suspend fun getPages(sourceId: String, chapterUrl: String): List<PageDto> {
         val source = source(sourceId)
         val stub = SChapter.create().apply { url = chapterUrl; name = "" }
-        val result: List<Page> = runCatching { source.getPageList(stub) }
-            .getOrElse {
-                @Suppress("DEPRECATION")
-                source.fetchPageList(stub).awaitSingle()
-            }
+        val result: List<Page> = source.fetchPageList(stub).awaitSingle()
         return result.map { Mappers.pageToDto(it) }
     }
 
     suspend fun resolveImage(sourceId: String, page: PageDto): ImageRequestDto {
         val source = source(sourceId)
-        val model = Page(page.index, page.url ?: "", page.imageUrl)
-        val url = if (source is HttpSource) source.getImageUrl(model) else (page.imageUrl ?: page.url ?: "")
         val headers = if (source is HttpSource) {
             source.headers.toMultimap().mapValues { it.value.firstOrNull() ?: "" }
         } else {
             emptyMap()
+        }
+        val url = page.imageUrl ?: if (source is HttpSource) {
+            val model = Page(page.index, page.url ?: "", page.imageUrl)
+            source.fetchImageUrl(model).awaitSingle()
+        } else {
+            page.url ?: ""
         }
         return ImageRequestDto(url = url, headers = headers)
     }

@@ -18,6 +18,7 @@ import { getEngine } from '../engine';
 import { Icon } from '../components/Icon';
 import { Skeleton } from '../components/Skeleton';
 import { seededColor, withAlpha } from '../utils/color';
+import { toggleFavorite, useIsFavorite } from '../library/favorites';
 import type { RootStackParamList } from '../navigation/types';
 import type { MangaDto, ChapterDto } from '../engine/types';
 
@@ -55,6 +56,7 @@ export function MangaDetailScreen() {
   const manga = details ?? params.preview;
   const tint = seededColor(manga?.thumbnailUrl ?? manga?.title ?? 'x', 0.5, 0.32);
   const backdropHeight = Math.round(width * 0.78);
+  const favorited = useIsFavorite(params.sourceId, params.mangaUrl);
 
   const openReader = (chapter: ChapterDto) =>
     navigation.navigate('Reader', {
@@ -145,8 +147,22 @@ export function MangaDetailScreen() {
               Start Reading
             </Text>
           </Pressable>
-          <Pressable style={[styles.secondaryBtn, { borderColor: theme.colors.border }]}>
-            <Icon name="bookmark" size={18} color={theme.colors.text} />
+          <Pressable
+            onPress={() => manga && toggleFavorite(manga)}
+            style={[
+              styles.secondaryBtn,
+              {
+                borderColor: favorited ? theme.colors.accent : theme.colors.border,
+                backgroundColor: favorited ? withAlpha(theme.colors.accent, 0.14) : 'transparent',
+              },
+            ]}
+          >
+            <Icon
+              name="bookmark"
+              size={18}
+              color={favorited ? theme.colors.accent : theme.colors.text}
+              filled={favorited}
+            />
           </Pressable>
         </View>
 

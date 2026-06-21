@@ -1,44 +1,48 @@
 /*
- * Adapted from Mihon / Tachiyomi (https://github.com/mihonapp/mihon)
- * Licensed under the Apache License, Version 2.0. See NOTICE in repo root.
- *
- * Part of the vendored Tachiyomi source-api. Must stay under
- * `eu.kanade.tachiyomi.source` for extension runtime compatibility.
+ * Vendored Tachiyomi source-api. Must stay under `eu.kanade.tachiyomi.source`
+ * for extension runtime compatibility. Signatures mirror keiyoushi/extensions-lib
+ * (Apache 2.0 — see NOTICE).
  */
 package eu.kanade.tachiyomi.source
 
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
+import eu.kanade.tachiyomi.source.model.SManga
 import rx.Observable
 
+@Suppress("unused")
 interface CatalogueSource : Source {
-    /** An ISO 639-1 compliant language code (two letters in lower case). */
-    override val lang: String
 
-    /** Whether the source supports the "latest updates" listing. */
+    /** An ISO 639-1 compliant language code (two letters in lower case). */
+    val lang: String
+
+    /** Whether the source has support for latest updates. */
     val supportsLatest: Boolean
 
-    // --- Modern suspend API (preferred) ---
+    /** Returns an observable containing a page with a list of manga. */
+    fun fetchPopularManga(page: Int): Observable<MangasPage>
 
-    suspend fun getPopularManga(page: Int): MangasPage = throw NotImplementedError()
+    /** Returns an observable containing a page with a list of manga. */
+    fun fetchSearchManga(page: Int, query: String, filters: FilterList): Observable<MangasPage>
 
-    suspend fun getSearchManga(page: Int, query: String, filters: FilterList): MangasPage =
-        throw NotImplementedError()
-
-    suspend fun getLatestUpdates(page: Int): MangasPage = throw NotImplementedError()
+    /** Returns an observable containing a page with a list of latest manga updates. */
+    fun fetchLatestUpdates(page: Int): Observable<MangasPage>
 
     /** Returns the list of filters for the source. */
     fun getFilterList(): FilterList
 
-    // --- Deprecated RxJava API ---
+    /**
+     * Whether the source provides custom related mangas. Only supported on Komikku.
+     */
+    val supportsRelatedMangas: Boolean get() = false
 
-    @Deprecated("Use the suspend variant", ReplaceWith("getPopularManga(page)"))
-    fun fetchPopularManga(page: Int): Observable<MangasPage> = throw NotImplementedError()
+    /** Only supported on Komikku. */
+    val disableRelatedMangasBySearch: Boolean get() = false
 
-    @Deprecated("Use the suspend variant", ReplaceWith("getSearchManga(page, query, filters)"))
-    fun fetchSearchManga(page: Int, query: String, filters: FilterList): Observable<MangasPage> =
-        throw NotImplementedError()
+    /** Only supported on Komikku. */
+    val disableRelatedMangas: Boolean get() = false
 
-    @Deprecated("Use the suspend variant", ReplaceWith("getLatestUpdates(page)"))
-    fun fetchLatestUpdates(page: Int): Observable<MangasPage> = throw NotImplementedError()
+    /** Only supported on Komikku. */
+    suspend fun fetchRelatedMangaList(manga: SManga): List<SManga> =
+        throw UnsupportedOperationException("Unsupported!")
 }

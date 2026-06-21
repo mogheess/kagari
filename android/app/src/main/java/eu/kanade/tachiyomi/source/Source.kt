@@ -1,9 +1,7 @@
 /*
- * Adapted from Mihon / Tachiyomi (https://github.com/mihonapp/mihon)
- * Licensed under the Apache License, Version 2.0. See NOTICE in repo root.
- *
- * Part of the vendored Tachiyomi source-api. Must stay under
- * `eu.kanade.tachiyomi.source` for extension runtime compatibility.
+ * Vendored Tachiyomi source-api. Must stay under `eu.kanade.tachiyomi.source`
+ * for extension runtime compatibility. Signatures mirror keiyoushi/extensions-lib
+ * (Apache 2.0 — see NOTICE).
  */
 package eu.kanade.tachiyomi.source
 
@@ -13,35 +11,23 @@ import eu.kanade.tachiyomi.source.model.SManga
 import rx.Observable
 
 /**
- * A basic interface for creating a source. It could be an online source, a
- * local source, etc.
+ * A basic interface for creating a source. It could be an online source, a local source, etc.
  */
+@Suppress("unused")
 interface Source {
-    /** Id of the source. Stable across installs (typically derived from name+lang). */
+
+    /** Id for the source. Must be unique. */
     val id: Long
 
     /** Name of the source. */
     val name: String
 
-    val lang: String
-        get() = ""
+    /** Returns an observable with the updated details for a manga. */
+    fun fetchMangaDetails(manga: SManga): Observable<SManga>
 
-    // --- Modern suspend API (preferred) ---
+    /** Returns an observable with all the available chapters for a manga. */
+    fun fetchChapterList(manga: SManga): Observable<List<SChapter>>
 
-    suspend fun getMangaDetails(manga: SManga): SManga = throw NotImplementedError()
-
-    suspend fun getChapterList(manga: SManga): List<SChapter> = throw NotImplementedError()
-
-    suspend fun getPageList(chapter: SChapter): List<Page> = throw NotImplementedError()
-
-    // --- Deprecated RxJava API (older extensions still implement these) ---
-
-    @Deprecated("Use the suspend variant", ReplaceWith("getMangaDetails(manga)"))
-    fun fetchMangaDetails(manga: SManga): Observable<SManga> = throw NotImplementedError()
-
-    @Deprecated("Use the suspend variant", ReplaceWith("getChapterList(manga)"))
-    fun fetchChapterList(manga: SManga): Observable<List<SChapter>> = throw NotImplementedError()
-
-    @Deprecated("Use the suspend variant", ReplaceWith("getPageList(chapter)"))
-    fun fetchPageList(chapter: SChapter): Observable<List<Page>> = throw NotImplementedError()
+    /** Returns an observable with the list of pages a chapter has. */
+    fun fetchPageList(chapter: SChapter): Observable<List<Page>>
 }

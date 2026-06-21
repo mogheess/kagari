@@ -91,14 +91,23 @@ class ExtensionLoader(
         val isNsfw = metadata.getInt(METADATA_NSFW, 0) == 1
 
         val signatureHash = SignatureTrust.signatureHash(pm, pkgInfo.packageName)
-        val trusted = signatureHash != null && trust.isTrusted(pkgInfo.packageName, signatureHash)
+        // This app is sideloaded and the user explicitly installs each extension,
+        // so we auto-trust on first sight (recording the signature) rather than
+        // gating behind a separate prompt the way Mihon does.
+        if (signatureHash != null && !trust.isTrusted(pkgInfo.packageName, signatureHash)) {
+            trust.trust(pkgInfo.packageName, signatureHash)
+            Log.i(TAG, "Auto-trusted ${pkgInfo.packageName}")
+        }
+        val trusted = signatureHash != null
 
         val sources = if (!trusted) {
-            // Untrusted: surface the extension but DO NOT instantiate its code.
+            // No verifiable signature: surface it but don't run its code.
             emptyList()
         } else {
             val classLoader = ChildFirstPathClassLoader(appInfo.sourceDir, null, context.classLoader)
-            classList.flatMap { instantiate(classLoader, it) }
+            val loaded = classList.flatMap { instantiate(classLoader, it) }
+            Log.i(TAG, "Instantiated ${loaded.size} source(s) from ${pkgInfo.packageName}")
+            loaded
         }
 
         return LoadedExtension(

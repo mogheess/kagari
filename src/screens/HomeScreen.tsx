@@ -63,7 +63,12 @@ export function HomeScreen() {
           <HomeEmptyState onBrowse={() => navigation.navigate('Extensions')} />
         ) : (
           enabled.map(block => (
-            <HomeBlockView key={block.id} block={block} onOpenManga={openManga} />
+            <HomeBlockView
+              key={block.id}
+              block={block}
+              sources={sources ?? []}
+              onOpenManga={openManga}
+            />
           ))
         )}
       </ScrollView>

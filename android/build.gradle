@@ -20,3 +20,12 @@ buildscript {
 }
 
 apply plugin: "com.facebook.react.rootproject"
+
+allprojects {
+    repositories {
+        // Tachiyomi/Mihon extensions are compiled against an Injekt fork that is
+        // only published on JitPack. We must provide the exact same runtime so the
+        // inlined `injectLazy()` / `Injekt.get()` calls in extension bytecode link.
+        maven { url("https://www.jitpack.io") }
+    }
+}

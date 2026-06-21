@@ -7,84 +7,96 @@ import { SectionHeader } from './SectionHeader';
 import { CoverRail } from './CoverRail';
 import { FeaturedHero } from './FeaturedHero';
 import { blockLabel, type HomeBlock } from '../home/HomeConfig';
-import type { MangaDto } from '../engine/types';
+import { useFavorites, favoriteToManga } from '../library/favorites';
+import type { MangaDto, SourceDto } from '../engine/types';
 
 interface HomeBlockViewProps {
   block: HomeBlock;
+  sources: SourceDto[];
   onOpenManga: (m: MangaDto) => void;
 }
 
-/** Renders one configurable home block by pulling from the engine. */
-export function HomeBlockView({ block, onOpenManga }: HomeBlockViewProps) {
-  const theme = useTheme();
-  const engine = getEngine();
-
-  const sourceId = block.sourceId ?? '1001';
-
-  const { data, loading } = useAsync<MangaDto[]>(async () => {
-    switch (block.kind) {
-      case 'featured':
-      case 'popular':
-      case 'recommended': {
-        const res = await engine.getPopular(sourceId, 1);
-        return res.manga;
-      }
-      case 'latest': {
-        const res = await engine.getLatest(sourceId, 1);
-        return res.manga;
-      }
-      case 'continue': {
-        // Stand-in for a local "history" table; reuse popular as a sample set.
-        const res = await engine.getPopular(sourceId, 2);
-        return res.manga.slice(0, 8);
-      }
-      default:
-        return [];
-    }
-  }, [block.kind, sourceId]);
-
-  if (block.kind === 'featured') {
-    const hero = data?.[0];
-    return (
-      <View style={{ paddingHorizontal: theme.spacing.lg, marginBottom: theme.spacing.xxl }}>
-        {hero ? (
-          <FeaturedHero
-            manga={hero}
-            tagline="He killed for a crown. Now he'll burn the world."
-            onPress={() => onOpenManga(hero)}
-          />
-        ) : null}
-      </View>
-    );
+/**
+ * Renders one configurable home block. Browse rails (featured/popular/latest)
+ * pull from a real installed source; the "Continue" rail shows the local
+ * library (favorites). Empty rails render nothing so the Home stays tidy.
+ */
+export function HomeBlockView({ block, sources, onOpenManga }: HomeBlockViewProps) {
+  if (block.kind === 'continue') {
+    return <ContinueBlock onOpenManga={onOpenManga} />;
   }
+  return <BrowseBlock block={block} sources={sources} onOpenManga={onOpenManga} />;
+}
 
-  const isContinue = block.kind === 'continue';
+function ContinueBlock({ onOpenManga }: { onOpenManga: (m: MangaDto) => void }) {
+  const theme = useTheme();
+  const favorites = useFavorites();
+  if (favorites.length === 0) return null;
 
   return (
     <View style={{ marginBottom: theme.spacing.xxl }}>
       <View style={{ paddingHorizontal: theme.spacing.lg, marginBottom: theme.spacing.md }}>
-        <SectionHeader
-          title={isContinue ? 'Continue' : blockLabel(block).split(' \u00B7 ')[0]}
-          source={block.sourceName}
-          onSeeAll={() => {}}
-        />
+        <SectionHeader title="Library" onSeeAll={() => {}} />
       </View>
       <CoverRail
-        data={data ?? []}
-        loading={loading}
-        coverWidth={isContinue ? 124 : 112}
-        subtitleOf={m =>
-          isContinue ? `Ch. ${(Math.abs(hashCode(m.url)) % 300) + 1}` : undefined
-        }
-        progressOf={isContinue ? m => ((Math.abs(hashCode(m.url)) % 90) + 5) / 100 : undefined}
+        data={favorites.map(favoriteToManga)}
+        loading={false}
+        coverWidth={124}
         onPressItem={onOpenManga}
       />
     </View>
   );
 }
 
-function hashCode(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
-  return h;
+function BrowseBlock({
+  block,
+  sources,
+  onOpenManga,
+}: {
+  block: HomeBlock;
+  sources: SourceDto[];
+  onOpenManga: (m: MangaDto) => void;
+}) {
+  const theme = useTheme();
+  const engine = getEngine();
+
+  const source = sources.find(s => s.id === block.sourceId) ?? sources[0];
+  const wantsLatest = block.kind === 'latest';
+  const usable = source && (!wantsLatest || source.supportsLatest);
+  const sourceId = source?.id;
+
+  const { data, loading } = useAsync<MangaDto[]>(async () => {
+    if (!sourceId || !usable) return [];
+    if (wantsLatest) {
+      const res = await engine.getLatest(sourceId, 1);
+      return res.manga;
+    }
+    const res = await engine.getPopular(sourceId, 1);
+    return res.manga;
+  }, [sourceId, block.kind, usable]);
+
+  if (!usable) return null;
+  if (!loading && (data?.length ?? 0) === 0) return null;
+
+  if (block.kind === 'featured') {
+    const hero = data?.[0];
+    return (
+      <View style={{ paddingHorizontal: theme.spacing.lg, marginBottom: theme.spacing.xxl }}>
+        {hero ? <FeaturedHero manga={hero} onPress={() => onOpenManga(hero)} /> : null}
+      </View>
+    );
+  }
+
+  return (
+    <View style={{ marginBottom: theme.spacing.xxl }}>
+      <View style={{ paddingHorizontal: theme.spacing.lg, marginBottom: theme.spacing.md }}>
+        <SectionHeader
+          title={blockLabel(block).split(' \u00B7 ')[0]}
+          source={source?.name}
+          onSeeAll={() => {}}
+        />
+      </View>
+      <CoverRail data={data ?? []} loading={loading} coverWidth={112} onPressItem={onOpenManga} />
+    </View>
+  );
 }

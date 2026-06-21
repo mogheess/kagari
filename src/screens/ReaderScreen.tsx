@@ -5,20 +5,28 @@ import {
   Image,
   FlatList,
   Pressable,
+  Modal,
   StyleSheet,
+  ActivityIndicator,
   useWindowDimensions,
   StatusBar,
   ViewToken,
 } from 'react-native';
-import { BlurView } from '@react-native-community/blur';
-import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAsync } from '../hooks/useAsync';
 import { getEngine } from '../engine';
 import { Icon } from '../components/Icon';
+import { useTheme } from '../theme/ThemeProvider';
+import {
+  READER_MODES,
+  getReaderMode,
+  setReaderMode,
+  isHorizontal,
+  isPaged,
+  type ReaderMode,
+} from '../reader/readerSettings';
 import type { RootStackParamList } from '../navigation/types';
 import type { PageDto } from '../engine/types';
 
@@ -29,133 +37,277 @@ export function ReaderScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const { params } = useRoute<ReaderRoute>();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const engine = getEngine();
 
   const [chrome, setChrome] = useState(true);
   const [current, setCurrent] = useState(0);
+  const [mode, setMode] = useState<ReaderMode>(getReaderMode());
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
-  const { data: pages } = useAsync<PageDto[]>(
+  const { data: pages, loading, error } = useAsync<PageDto[]>(
     () => engine.getPages(params.sourceId, params.chapter.url),
     [params.chapter.url],
   );
 
   const total = pages?.length ?? 0;
+  const horizontal = isHorizontal(mode);
+  const paged = isPaged(mode);
+  const inverted = mode === 'rtl';
+
+  const toggleChrome = useCallback(() => setChrome(c => !c), []);
 
   const onViewable = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
     const first = viewableItems[0];
     if (first?.index != null) setCurrent(first.index);
   }).current;
 
-  const chromeStyle = useAnimatedStyle(() => ({ opacity: withTiming(chrome ? 1 : 0, { duration: 180 }) }));
-
   const renderPage = useCallback(
-    ({ item }: { item: PageDto }) => <ReaderPage page={item} width={width} />,
-    [width],
+    ({ item }: { item: PageDto }) => (
+      <ReaderPage
+        page={item}
+        width={width}
+        screenHeight={height}
+        layout={paged ? 'page' : 'strip'}
+        onPress={toggleChrome}
+      />
+    ),
+    [width, height, paged, toggleChrome],
   );
 
   return (
     <View style={{ flex: 1, backgroundColor: '#000' }}>
-      <StatusBar hidden={!chrome} />
+      <StatusBar hidden={!chrome} animated />
 
-      <Pressable style={StyleSheet.absoluteFill} onPress={() => setChrome(c => !c)}>
+      {loading ? (
+        <View style={styles.center}>
+          <ActivityIndicator color="#fff" />
+        </View>
+      ) : error || total === 0 ? (
+        <Pressable style={styles.center} onPress={() => navigation.goBack()}>
+          <Icon name="globe" size={28} color="rgba(255,255,255,0.5)" />
+          <Text style={styles.errorText}>
+            {error ? "Couldn't load this chapter" : 'No pages found'}
+          </Text>
+          <Text style={styles.errorSub}>
+            {error
+              ? 'The source may be blocked or temporarily down. Tap to go back.'
+              : 'This chapter appears to be empty. Tap to go back.'}
+          </Text>
+        </Pressable>
+      ) : (
         <FlatList
+          key={mode}
           data={pages ?? []}
           keyExtractor={p => String(p.index)}
           renderItem={renderPage}
+          horizontal={horizontal}
+          inverted={inverted}
+          pagingEnabled={paged}
+          removeClippedSubviews={false}
           showsVerticalScrollIndicator={false}
+          showsHorizontalScrollIndicator={false}
           onViewableItemsChanged={onViewable}
           viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
-          ListFooterComponent={<View style={{ height: 80 }} />}
+          getItemLayout={
+            paged
+              ? (_, index) => {
+                  const size = horizontal ? width : height;
+                  return { length: size, offset: size * index, index };
+                }
+              : undefined
+          }
+          initialScrollIndex={paged && current > 0 ? current : undefined}
+          ListFooterComponent={paged ? null : <View style={{ height: 80 }} />}
         />
-      </Pressable>
+      )}
 
-      {/* Top glass bar */}
-      <Animated.View style={[styles.topBar, chromeStyle]} pointerEvents={chrome ? 'auto' : 'none'}>
-        <BlurView style={StyleSheet.absoluteFill} blurType="dark" blurAmount={18} />
-        <LinearGradient colors={['rgba(0,0,0,0.5)', 'transparent']} style={StyleSheet.absoluteFill} />
-        <View style={[styles.topRow, { paddingTop: insets.top + 6 }]}>
+      {/* Top bar */}
+      {chrome ? (
+        <View style={[styles.topBar, { paddingTop: insets.top + 6 }]}>
           <Pressable hitSlop={10} onPress={() => navigation.goBack()}>
             <Icon name="back" size={24} color="#fff" />
           </Pressable>
           <Text numberOfLines={1} style={styles.chapterTitle}>
             {params.chapter.name}
           </Text>
-          <Pressable hitSlop={10}>
+          <Pressable hitSlop={10} onPress={() => setSettingsOpen(true)}>
             <Icon name="settings" size={22} color="#fff" />
           </Pressable>
         </View>
-      </Animated.View>
+      ) : null}
 
-      {/* Bottom glass bar */}
-      <Animated.View
-        style={[styles.bottomBar, { paddingBottom: insets.bottom + 10 }, chromeStyle]}
-        pointerEvents={chrome ? 'auto' : 'none'}
-      >
-        <BlurView style={StyleSheet.absoluteFill} blurType="dark" blurAmount={18} />
-        <View style={styles.progressTrack}>
-          <LinearGradient
-            colors={['#0FA68C', '#2FD3B6']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={[
-              styles.progressFill,
-              { width: total ? `${((current + 1) / total) * 100}%` : '0%' },
-            ]}
-          />
-          <View
-            style={[
-              styles.handle,
-              { left: total ? `${((current + 1) / total) * 100}%` : '0%' },
-            ]}
-          />
+      {/* Bottom bar */}
+      {chrome && total > 0 ? (
+        <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 12 }]}>
+          <View style={styles.progressTrack}>
+            <View
+              style={[styles.progressFill, { width: `${((current + 1) / total) * 100}%` }]}
+            />
+          </View>
+          <View style={styles.bottomRow}>
+            <Pressable hitSlop={10} onPress={() => setSettingsOpen(true)} style={styles.modePill}>
+              <Icon name={horizontal ? 'columns' : 'list'} size={16} color="#fff" />
+              <Text style={styles.modePillText}>{labelFor(mode)}</Text>
+            </Pressable>
+            <Text style={styles.counter}>
+              {current + 1} / {total}
+            </Text>
+          </View>
         </View>
-        <View style={styles.bottomRow}>
-          <Icon name="back" size={20} color="#fff" />
-          <Text style={styles.counter}>
-            {total ? current + 1 : 0} / {total}
-          </Text>
-          <Icon name="columns" size={20} color="#fff" />
-          <Icon name="sun" size={20} color="#fff" />
-        </View>
-      </Animated.View>
+      ) : null}
+
+      <ReaderSettingsSheet
+        visible={settingsOpen}
+        mode={mode}
+        onSelect={m => {
+          setReaderMode(m);
+          setMode(m);
+          setSettingsOpen(false);
+        }}
+        onClose={() => setSettingsOpen(false)}
+      />
     </View>
   );
 }
 
-function ReaderPage({ page, width }: { page: PageDto; width: number }) {
-  // Mock pages are 800x1200 (ratio 1.5). Real pages would carry dimensions.
+function labelFor(mode: ReaderMode): string {
+  return READER_MODES.find(m => m.mode === mode)?.label ?? mode;
+}
+
+function ReaderPage({
+  page,
+  width,
+  screenHeight,
+  layout,
+  onPress,
+}: {
+  page: PageDto;
+  width: number;
+  screenHeight: number;
+  layout: 'strip' | 'page';
+  onPress: () => void;
+}) {
   const [ratio, setRatio] = useState(1.5);
   const uri = page.imageUrl ?? page.url;
   if (!uri) return null;
+
+  if (layout === 'page') {
+    return (
+      <Pressable
+        onPress={onPress}
+        style={{ width, height: screenHeight, justifyContent: 'center', backgroundColor: '#000' }}
+      >
+        <Image source={{ uri }} style={{ width, height: screenHeight }} resizeMode="contain" />
+      </Pressable>
+    );
+  }
+
   return (
-    <Image
-      source={{ uri }}
-      style={{ width, height: width * ratio, backgroundColor: '#0a0a0a' }}
-      resizeMode="contain"
-      onLoad={e => {
-        const { width: w, height: h } = e.nativeEvent.source;
-        if (w && h) setRatio(h / w);
-      }}
-    />
+    <Pressable onPress={onPress}>
+      <Image
+        source={{ uri }}
+        style={{ width, height: width * ratio, backgroundColor: '#0a0a0a' }}
+        resizeMode="contain"
+        onLoad={e => {
+          const { width: w, height: h } = e.nativeEvent.source;
+          if (w && h) setRatio(h / w);
+        }}
+      />
+    </Pressable>
+  );
+}
+
+function ReaderSettingsSheet({
+  visible,
+  mode,
+  onSelect,
+  onClose,
+}: {
+  visible: boolean;
+  mode: ReaderMode;
+  onSelect: (m: ReaderMode) => void;
+  onClose: () => void;
+}) {
+  const theme = useTheme();
+  const insets = useSafeAreaInsets();
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={styles.sheetBackdrop} onPress={onClose} />
+      <View
+        style={[
+          styles.sheet,
+          { backgroundColor: theme.colors.bg, paddingBottom: insets.bottom + 10, borderColor: theme.colors.border },
+        ]}
+      >
+        <View style={styles.grabber} />
+        <Text style={[theme.typography.heading, { color: theme.colors.text, marginBottom: 6 }]}>
+          Reading mode
+        </Text>
+        {READER_MODES.map(opt => {
+          const active = opt.mode === mode;
+          return (
+            <Pressable
+              key={opt.mode}
+              onPress={() => onSelect(opt.mode)}
+              style={({ pressed }) => [
+                styles.modeRow,
+                { backgroundColor: pressed ? theme.colors.surface : 'transparent' },
+              ]}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
+                  {opt.label}
+                </Text>
+                <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginTop: 2 }}>
+                  {opt.hint}
+                </Text>
+              </View>
+              {active ? <Icon name="check" size={20} color={theme.colors.accent} /> : null}
+            </Pressable>
+          );
+        })}
+      </View>
+    </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  center: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 40,
+  },
+  errorText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+    marginTop: 14,
+  },
+  errorSub: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 6,
+  },
   topBar: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    overflow: 'hidden',
-  },
-  topRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingBottom: 12,
     gap: 12,
+    backgroundColor: 'rgba(8,8,10,0.92)',
   },
   chapterTitle: {
     flex: 1,
@@ -169,9 +321,9 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    overflow: 'hidden',
     paddingTop: 14,
     paddingHorizontal: 18,
+    backgroundColor: 'rgba(8,8,10,0.92)',
   },
   progressTrack: {
     height: 4,
@@ -182,14 +334,7 @@ const styles = StyleSheet.create({
   progressFill: {
     height: 4,
     borderRadius: 2,
-  },
-  handle: {
-    position: 'absolute',
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: '#fff',
-    marginLeft: -7,
+    backgroundColor: '#2FD3B6',
   },
   bottomRow: {
     flexDirection: 'row',
@@ -197,9 +342,56 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingTop: 16,
   },
+  modePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+  },
+  modePillText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
   counter: {
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',
+  },
+  sheetBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  sheet: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 18,
+    paddingTop: 4,
+  },
+  grabber: {
+    alignSelf: 'center',
+    width: 38,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(128,128,128,0.4)',
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  modeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+    borderRadius: 10,
   },
 });

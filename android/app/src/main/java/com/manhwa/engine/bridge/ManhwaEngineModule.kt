@@ -149,8 +149,10 @@ class ManhwaEngineModule(
             try {
                 promise.resolve(block())
             } catch (e: EngineException) {
+                android.util.Log.w(NAME, "engine error (${e.kind}): ${e.message}", e)
                 promise.reject(e.kind, e.message, e)
             } catch (e: Throwable) {
+                android.util.Log.e(NAME, "engine call failed: ${e.message}", e)
                 promise.reject("unknown", e.message, e)
             }
         }

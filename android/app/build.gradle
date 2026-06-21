@@ -122,11 +122,27 @@ dependencies {
     // These libraries must be present at runtime under their original package
     // names, because Tachiyomi/Mihon extension APKs are compiled against them
     // as `compileOnly` and resolve their symbols from the host process.
+    // Versions mirror keiyoushi/extensions-source's version catalog so the
+    // extension bytecode links against compatible classes.
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    // Okio integration for kotlinx-serialization. Extensions parse JSON bodies
+    // via `Json.decodeFromBufferedSource(...)` (class
+    // `kotlinx.serialization.json.okio.OkioStreamsKt`); without this the source
+    // throws NoClassDefFoundError at parse time.
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json-okio:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-protobuf:1.7.3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.okio:okio:3.9.0")
     implementation("org.jsoup:jsoup:1.17.2")
-    // RxJava 1 is required by older extensions that still implement the
-    // deprecated fetch* Observable methods (Tachiyomi's historical API).
+    // RxJava 1 is required by extensions that implement the fetch* Observable
+    // methods (Tachiyomi's primary source API).
     implementation("io.reactivex:rxjava:1.3.8")
+    // Dependency injection. Extensions call `injectLazy()` / `Injekt.get()`,
+    // whose inlined bytecode targets this exact Injekt fork (published on
+    // JitPack and used by keiyoushi/extensions-source).
+    implementation("com.github.null2264.injekt:injekt-core:4135455a2a")
+    // Extensions implementing ConfigurableSource reference androidx.preference
+    // classes (PreferenceScreen, EditTextPreference, ...) at runtime.
+    implementation("androidx.preference:preference-ktx:1.2.1")
 }

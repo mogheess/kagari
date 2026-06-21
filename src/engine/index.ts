@@ -1,48 +1,56 @@
 /**
- * Engine selector.
+ * Engine selector — extensions only.
  *
- * - `mock`   : pure-JS demo data. Default, so the UI is always populated even
- *              with no extensions installed.
- * - `native` : the real Kotlin extension engine (loads installed APKs). Empty
- *              until the user installs/trusts extensions.
- *
- * The mode is switchable at runtime (see EngineModeProvider + Profile toggle).
+ * The app talks exclusively to the native Kotlin extension engine, which loads
+ * installed extension APKs. There is no demo/mock data: every list, detail and
+ * page comes from a real source. When the native module isn't present (e.g. a
+ * JS-only dev environment) a no-op engine is returned so the UI degrades to
+ * empty states instead of crashing.
  */
 import { createNativeEngine } from './nativeEngine';
-import { createMockEngine } from './mockEngine';
 import type { Engine } from './types';
 
-export type EngineMode = 'mock' | 'native';
-
-let mode: EngineMode = 'mock';
 let instance: Engine | null = null;
-let nativeAvailable: boolean | null = null;
 
-/** Whether the native Kotlin module is present on this build/device. */
+/** Whether the real native Kotlin module is present on this build/device. */
 export function isNativeAvailable(): boolean {
-  if (nativeAvailable === null) {
-    nativeAvailable = createNativeEngine() !== null;
-  }
-  return nativeAvailable;
+  return createNativeEngine() !== null;
 }
 
-export function getEngineMode(): EngineMode {
-  return mode;
-}
+const UNAVAILABLE = 'Extension engine unavailable on this build.';
 
-export function setEngineMode(next: EngineMode): void {
-  if (next === mode) return;
-  mode = next;
-  instance = null; // force re-create on next getEngine()
+function createUnavailableEngine(): Engine {
+  const reject = () => Promise.reject(new Error(UNAVAILABLE));
+  return {
+    isNative: false,
+    reload: () => Promise.resolve(),
+    listExtensions: () => Promise.resolve([]),
+    listSources: () => Promise.resolve([]),
+    trustSignature: reject,
+    listRepos: () => Promise.resolve([]),
+    addRepo: reject,
+    removeRepo: () => Promise.resolve(),
+    getAvailableExtensions: () => Promise.resolve([]),
+    installExtension: reject,
+    uninstallExtension: () => Promise.resolve(),
+    installApk: reject,
+    getPopular: () => Promise.resolve({ manga: [], hasNextPage: false }),
+    getLatest: () => Promise.resolve({ manga: [], hasNextPage: false }),
+    search: () => Promise.resolve({ manga: [], hasNextPage: false }),
+    getFilters: () => Promise.resolve([]),
+    getMangaDetails: reject,
+    getChapters: () => Promise.resolve([]),
+    getPages: () => Promise.resolve([]),
+    resolveImage: reject,
+  };
 }
 
 export function getEngine(): Engine {
   if (instance) return instance;
-  instance =
-    mode === 'native' ? createNativeEngine() ?? createMockEngine() : createMockEngine();
+  instance = createNativeEngine() ?? createUnavailableEngine();
   if (__DEV__) {
     // eslint-disable-next-line no-console
-    console.log(`[engine] using ${instance.isNative ? 'native Kotlin' : 'mock'} engine`);
+    console.log(`[engine] ${instance.isNative ? 'native Kotlin engine' : 'NO native engine (empty)'}`);
   }
   return instance;
 }

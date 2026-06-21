@@ -1,26 +1,16 @@
-import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  FlatList,
-  Pressable,
-  StyleSheet,
-  useWindowDimensions,
-} from 'react-native';
+import React from 'react';
+import { View, Text, FlatList, StyleSheet, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme } from '../theme/ThemeProvider';
-import { useAsync } from '../hooks/useAsync';
-import { getEngine } from '../engine';
 import { Cover } from '../components/Cover';
 import { Icon } from '../components/Icon';
+import { useFavorites, favoriteToManga } from '../library/favorites';
 import type { RootStackParamList } from '../navigation/types';
-import type { MangaDto } from '../engine/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-const FILTERS = ['All', 'Reading', 'Completed', 'On Hold'];
 const TAB_BAR_SPACE = 110;
 
 export function LibraryScreen() {
@@ -28,13 +18,9 @@ export function LibraryScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const { width } = useWindowDimensions();
-  const [filter, setFilter] = useState('All');
 
-  const engine = getEngine();
-  const { data, loading } = useAsync<MangaDto[]>(async () => {
-    const res = await engine.getPopular('1001', 1);
-    return res.manga;
-  }, []);
+  const favorites = useFavorites();
+  const data = favorites.map(favoriteToManga);
 
   const gap = 12;
   const cols = 3;
@@ -44,60 +30,45 @@ export function LibraryScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       <FlatList
-        data={loading ? [] : data ?? []}
+        data={data}
         numColumns={cols}
-        keyExtractor={(m, i) => `${m.url}:${i}`}
+        keyExtractor={(m, i) => `${m.sourceId}:${m.url}:${i}`}
         showsVerticalScrollIndicator={false}
         columnWrapperStyle={{ paddingHorizontal: sidePad, gap }}
         contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: TAB_BAR_SPACE, gap: 16 }}
         ListHeaderComponent={
-          <View style={{ marginBottom: 16 }}>
-            <View style={[styles.header, { paddingHorizontal: sidePad }]}>
-              <Text style={[theme.typography.title, { color: theme.colors.text }]}>Library</Text>
-              <View style={styles.actions}>
-                <Icon name="search" size={21} color={theme.colors.text} />
-                <Icon name="filter" size={21} color={theme.colors.text} />
-              </View>
-            </View>
-            <FlatList
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              data={FILTERS}
-              keyExtractor={f => f}
-              contentContainerStyle={{ paddingHorizontal: sidePad, gap: 8, marginTop: 14 }}
-              renderItem={({ item }) => {
-                const active = item === filter;
-                return (
-                  <Pressable
-                    onPress={() => setFilter(item)}
-                    style={[
-                      styles.chip,
-                      {
-                        backgroundColor: active ? theme.colors.accent : theme.colors.surface,
-                        borderColor: active ? theme.colors.accent : theme.colors.border,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={{
-                        color: active ? theme.colors.onAccent : theme.colors.textMuted,
-                        fontWeight: '600',
-                        fontSize: 13,
-                      }}
-                    >
-                      {item}
-                    </Text>
-                  </Pressable>
-                );
-              }}
-            />
+          <View style={[styles.header, { paddingHorizontal: sidePad }]}>
+            <Text style={[theme.typography.title, { color: theme.colors.text }]}>Library</Text>
+            <Text style={{ color: theme.colors.textMuted, fontSize: 13 }}>
+              {favorites.length > 0 ? `${favorites.length} saved` : ''}
+            </Text>
           </View>
         }
-        renderItem={({ item, index }) => (
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <View style={[styles.emptyIcon, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+              <Icon name="bookmark" size={26} color={theme.colors.textMuted} />
+            </View>
+            <Text style={[theme.typography.heading, { color: theme.colors.text, marginTop: 16 }]}>
+              No saved manga yet
+            </Text>
+            <Text
+              style={{
+                color: theme.colors.textMuted,
+                fontSize: 13.5,
+                lineHeight: 20,
+                textAlign: 'center',
+                marginTop: 6,
+              }}
+            >
+              Tap the bookmark on any manga to add it here.
+            </Text>
+          </View>
+        }
+        renderItem={({ item }) => (
           <Cover
             manga={item}
             width={coverWidth}
-            badge={(index * 7) % 40}
             onPress={() =>
               navigation.navigate('MangaDetail', {
                 sourceId: item.sourceId,
@@ -117,15 +88,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginBottom: 16,
   },
-  actions: {
-    flexDirection: 'row',
-    gap: 16,
+  empty: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 48,
+    paddingTop: 80,
   },
-  chip: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 999,
+  emptyIcon: {
+    width: 60,
+    height: 60,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
   },
 });

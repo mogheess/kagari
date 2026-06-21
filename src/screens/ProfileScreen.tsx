@@ -5,8 +5,6 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme, useThemePreference, type ThemePreference } from '../theme/ThemeProvider';
 import { Icon, type IconName } from '../components/Icon';
-import { useEngineMode } from '../engine/EngineModeProvider';
-import type { EngineMode } from '../engine';
 import type { RootStackParamList } from '../navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -17,17 +15,11 @@ export function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const { preference, setPreference } = useThemePreference();
-  const { mode: engineMode, nativeAvailable, setMode: setEngineMode } = useEngineMode();
 
   const modes: { key: ThemePreference; label: string; icon: IconName }[] = [
     { key: 'system', label: 'Auto', icon: 'settings' },
     { key: 'light', label: 'Light', icon: 'sun' },
     { key: 'dark', label: 'Dark', icon: 'moon' },
-  ];
-
-  const dataModes: { key: EngineMode; label: string; icon: IconName }[] = [
-    { key: 'mock', label: 'Demo', icon: 'grid' },
-    { key: 'native', label: 'Extensions', icon: 'book' },
   ];
 
   return (
@@ -77,60 +69,12 @@ export function ProfileScreen() {
         </View>
 
         <Text style={[styles.sectionLabel, { color: theme.colors.textFaint, marginTop: 28 }]}>
-          DATA SOURCE
-        </Text>
-        <View style={[styles.segment, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-          {dataModes.map(m => {
-            const active = m.key === engineMode;
-            const disabled = m.key === 'native' && !nativeAvailable;
-            return (
-              <Pressable
-                key={m.key}
-                disabled={disabled}
-                onPress={() => setEngineMode(m.key)}
-                style={[styles.segmentItem, active && { backgroundColor: theme.colors.accent }]}
-              >
-                <Icon
-                  name={m.icon}
-                  size={16}
-                  color={
-                    disabled
-                      ? theme.colors.textFaint
-                      : active
-                      ? theme.colors.onAccent
-                      : theme.colors.textMuted
-                  }
-                />
-                <Text
-                  style={{
-                    color: disabled
-                      ? theme.colors.textFaint
-                      : active
-                      ? theme.colors.onAccent
-                      : theme.colors.textMuted,
-                    fontWeight: '600',
-                    fontSize: 13,
-                  }}
-                >
-                  {m.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-        <Text style={{ color: theme.colors.textFaint, fontSize: 12, marginTop: 8, lineHeight: 17 }}>
-          {engineMode === 'mock'
-            ? 'Showing demo data so you can explore the UI. Switch to Extensions to load installed sources.'
-            : 'Loading from installed extensions. Install & trust an extension to see content.'}
-        </Text>
-
-        <Text style={[styles.sectionLabel, { color: theme.colors.textFaint, marginTop: 28 }]}>
           SOURCES
         </Text>
         <Row
           icon="settings"
           label="Extensions & Repos"
-          hint={engineMode === 'native' ? 'Native engine' : 'Demo data'}
+          hint="Manage"
           onPress={() => navigation.navigate('Extensions')}
         />
         <Row icon="grid" label="Customize Home" onPress={() => navigation.navigate('CustomizeHome')} />

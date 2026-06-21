@@ -20,7 +20,7 @@ object Mappers {
         return SourceDto(
             id = source.id.toString(),
             name = source.name,
-            lang = source.lang,
+            lang = catalogue?.lang ?: "",
             supportsLatest = catalogue?.supportsLatest ?: false,
             isNsfw = isNsfw,
             extensionPkg = extensionPkg,
@@ -29,8 +29,8 @@ object Mappers {
 
     fun mangaToDto(sourceId: Long, manga: SManga): MangaDto = MangaDto(
         sourceId = sourceId.toString(),
-        url = manga.url,
-        title = manga.title,
+        url = safe { manga.url } ?: "",
+        title = safe { manga.title } ?: "",
         thumbnailUrl = manga.thumbnail_url,
         author = manga.author,
         artist = manga.artist,
@@ -49,8 +49,8 @@ object Mappers {
     fun chapterToDto(sourceId: Long, mangaUrl: String, chapter: SChapter): ChapterDto = ChapterDto(
         sourceId = sourceId.toString(),
         mangaUrl = mangaUrl,
-        url = chapter.url,
-        name = chapter.name,
+        url = safe { chapter.url } ?: "",
+        name = safe { chapter.name } ?: "",
         chapterNumber = chapter.chapter_number,
         scanlator = chapter.scanlator,
         dateUpload = chapter.date_upload,
@@ -61,6 +61,13 @@ object Mappers {
         imageUrl = page.imageUrl,
         url = page.url.ifEmpty { null },
     )
+
+    /** Reads a possibly-uninitialized lateinit field without crashing the call. */
+    private inline fun <T> safe(block: () -> T): T? = try {
+        block()
+    } catch (_: UninitializedPropertyAccessException) {
+        null
+    }
 
     private fun statusToString(status: Int): String = when (status) {
         SManga.ONGOING -> "ongoing"

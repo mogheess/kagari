@@ -1,11 +1,8 @@
 /*
- * Adapted from Mihon / Tachiyomi (https://github.com/mihonapp/mihon)
- * Licensed under the Apache License, Version 2.0. See NOTICE in repo root.
- *
- * This is part of the vendored Tachiyomi "source-api" surface. It MUST remain
- * under the `eu.kanade.tachiyomi.source.*` package so that extension APKs
- * (compiled against this API as `compileOnly`) resolve these classes from the
- * host process at runtime.
+ * Vendored Tachiyomi source-api. Must stay under `eu.kanade.tachiyomi.source.*`
+ * so extension APKs (compiled against this API as `compileOnly`) resolve these
+ * classes from the host process. Signatures mirror keiyoushi/extensions-lib
+ * (Apache 2.0 — see NOTICE).
  */
 package eu.kanade.tachiyomi.source.model
 
@@ -20,6 +17,7 @@ interface SManga : Serializable {
     var genre: String?
     var status: Int
     var thumbnail_url: String?
+    var update_strategy: UpdateStrategy
     var initialized: Boolean
 
     companion object {
@@ -44,5 +42,6 @@ class SMangaImpl : SManga {
     override var genre: String? = null
     override var status: Int = 0
     override var thumbnail_url: String? = null
+    override var update_strategy: UpdateStrategy = UpdateStrategy.ALWAYS_UPDATE
     override var initialized: Boolean = false
 }

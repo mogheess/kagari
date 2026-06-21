@@ -15,14 +15,8 @@ export interface HomeBlock {
 const DEFAULT_BLOCKS: HomeBlock[] = [
   { id: 'b_featured', kind: 'featured', enabled: true },
   { id: 'b_continue', kind: 'continue', enabled: true },
-  { id: 'b_popular_mdex', kind: 'popular', sourceId: '1001', sourceName: 'MangaDex', enabled: true },
-  {
-    id: 'b_latest_weeb',
-    kind: 'latest',
-    sourceId: '1002',
-    sourceName: 'Weeb Central',
-    enabled: true,
-  },
+  { id: 'b_popular', kind: 'popular', enabled: true },
+  { id: 'b_latest', kind: 'latest', enabled: true },
   { id: 'b_recommended', kind: 'recommended', enabled: false },
 ];
 

@@ -1,22 +1,23 @@
 /*
- * Adapted from Mihon / Tachiyomi (https://github.com/mihonapp/mihon)
- * Licensed under the Apache License, Version 2.0. See NOTICE in repo root.
- *
- * Part of the vendored Tachiyomi source-api. Must stay under
+ * Vendored Tachiyomi source-api. Must stay under
  * `eu.kanade.tachiyomi.source.model` for extension runtime compatibility.
+ * Signatures mirror keiyoushi/extensions-lib (Apache 2.0 — see NOTICE).
+ *
+ * NOTE: the constructor parameter list (index, url, imageUrl, uri) must match
+ * the extensions-lib stub exactly so Kotlin's synthetic default constructor
+ * (`Page$default`) has the same descriptor the extension bytecode calls.
  */
 package eu.kanade.tachiyomi.source.model
 
-open class Page(
+import android.net.Uri
+
+@Suppress("unused")
+class Page(
     val index: Int,
     val url: String = "",
     var imageUrl: String? = null,
+    var uri: Uri? = null,
 ) {
     val number: Int
         get() = index + 1
 }
-
-data class MangasPage(
-    val mangas: List<SManga>,
-    val hasNextPage: Boolean,
-)
