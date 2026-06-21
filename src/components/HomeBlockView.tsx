@@ -5,11 +5,14 @@ import { useAsync } from '../hooks/useAsync';
 import { getEngine } from '../engine';
 import { SectionHeader } from './SectionHeader';
 import { CoverRail } from './CoverRail';
-import { FeaturedHero } from './FeaturedHero';
+import { FeaturedCarousel } from './FeaturedCarousel';
 import { blockLabel, type HomeBlock } from '../home/HomeConfig';
 import { useFavorites, favoriteToManga } from '../library/favorites';
 import { pickDefaultSource } from '../utils/sourceSelect';
 import type { MangaDto, SourceDto } from '../engine/types';
+
+/** How many top-popular entries the featured carousel rotates through. */
+const FEATURED_COUNT = 6;
 
 interface HomeBlockViewProps {
   block: HomeBlock;
@@ -82,12 +85,9 @@ function BrowseBlock({
   if (!loading && (data?.length ?? 0) === 0) return null;
 
   if (block.kind === 'featured') {
-    const hero = data?.[0];
-    return (
-      <View style={{ paddingHorizontal: theme.spacing.lg, marginBottom: theme.spacing.xxl }}>
-        {hero ? <FeaturedHero manga={hero} onPress={() => onOpenManga(hero)} /> : null}
-      </View>
-    );
+    const pool = (data ?? []).filter(m => !!m.thumbnailUrl).slice(0, FEATURED_COUNT);
+    if (pool.length === 0) return null;
+    return <FeaturedCarousel data={pool} onOpenManga={onOpenManga} />;
   }
 
   return (

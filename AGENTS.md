@@ -132,6 +132,11 @@ When you add a new persisted store, follow the favorites pattern (in-memory stat
   **library**). Browse blocks pull from a per-block source chosen in **Customize
   Home**; with none chosen they fall back to `pickDefaultSource` (English &
   non-NSFW first — `src/utils/sourceSelect.ts`). Empty rails auto-hide.
+  - **Featured** isn't curated — it's the source's **Popular** list. The block
+    renders the top `FEATURED_COUNT` (6) entries that have cover art as an
+    auto-rotating, swipeable `FeaturedCarousel` (genre-based taglines; pauses on
+    drag; page dots). Browse stubs aren't `initialized`, so there's no
+    description/rating to rank "editorially" by without extra detail fetches.
 - **Discover**: source picker (`SourcePickerSheet`, grouped by extension with
   language + NSFW tags), debounced search, popular browse, typed error/empty states.
 - **Library**: grid of favorites with **category filter chips** (All / each
