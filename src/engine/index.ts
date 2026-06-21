@@ -42,6 +42,7 @@ function createUnavailableEngine(): Engine {
     getChapters: () => Promise.resolve([]),
     getPages: () => Promise.resolve([]),
     resolveImage: reject,
+    fetchImage: reject,
   };
 }
 

@@ -80,6 +80,26 @@ data class ImageRequestDto(
 )
 
 @Serializable
+data class ImageFileDto(
+    val uri: String,
+    val sourceUrl: String? = null,
+    val bytes: Long = 0,
+    val cached: Boolean = false,
+    val width: Int? = null,
+    val height: Int? = null,
+    val contentType: String? = null,
+    val tiles: List<ImageTileDto> = emptyList(),
+)
+
+@Serializable
+data class ImageTileDto(
+    val uri: String,
+    val width: Int,
+    val height: Int,
+    val index: Int,
+)
+
+@Serializable
 data class RepoDto(
     val url: String,
     val name: String,

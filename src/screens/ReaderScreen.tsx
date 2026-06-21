@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -28,10 +28,15 @@ import {
   type ReaderMode,
 } from '../reader/readerSettings';
 import type { RootStackParamList } from '../navigation/types';
-import type { PageDto } from '../engine/types';
+import type { ImageFileDto, ImageTileDto, PageDto } from '../engine/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type ReaderRoute = RouteProp<RootStackParamList, 'Reader'>;
+const MAX_IMAGE_FETCHES = 1;
+const IMAGE_FETCH_RETRIES = 3;
+
+let activeImageFetches = 0;
+const imageFetchQueue: (() => void)[] = [];
 
 export function ReaderScreen() {
   const insets = useSafeAreaInsets();
@@ -65,6 +70,7 @@ export function ReaderScreen() {
   const renderPage = useCallback(
     ({ item }: { item: PageDto }) => (
       <ReaderPage
+        sourceId={params.sourceId}
         page={item}
         width={width}
         screenHeight={height}
@@ -72,7 +78,7 @@ export function ReaderScreen() {
         onPress={toggleChrome}
       />
     ),
-    [width, height, paged, toggleChrome],
+    [params.sourceId, width, height, paged, toggleChrome],
   );
 
   return (
@@ -175,13 +181,74 @@ function labelFor(mode: ReaderMode): string {
   return READER_MODES.find(m => m.mode === mode)?.label ?? mode;
 }
 
+function logReaderImage(message: string, details: Record<string, unknown>): void {
+  if (!__DEV__) return;
+  console.log(`[reader:image] ${message}`, details);
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function drainImageFetchQueue(): void {
+  while (activeImageFetches < MAX_IMAGE_FETCHES && imageFetchQueue.length > 0) {
+    const next = imageFetchQueue.shift();
+    if (!next) return;
+    activeImageFetches += 1;
+    next();
+  }
+}
+
+function enqueueNativeImageFetch(sourceId: string, page: PageDto): Promise<ImageFileDto> {
+  return new Promise((resolve, reject) => {
+    const run = () => {
+      fetchNativeImageWithRetry(sourceId, page)
+        .then(resolve)
+        .catch(reject)
+        .finally(() => {
+          activeImageFetches = Math.max(0, activeImageFetches - 1);
+          drainImageFetchQueue();
+        });
+    };
+    imageFetchQueue.push(run);
+    drainImageFetchQueue();
+  });
+}
+
+async function fetchNativeImageWithRetry(
+  sourceId: string,
+  page: PageDto,
+): Promise<ImageFileDto> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= IMAGE_FETCH_RETRIES; attempt += 1) {
+    try {
+      return await getEngine().fetchImage(sourceId, page);
+    } catch (error) {
+      lastError = error;
+      logReaderImage('native fetch attempt failed', {
+        page: page.index,
+        attempt,
+        message: error instanceof Error ? error.message : String(error),
+        pageUrl: page.url,
+        imageUrl: page.imageUrl,
+      });
+      if (attempt < IMAGE_FETCH_RETRIES) {
+        await wait(250 * attempt);
+      }
+    }
+  }
+  throw lastError;
+}
+
 function ReaderPage({
+  sourceId,
   page,
   width,
   screenHeight,
   layout,
   onPress,
 }: {
+  sourceId: string;
   page: PageDto;
   width: number;
   screenHeight: number;
@@ -189,8 +256,51 @@ function ReaderPage({
   onPress: () => void;
 }) {
   const [ratio, setRatio] = useState(1.5);
-  const uri = page.imageUrl ?? page.url;
-  if (!uri) return null;
+  const [uri, setUri] = useState<string | null>(null);
+  const [tiles, setTiles] = useState<ImageTileDto[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setUri(null);
+    setTiles([]);
+    setLoadError(null);
+    setRatio(1.5);
+
+    enqueueNativeImageFetch(sourceId, page)
+      .then(image => {
+        const sortedTiles = sortTiles(image);
+        logReaderImage('native fetch', {
+          page: page.index,
+          cached: image.cached,
+          bytes: image.bytes,
+          nativeWidth: image.width,
+          nativeHeight: image.height,
+          contentType: image.contentType,
+          tiles: sortedTiles.length,
+          sourceUrl: image.sourceUrl,
+          uri: image.uri,
+        });
+        if (!cancelled) {
+          setUri(image.uri);
+          setTiles(sortedTiles);
+        }
+      })
+      .catch(error => {
+        const message = error instanceof Error ? error.message : String(error);
+        logReaderImage('native fetch failed', {
+          page: page.index,
+          message,
+        });
+        if (!cancelled) setLoadError(message);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [page, sourceId]);
+
+  const tileHeight = tiles.length > 0 ? scaledTilesHeight(tiles, width) : 0;
 
   if (layout === 'page') {
     return (
@@ -198,24 +308,119 @@ function ReaderPage({
         onPress={onPress}
         style={{ width, height: screenHeight, justifyContent: 'center', backgroundColor: '#000' }}
       >
-        <Image source={{ uri }} style={{ width, height: screenHeight }} resizeMode="contain" />
+        {uri ? (
+          <Image
+            source={{ uri }}
+            style={{ width, height: screenHeight }}
+            resizeMode="contain"
+            resizeMethod="scale"
+            onLoad={e => {
+              const { width: w, height: h } = e.nativeEvent.source;
+              logReaderImage('rendered page image', {
+                page: page.index,
+                layout,
+                decodedWidth: w,
+                decodedHeight: h,
+                viewWidth: width,
+                viewHeight: screenHeight,
+                uri,
+              });
+            }}
+          />
+        ) : loadError ? (
+          <ReaderImageError message={loadError} />
+        ) : (
+          <ActivityIndicator color="#fff" />
+        )}
+      </Pressable>
+    );
+  }
+
+  if (tiles.length > 0) {
+    return (
+      <Pressable
+        onPress={onPress}
+        style={{ width, backgroundColor: '#0a0a0a' }}
+      >
+        {tiles.map(tile => {
+          const height = Math.max(1, Math.round((width * tile.height) / tile.width));
+          return (
+            <Image
+              key={`${page.index}:${tile.index}`}
+              source={{ uri: tile.uri }}
+              style={{ width, height }}
+              resizeMode="stretch"
+              resizeMethod="scale"
+              onLoad={e => {
+                const { width: w, height: h } = e.nativeEvent.source;
+                logReaderImage('rendered tile image', {
+                  page: page.index,
+                  tile: tile.index,
+                  decodedWidth: w,
+                  decodedHeight: h,
+                  viewWidth: width,
+                  viewHeight: height,
+                  tileUri: tile.uri,
+                  fullUri: uri,
+                  totalViewHeight: tileHeight,
+                });
+              }}
+            />
+          );
+        })}
       </Pressable>
     );
   }
 
   return (
-    <Pressable onPress={onPress}>
-      <Image
-        source={{ uri }}
-        style={{ width, height: width * ratio, backgroundColor: '#0a0a0a' }}
-        resizeMode="contain"
-        onLoad={e => {
-          const { width: w, height: h } = e.nativeEvent.source;
-          if (w && h) setRatio(h / w);
-        }}
-      />
+    <Pressable
+      onPress={onPress}
+      style={{ width, height: width * ratio, backgroundColor: '#0a0a0a', justifyContent: 'center' }}
+    >
+      {uri ? (
+        <Image
+          source={{ uri }}
+          style={{ width, height: width * ratio }}
+          resizeMode="contain"
+          resizeMethod="scale"
+          onLoad={e => {
+            const { width: w, height: h } = e.nativeEvent.source;
+            logReaderImage('rendered strip image', {
+              page: page.index,
+              layout,
+              decodedWidth: w,
+              decodedHeight: h,
+              viewWidth: width,
+              viewHeight: width * ratio,
+              uri,
+            });
+            if (w && h) setRatio(h / w);
+          }}
+        />
+      ) : loadError ? (
+        <ReaderImageError message={loadError} />
+      ) : (
+        <ActivityIndicator color="#fff" />
+      )}
     </Pressable>
   );
+}
+
+function ReaderImageError({ message }: { message: string }) {
+  return (
+    <View style={styles.imageError}>
+      <Text style={styles.imageErrorTitle}>Image failed to load</Text>
+      <Text style={styles.imageErrorText}>{message}</Text>
+    </View>
+  );
+}
+
+function sortTiles(image: ImageFileDto): ImageTileDto[] {
+  return [...(image.tiles ?? [])].sort((a, b) => a.index - b.index);
+}
+
+function scaledTilesHeight(tiles: ImageTileDto[], width: number): number {
+  return tiles.reduce((sum, tile) => sum + Math.max(1, Math.round((width * tile.height) / tile.width)), 0);
 }
 
 function ReaderSettingsSheet({
@@ -295,6 +500,24 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: 'center',
     marginTop: 6,
+  },
+  imageError: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+  },
+  imageErrorTitle: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  imageErrorText: {
+    color: 'rgba(255,255,255,0.62)',
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 8,
+    textAlign: 'center',
   },
   topBar: {
     position: 'absolute',
