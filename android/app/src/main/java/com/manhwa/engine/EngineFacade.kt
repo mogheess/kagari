@@ -34,8 +34,14 @@ import okhttp3.Response
 
 /**
  * The single entry point the RN bridge talks to. Holds loaded sources and
- * exposes a suspend API that returns DTOs. Each call prefers the modern suspend
- * source method and falls back to the deprecated RxJava `fetch*` Observable.
+ * exposes a suspend API that returns DTOs.
+ *
+ * Browse/detail/page calls currently go through the source's RxJava `fetch*`
+ * Observable (bridged to suspend via `awaitSingle`). The vendored source-api
+ * exposes only those deprecated Rx methods, not extension-lib 1.6's suspend
+ * `getPopularManga`/`getPageList`/etc. Most keiyoushi `ParsedHttpSource`
+ * extensions override the request/parse methods, so the Rx path works; sources
+ * that override *only* the suspend methods will not. See AGENTS.md "Known gaps".
  */
 class EngineFacade(context: Context) {
 
@@ -147,7 +153,11 @@ class EngineFacade(context: Context) {
         return ImageRequestDto(url = url, headers = headers)
     }
 
-    suspend fun fetchImage(sourceId: String, page: PageDto): ImageFileDto {
+    suspend fun fetchImage(
+        sourceId: String,
+        page: PageDto,
+        forceRefresh: Boolean = false,
+    ): ImageFileDto {
         val source = source(sourceId)
         if (source !is HttpSource) {
             throw EngineException("parse", "Source $sourceId does not support HTTP image fetching")
@@ -165,6 +175,16 @@ class EngineFacade(context: Context) {
         val cacheDir = File(appContext.cacheDir, "reader_images/$sourceId").apply { mkdirs() }
         val key = cacheKey(page.index, page.url, imageUrl)
         File(cacheDir, "$key.img").delete()
+        // A manual retry busts the cache: a truncated/partial earlier download can
+        // write a non-empty but corrupt file that renders black, and would otherwise
+        // be served forever. Drop every cached variant + tiles for this page.
+        if (forceRefresh) {
+            cacheDir.listFiles()?.forEach { f ->
+                if (f.name.startsWith("$key.") || f.name == "${key}_tiles") {
+                    f.deleteRecursively()
+                }
+            }
+        }
         var finalFile = File(cacheDir, "$key.${extensionFor(imageUrl, null)}")
         var contentType: String? = null
         val cached = finalFile.exists() && finalFile.length() > 0L
@@ -196,6 +216,13 @@ class EngineFacade(context: Context) {
                 temp.delete()
             }
             finalFile = typedFile
+            // Guard against caching a corrupt/incomplete download (a common cause of
+            // "black pages"): if it can't be decoded, delete it and fail so the
+            // retry loop re-downloads instead of permanently serving a bad file.
+            if (imageSize(finalFile) == null) {
+                finalFile.delete()
+                throw EngineException("network", "Downloaded image was incomplete; please retry")
+            }
         }
         val size = imageSize(finalFile)
         val tiles = if (size != null && size.second > MAX_TILE_HEIGHT) {
@@ -220,6 +247,91 @@ class EngineFacade(context: Context) {
             contentType = contentType,
             tiles = tiles,
         )
+    }
+
+    // --- offline downloads -------------------------------------------------
+    // Downloaded pages live in filesDir (persistent, not evicted like the reader
+    // cache). They're keyed by chapter + page index so the reader can find them
+    // offline without re-resolving image URLs (which would need the network).
+
+    private val downloadsRoot: File
+        get() = File(appContext.filesDir, "downloads")
+
+    private fun chapterDir(sourceId: String, chapterUrl: String): File =
+        File(downloadsRoot, "$sourceId/${hashKey(chapterUrl)}")
+
+    private fun hashKey(value: String): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest(value.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+
+    /** Downloads one page to persistent storage; returns its file:// uri. Idempotent. */
+    suspend fun downloadPage(sourceId: String, chapterUrl: String, page: PageDto): String {
+        val source = source(sourceId)
+        if (source !is HttpSource) {
+            throw EngineException("parse", "Source $sourceId does not support HTTP image fetching")
+        }
+        val dir = chapterDir(sourceId, chapterUrl).apply { mkdirs() }
+        val existing = dir.listFiles()?.firstOrNull {
+            it.name.startsWith("${page.index}.") && !it.name.endsWith(".tmp") && it.length() > 0L
+        }
+        if (existing != null && imageSize(existing) != null) {
+            return Uri.fromFile(existing).toString()
+        }
+
+        val model = Page(page.index, page.url ?: "", page.imageUrl)
+        val imageUrl = resolveNativeImageUrl(sourceId, source, page, model)
+        model.imageUrl = imageUrl
+
+        val temp = File(dir, "${page.index}.tmp")
+        val contentType = try {
+            source.fetchImage(model).awaitSingle().use { response -> writeImageResponse(response, temp) }
+        } catch (error: Throwable) {
+            temp.delete()
+            directImageResponse(source, imageUrl).use { response -> writeImageResponse(response, temp) }
+        }
+        val finalFile = File(dir, "${page.index}.${extensionFor(imageUrl, contentType)}")
+        finalFile.delete()
+        if (!temp.renameTo(finalFile)) {
+            temp.copyTo(finalFile, overwrite = true)
+            temp.delete()
+        }
+        if (imageSize(finalFile) == null) {
+            finalFile.delete()
+            throw EngineException("network", "Downloaded image was incomplete; please retry")
+        }
+        return Uri.fromFile(finalFile).toString()
+    }
+
+    /** Reads a previously downloaded page (no network), tiling tall webtoon images. */
+    fun fetchDownloadedImage(sourceId: String, chapterUrl: String, pageIndex: Int): ImageFileDto {
+        val dir = chapterDir(sourceId, chapterUrl)
+        val file = dir.listFiles()?.firstOrNull {
+            it.name.startsWith("$pageIndex.") && !it.name.endsWith(".tmp") && it.length() > 0L
+        } ?: throw EngineException("not_found", "Page $pageIndex is not downloaded")
+        val size = imageSize(file)
+            ?: throw EngineException("parse", "Downloaded page $pageIndex is unreadable")
+        val tiles = if (size.second > MAX_TILE_HEIGHT) {
+            val tileCache = File(appContext.cacheDir, "reader_images/$sourceId").apply { mkdirs() }
+            imageTiles(file, tileCache, hashKey("dl|$chapterUrl|$pageIndex"), size.first, size.second)
+        } else {
+            emptyList()
+        }
+        return ImageFileDto(
+            uri = Uri.fromFile(file).toString(),
+            sourceUrl = null,
+            bytes = file.length(),
+            cached = true,
+            width = size.first,
+            height = size.second,
+            contentType = null,
+            tiles = tiles,
+        )
+    }
+
+    /** Removes all downloaded pages for a chapter. */
+    fun deleteDownloadedChapter(sourceId: String, chapterUrl: String) {
+        chapterDir(sourceId, chapterUrl).deleteRecursively()
     }
 
     private fun source(sourceId: String): Source {

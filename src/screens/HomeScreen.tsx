@@ -1,10 +1,11 @@
-import React from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { View, Text, ScrollView, Pressable, StyleSheet, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme } from '../theme/ThemeProvider';
 import { useHomeConfig } from '../home/HomeConfig';
+import { useTabNav } from '../navigation/TabNav';
 import { HomeBlockView } from '../components/HomeBlockView';
 import { Icon } from '../components/Icon';
 import { useAsync } from '../hooks/useAsync';
@@ -21,20 +22,40 @@ export function HomeScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const { blocks } = useHomeConfig();
+  const { navigateTab } = useTabNav();
   const engine = getEngine();
 
   const openManga = (m: MangaDto) =>
     navigation.navigate('MangaDetail', { sourceId: m.sourceId, mangaUrl: m.url, preview: m });
 
   const enabled = blocks.filter(b => b.enabled);
-  const { data: sources, loading } = useAsync<SourceDto[]>(() => engine.listSources(), []);
+  const { data: sources, loading, reload } = useAsync<SourceDto[]>(() => engine.listSources(), []);
   const hasSources = (sources?.length ?? 0) > 0;
+
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    setRefreshKey(k => k + 1);
+    reload();
+    // Rails reload independently; give them a beat, then release the spinner.
+    setTimeout(() => setRefreshing(false), 900);
+  }, [reload]);
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: TAB_BAR_SPACE }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.colors.accent}
+            colors={[theme.colors.accent]}
+            progressViewOffset={insets.top + 8}
+          />
+        }
       >
         <View style={[styles.header, { paddingHorizontal: theme.spacing.lg }]}>
           <View>
@@ -51,7 +72,7 @@ export function HomeScreen() {
             </Pressable>
             <Pressable
               hitSlop={8}
-              onPress={() => navigation.navigate('Extensions')}
+              onPress={() => navigateTab('profile')}
               style={[styles.iconBtn, { borderColor: theme.colors.border }]}
             >
               <Icon name="settings" size={19} color={theme.colors.text} />
@@ -68,6 +89,7 @@ export function HomeScreen() {
               block={block}
               sources={sources ?? []}
               onOpenManga={openManga}
+              refreshKey={refreshKey}
             />
           ))
         )}

@@ -61,20 +61,26 @@ Key design choices:
   under `eu.kanade.tachiyomi.*` (those exact package names are required).
 - **Local state persists** (library, categories, home layout) via AsyncStorage,
   wrapped in small reactive stores (`src/store`, `src/library`).
-- **Reader image loading is the one remaining gap** — see Status. The reader
-  currently renders page URLs with `<Image>` instead of fetching through the
-  source's OkHttp client, so scrambled/Cloudflare sources may not render.
+- **Reader images load natively.** `fetchImage` downloads each page through the
+  source's OkHttp client (headers + Cloudflare cookies), caches it to a local
+  `file://`, and tiles very tall webtoon images — so the bridge never carries
+  image bytes. Remaining gaps (filters, suspend 1.6 API, read history) are in
+  Status.
 
 ## Features
 
 - **Home** — configurable, reorderable blocks (featured / popular / latest /
-  recommended) plus a "Continue" rail showing your library. Each browse block
-  pulls from a source you pick in **Customize Home**; sensible default is
-  English & non-NSFW. Layout + source choices persist.
-- **Discover** — grouped, searchable source picker (language + NSFW tags),
-  debounced search, typed error/empty states.
+  recommended) plus a "Continue" rail showing your library. Set one **universal
+  source** for the whole home screen (or override individual sections); sensible
+  default is English & non-NSFW. Layout + source choices persist.
+- **Discover** — **Source** mode (grouped, searchable source picker with language
+  + NSFW tags, debounced search) and **Global** mode that searches your chosen
+  (pinned) sources at once, one result rail per source.
 - **Library** — your favorites, with **categories**: create/rename/delete, filter
   by category, and assign manga from their detail page. Persisted, reactive.
+- **Updates / History** — segmented tab; **History** records the chapters you
+  open (grouped by day, resume, persisted). Updates is reserved for real
+  new-chapter tracking.
 - **Reader** — four modes: webtoon long-strip, vertical paged, left-to-right,
   right-to-left.
 
@@ -84,7 +90,8 @@ Key design choices:
 src/
   engine/        # Engine contract + native impl + selector (no mock)
   store/         # AsyncStorage wrapper (persist.ts)
-  library/       # favorites.ts, categories.ts (persisted, reactive)
+  library/       # favorites.ts, categories.ts, history.ts (persisted, reactive)
+  sources/       # pinned.ts (pinned sources for global search)
   reader/        # readerSettings.ts (reading modes)
   theme/         # Design tokens + ThemeProvider (dark/light)
   home/          # Configurable, persisted home-block model (Notion-style)
@@ -139,9 +146,13 @@ Then add a repo + install an extension from **Profile → Extensions & Repos**.
 - [x] Repo management (add/remove), real index parsing, Browse/Installed UI
 - [x] APK install/uninstall (download + `FileProvider` + system installer)
 - [x] Library favorites (persisted, merge-safe) + Categories
-- [x] Configurable + persisted Home with per-section source picker
+- [x] Global search across pinned sources (per-source rails)
+- [x] Reading history (persisted) in a Updates | History tab
+- [x] Configurable + persisted Home with universal source + per-section overrides
 - [x] Reader modes (webtoon / vertical / ltr / rtl)
-- [ ] Native reader image loading via the source's OkHttp client (scrambled /
-      Cloudflare-gated pages)
+- [x] Native reader image loading via the source's OkHttp client (cached
+      `file://` + webtoon tiling)
+- [ ] Search filters wired (`FilterList` ⇄ `FilterDto`)
+- [ ] Suspend (extension-lib 1.6) source API; per-chapter read-state + Updates feed
 - [ ] Untrusted-extension trust prompt UI
 ```

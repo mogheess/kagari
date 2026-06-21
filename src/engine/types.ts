@@ -214,5 +214,17 @@ export interface Engine {
   getChapters(sourceId: string, mangaUrl: string): Promise<ChapterDto[]>;
   getPages(sourceId: string, chapterUrl: string): Promise<PageDto[]>;
   resolveImage(sourceId: string, page: PageDto): Promise<ImageRequestDto>;
-  fetchImage(sourceId: string, page: PageDto): Promise<ImageFileDto>;
+  fetchImage(sourceId: string, page: PageDto, forceRefresh?: boolean): Promise<ImageFileDto>;
+
+  // offline downloads
+  /** Downloads one page to persistent storage; resolves with its file:// uri. */
+  downloadPage(sourceId: string, chapterUrl: string, page: PageDto): Promise<string>;
+  /** Reads a previously downloaded page (offline, no network). */
+  fetchDownloadedImage(
+    sourceId: string,
+    chapterUrl: string,
+    pageIndex: number,
+  ): Promise<ImageFileDto>;
+  /** Deletes all downloaded pages for a chapter. */
+  deleteDownloadedChapter(sourceId: string, chapterUrl: string): Promise<void>;
 }

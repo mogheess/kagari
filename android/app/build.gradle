@@ -93,16 +93,34 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            // Configure these in ~/.gradle/gradle.properties (NEVER commit them):
+            //   KAGARI_STORE_FILE=/abs/path/to/kagari-release.keystore
+            //   KAGARI_STORE_PASSWORD=...
+            //   KAGARI_KEY_ALIAS=kagari
+            //   KAGARI_KEY_PASSWORD=...
+            // Generate one with:
+            //   keytool -genkeypair -v -keystore kagari-release.keystore \
+            //     -alias kagari -keyalg RSA -keysize 2048 -validity 10000
+            if (project.hasProperty('KAGARI_STORE_FILE')) {
+                storeFile file(project.property('KAGARI_STORE_FILE'))
+                storePassword project.property('KAGARI_STORE_PASSWORD')
+                keyAlias project.property('KAGARI_KEY_ALIAS')
+                keyPassword project.property('KAGARI_KEY_PASSWORD')
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            // Uses the real release keystore when configured (see above);
+            // otherwise falls back to the debug key so local release builds
+            // still succeed. Do NOT ship a debug-signed APK to users.
+            signingConfig project.hasProperty('KAGARI_STORE_FILE') ? signingConfigs.release : signingConfigs.debug
             minifyEnabled enableProguardInReleaseBuilds
+            shrinkResources enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
     }

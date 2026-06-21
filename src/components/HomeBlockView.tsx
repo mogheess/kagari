@@ -6,7 +6,7 @@ import { getEngine } from '../engine';
 import { SectionHeader } from './SectionHeader';
 import { CoverRail } from './CoverRail';
 import { FeaturedCarousel } from './FeaturedCarousel';
-import { blockLabel, type HomeBlock } from '../home/HomeConfig';
+import { blockLabel, useHomeConfig, type HomeBlock } from '../home/HomeConfig';
 import { useFavorites, favoriteToManga } from '../library/favorites';
 import { pickDefaultSource } from '../utils/sourceSelect';
 import type { MangaDto, SourceDto } from '../engine/types';
@@ -18,6 +18,8 @@ interface HomeBlockViewProps {
   block: HomeBlock;
   sources: SourceDto[];
   onOpenManga: (m: MangaDto) => void;
+  /** Bumped by pull-to-refresh to force browse rails to re-fetch. */
+  refreshKey?: number;
 }
 
 /**
@@ -25,11 +27,13 @@ interface HomeBlockViewProps {
  * pull from a real installed source; the "Continue" rail shows the local
  * library (favorites). Empty rails render nothing so the Home stays tidy.
  */
-export function HomeBlockView({ block, sources, onOpenManga }: HomeBlockViewProps) {
+export function HomeBlockView({ block, sources, onOpenManga, refreshKey = 0 }: HomeBlockViewProps) {
   if (block.kind === 'continue') {
     return <ContinueBlock onOpenManga={onOpenManga} />;
   }
-  return <BrowseBlock block={block} sources={sources} onOpenManga={onOpenManga} />;
+  return (
+    <BrowseBlock block={block} sources={sources} onOpenManga={onOpenManga} refreshKey={refreshKey} />
+  );
 }
 
 function ContinueBlock({ onOpenManga }: { onOpenManga: (m: MangaDto) => void }) {
@@ -56,19 +60,29 @@ function BrowseBlock({
   block,
   sources,
   onOpenManga,
+  refreshKey,
 }: {
   block: HomeBlock;
   sources: SourceDto[];
   onOpenManga: (m: MangaDto) => void;
+  refreshKey: number;
 }) {
   const theme = useTheme();
   const engine = getEngine();
+  const { universalSourceId } = useHomeConfig();
 
   const wantsLatest = block.kind === 'latest';
-  const source =
-    sources.find(s => s.id === block.sourceId) ??
-    pickDefaultSource(sources, { needsLatest: wantsLatest });
-  const usable = source && (!wantsLatest || source.supportsLatest);
+  // Resolution order: per-section override -> universal source -> smart default.
+  // Skip any candidate that can't satisfy a "latest" section.
+  const ok = (s?: SourceDto) => !!s && (!wantsLatest || s.supportsLatest);
+  const override = sources.find(s => s.id === block.sourceId);
+  const universal = sources.find(s => s.id === universalSourceId);
+  const source = ok(override)
+    ? override
+    : ok(universal)
+      ? universal
+      : pickDefaultSource(sources, { needsLatest: wantsLatest });
+  const usable = ok(source);
   const sourceId = source?.id;
 
   const { data, loading } = useAsync<MangaDto[]>(async () => {
@@ -79,7 +93,7 @@ function BrowseBlock({
     }
     const res = await engine.getPopular(sourceId, 1);
     return res.manga;
-  }, [sourceId, block.kind, usable]);
+  }, [sourceId, block.kind, usable, refreshKey]);
 
   if (!usable) return null;
   if (!loading && (data?.length ?? 0) === 0) return null;

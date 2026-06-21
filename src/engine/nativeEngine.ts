@@ -3,8 +3,8 @@
  *
  * The native side returns JSON strings (keeps the bridge contract simple and
  * mirrors the "JSON-like data" design); this layer parses them into typed DTOs.
- * Returns `null` when the native module is unavailable so the app can fall back
- * to the mock engine during development.
+ * Returns `null` when the native module is unavailable so the selector
+ * (`engine/index.ts`) can fall back to the no-op engine — there is no mock data.
  */
 import { NativeModules } from 'react-native';
 import type {
@@ -42,7 +42,10 @@ interface ManhwaEngineNative {
   getChapters(sourceId: string, mangaUrl: string): Promise<string>;
   getPages(sourceId: string, chapterUrl: string): Promise<string>;
   resolveImage(sourceId: string, pageJson: string): Promise<string>;
-  fetchImage(sourceId: string, pageJson: string): Promise<string>;
+  fetchImage(sourceId: string, pageJson: string, forceRefresh: boolean): Promise<string>;
+  downloadPage(sourceId: string, chapterUrl: string, pageJson: string): Promise<string>;
+  fetchDownloadedImage(sourceId: string, chapterUrl: string, pageIndex: number): Promise<string>;
+  deleteDownloadedChapter(sourceId: string, chapterUrl: string): Promise<void>;
 }
 
 const Native = NativeModules.ManhwaEngine as ManhwaEngineNative | undefined;
@@ -129,13 +132,31 @@ export function createNativeEngine(): Engine | null {
         await Native.resolveImage(sourceId, JSON.stringify(page)),
       );
     },
-    async fetchImage(sourceId, page: PageDto) {
+    async fetchImage(sourceId, page: PageDto, forceRefresh = false) {
       if (typeof Native.fetchImage !== 'function') {
         throw new Error('Native image fetching is unavailable on this build.');
       }
       return parse<ImageFileDto>(
-        await Native.fetchImage(sourceId, JSON.stringify(page)),
+        await Native.fetchImage(sourceId, JSON.stringify(page), forceRefresh),
       );
+    },
+    async downloadPage(sourceId, chapterUrl, page: PageDto) {
+      if (typeof Native.downloadPage !== 'function') {
+        throw new Error('Downloads are unavailable on this build.');
+      }
+      return Native.downloadPage(sourceId, chapterUrl, JSON.stringify(page));
+    },
+    async fetchDownloadedImage(sourceId, chapterUrl, pageIndex) {
+      if (typeof Native.fetchDownloadedImage !== 'function') {
+        throw new Error('Downloads are unavailable on this build.');
+      }
+      return parse<ImageFileDto>(
+        await Native.fetchDownloadedImage(sourceId, chapterUrl, pageIndex),
+      );
+    },
+    async deleteDownloadedChapter(sourceId, chapterUrl) {
+      if (typeof Native.deleteDownloadedChapter !== 'function') return;
+      await Native.deleteDownloadedChapter(sourceId, chapterUrl);
     },
   };
 }

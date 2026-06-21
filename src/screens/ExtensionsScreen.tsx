@@ -7,7 +7,6 @@ import {
   StyleSheet,
   FlatList,
   ActivityIndicator,
-  Alert,
   AppState,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,6 +19,26 @@ import type { AvailableExtensionDto, ExtensionDto, RepoDto } from '../engine/typ
 const KEIYOUSHI = 'https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.min.json';
 
 type Tab = 'browse' | 'installed';
+
+/** Turns raw network/HTTP errors into a calmer, human explanation. */
+function friendlyInstallError(message: string): string {
+  const m = message.toLowerCase();
+  if (m.includes('403') || m.includes('429') || m.includes('blocked')) {
+    return 'The repo looks rate-limited or blocked right now. Try again in a moment.';
+  }
+  if (m.includes('404')) {
+    return 'This file is missing from the repo (404). The mirror may be down.';
+  }
+  if (m.includes('5')) {
+    if (m.includes('500') || m.includes('502') || m.includes('503') || m.includes('504')) {
+      return 'The repo server is temporarily down. Try again shortly.';
+    }
+  }
+  if (m.includes('network') || m.includes('timeout') || m.includes('timed out') || m.includes('failed to fetch')) {
+    return 'Network problem reaching the repo. Check your connection and retry.';
+  }
+  return message;
+}
 
 export function ExtensionsScreen() {
   const theme = useTheme();
@@ -39,6 +58,8 @@ export function ExtensionsScreen() {
   const [debounced, setDebounced] = useState('');
   const [lang, setLang] = useState(''); // '' = all languages
   const [busyPkg, setBusyPkg] = useState<string | null>(null);
+  // pkg -> error message for installs that failed (repo blocked, APK down, etc.)
+  const [failedPkgs, setFailedPkgs] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(query.trim().toLowerCase()), 250);
@@ -101,14 +122,28 @@ export function ExtensionsScreen() {
     await refreshAvailable();
   };
 
+  const clearFailed = (pkg: string) =>
+    setFailedPkgs(prev => {
+      if (!(pkg in prev)) return prev;
+      const next = { ...prev };
+      delete next[pkg];
+      return next;
+    });
+
   const onInstall = async (ext: AvailableExtensionDto) => {
     setBusyPkg(ext.pkg);
+    clearFailed(ext.pkg);
     try {
       await engine.installExtension(ext);
       await refreshInstalled();
       await refreshAvailable();
     } catch (e) {
-      Alert.alert('Install failed', e instanceof Error ? e.message : 'Unknown error');
+      // Surface inline (with a Retry affordance) instead of a throwaway alert —
+      // repos/APK mirrors are often just temporarily down or rate-limited.
+      setFailedPkgs(prev => ({
+        ...prev,
+        [ext.pkg]: e instanceof Error ? e.message : 'Install failed',
+      }));
     } finally {
       setBusyPkg(null);
     }
@@ -131,7 +166,10 @@ export function ExtensionsScreen() {
   );
 
   // Drives FlatList row re-renders when install state or in-flight pkg changes.
-  const listExtra = useMemo(() => ({ installedPkgs, busyPkg }), [installedPkgs, busyPkg]);
+  const listExtra = useMemo(
+    () => ({ installedPkgs, busyPkg, failedPkgs }),
+    [installedPkgs, busyPkg, failedPkgs],
+  );
 
   // Language chips, most common first.
   const languages = useMemo(() => {
@@ -289,7 +327,21 @@ export function ExtensionsScreen() {
 
           {repoError ? (
             <View style={[styles.notice, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-              <Text style={{ color: theme.colors.textMuted, fontSize: 12.5 }}>{repoError}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: '600' }}>
+                  Couldn’t load extensions
+                </Text>
+                <Text style={{ color: theme.colors.textMuted, fontSize: 12, marginTop: 3 }}>
+                  {friendlyInstallError(repoError)}
+                </Text>
+              </View>
+              <Pressable
+                onPress={refreshAvailable}
+                style={[styles.retryBtn, { borderColor: theme.colors.border }]}
+              >
+                <Icon name="refresh" size={14} color={theme.colors.accent} />
+                <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 12.5 }}>Retry</Text>
+              </Pressable>
             </View>
           ) : null}
 
@@ -317,6 +369,8 @@ export function ExtensionsScreen() {
   const renderBrowseRow = (ext: AvailableExtensionDto) => {
     const installed = installedPkgs.has(ext.pkg);
     const busy = busyPkg === ext.pkg;
+    const failure = failedPkgs[ext.pkg];
+    const failed = !installed && !busy && !!failure;
     return (
       <View
         style={[styles.extRow, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
@@ -330,11 +384,17 @@ export function ExtensionsScreen() {
           <Text numberOfLines={1} style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
             {ext.name}
           </Text>
-          <Text style={{ color: theme.colors.textFaint, fontSize: 11.5, marginTop: 2 }}>
-            {`${ext.lang === 'all' ? 'Multi' : ext.lang.toUpperCase()} \u00B7 v${ext.versionName}${
-              ext.isNsfw ? '  \u00B7  18+' : ''
-            }`}
-          </Text>
+          {failed ? (
+            <Text numberOfLines={1} style={{ color: '#E5604D', fontSize: 11.5, marginTop: 2 }}>
+              {friendlyInstallError(failure)}
+            </Text>
+          ) : (
+            <Text style={{ color: theme.colors.textFaint, fontSize: 11.5, marginTop: 2 }}>
+              {`${ext.lang === 'all' ? 'Multi' : ext.lang.toUpperCase()} \u00B7 v${ext.versionName}${
+                ext.isNsfw ? '  \u00B7  18+' : ''
+              }`}
+            </Text>
+          )}
         </View>
         <Pressable
           disabled={busy}
@@ -343,11 +403,18 @@ export function ExtensionsScreen() {
             styles.installBtn,
             installed
               ? { backgroundColor: theme.colors.elevated, borderColor: theme.colors.border, borderWidth: StyleSheet.hairlineWidth }
-              : { backgroundColor: theme.colors.accent },
+              : failed
+                ? { backgroundColor: 'transparent', borderColor: '#E5604D', borderWidth: StyleSheet.hairlineWidth }
+                : { backgroundColor: theme.colors.accent },
           ]}
         >
           {busy ? (
             <ActivityIndicator size="small" color={installed ? theme.colors.textMuted : theme.colors.onAccent} />
+          ) : failed ? (
+            <View style={styles.retryInline}>
+              <Icon name="refresh" size={13} color="#E5604D" />
+              <Text style={{ color: '#E5604D', fontWeight: '700', fontSize: 12.5 }}>Retry</Text>
+            </View>
           ) : (
             <Text
               style={{
@@ -521,10 +588,27 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   notice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
     padding: 14,
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
     marginBottom: 14,
+  },
+  retryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    height: 32,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  retryInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
   },
   extRow: {
     flexDirection: 'row',

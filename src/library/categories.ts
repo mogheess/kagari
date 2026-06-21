@@ -75,6 +75,20 @@ export function deleteCategory(id: string): void {
   removeCategoryFromAll(id);
 }
 
+/** Moves a category up (-1) or down (+1) in the ordering. */
+export function moveCategory(id: string, direction: -1 | 1): void {
+  const sorted = sortByOrder(categories);
+  const idx = sorted.findIndex(c => c.id === id);
+  if (idx === -1) return;
+  const swapWith = idx + direction;
+  if (swapWith < 0 || swapWith >= sorted.length) return;
+  const next = sorted.slice();
+  [next[idx], next[swapWith]] = [next[swapWith], next[idx]];
+  categories = next.map((c, i) => ({ ...c, order: i }));
+  emit();
+  persist();
+}
+
 function subscribe(cb: () => void): () => void {
   listeners.add(cb);
   return () => {

@@ -30,26 +30,48 @@ const DEFAULT_BLOCKS: HomeBlock[] = [
 
 const store = makePersistence<HomeBlock[]>('@kagari/home-blocks/v1');
 
+/** The default source every browse section uses unless it has its own override. */
+interface UniversalSource {
+  id?: string;
+  name?: string;
+}
+const universalStore = makePersistence<UniversalSource>('@kagari/home-universal-source/v1');
+
 interface HomeConfigValue {
   blocks: HomeBlock[];
   setBlocks: (b: HomeBlock[]) => void;
   toggle: (id: string) => void;
   move: (from: number, to: number) => void;
   remove: (id: string) => void;
-  /** Assigns the source a browse block pulls from. */
+  /** Assigns the source a browse block pulls from (a per-section override). */
   setSource: (id: string, sourceId: string, sourceName: string) => void;
+  /** Clears a section's override so it falls back to the universal source. */
+  clearSource: (id: string) => void;
+  /** Clears every per-section override so all sections follow the universal source. */
+  clearAllSources: () => void;
+  /** Source applied to every section without its own override. */
+  universalSourceId?: string;
+  universalSourceName?: string;
+  /** Sets (or clears, when passed undefined) the universal source. */
+  setUniversalSource: (sourceId?: string, sourceName?: string) => void;
 }
 
 const HomeConfigContext = createContext<HomeConfigValue | null>(null);
 
 export function HomeConfigProvider({ children }: { children: React.ReactNode }) {
   const [blocks, setBlocksState] = useState<HomeBlock[]>(DEFAULT_BLOCKS);
+  const [universal, setUniversalState] = useState<UniversalSource>({});
 
   useEffect(() => {
     let cancelled = false;
     store.load().then(stored => {
       if (!cancelled && stored && Array.isArray(stored) && stored.length > 0) {
         setBlocksState(stored);
+      }
+    });
+    universalStore.load().then(stored => {
+      if (!cancelled && stored && typeof stored === 'object') {
+        setUniversalState(stored);
       }
     });
     return () => {
@@ -98,9 +120,53 @@ export function HomeConfigProvider({ children }: { children: React.ReactNode }) 
     [update],
   );
 
+  const clearSource = useCallback(
+    (id: string) =>
+      update(prev =>
+        prev.map(b =>
+          b.id === id ? { ...b, sourceId: undefined, sourceName: undefined } : b,
+        ),
+      ),
+    [update],
+  );
+
+  const clearAllSources = useCallback(
+    () => update(prev => prev.map(b => ({ ...b, sourceId: undefined, sourceName: undefined }))),
+    [update],
+  );
+
+  const setUniversalSource = useCallback((sourceId?: string, sourceName?: string) => {
+    const next: UniversalSource = { id: sourceId, name: sourceName };
+    setUniversalState(next);
+    universalStore.save(next);
+  }, []);
+
   const value = useMemo(
-    () => ({ blocks, setBlocks, toggle, move, remove, setSource }),
-    [blocks, setBlocks, toggle, move, remove, setSource],
+    () => ({
+      blocks,
+      setBlocks,
+      toggle,
+      move,
+      remove,
+      setSource,
+      clearSource,
+      clearAllSources,
+      universalSourceId: universal.id,
+      universalSourceName: universal.name,
+      setUniversalSource,
+    }),
+    [
+      blocks,
+      setBlocks,
+      toggle,
+      move,
+      remove,
+      setSource,
+      clearSource,
+      clearAllSources,
+      universal,
+      setUniversalSource,
+    ],
   );
 
   return <HomeConfigContext.Provider value={value}>{children}</HomeConfigContext.Provider>;

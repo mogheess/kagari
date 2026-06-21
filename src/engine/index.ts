@@ -43,6 +43,9 @@ function createUnavailableEngine(): Engine {
     getPages: () => Promise.resolve([]),
     resolveImage: reject,
     fetchImage: reject,
+    downloadPage: reject,
+    fetchDownloadedImage: reject,
+    deleteDownloadedChapter: () => Promise.resolve(),
   };
 }
 

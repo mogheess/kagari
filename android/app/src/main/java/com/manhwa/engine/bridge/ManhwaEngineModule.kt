@@ -143,10 +143,37 @@ class ManhwaEngineModule(
     }
 
     @ReactMethod
-    fun fetchImage(sourceId: String, pageJson: String, promise: Promise) = resolve(promise) {
-        val page = json.decodeFromString<PageDto>(pageJson)
-        json.encodeToString(facade.fetchImage(sourceId, page))
+    fun fetchImage(sourceId: String, pageJson: String, forceRefresh: Boolean, promise: Promise) =
+        resolve(promise) {
+            val page = json.decodeFromString<PageDto>(pageJson)
+            json.encodeToString(facade.fetchImage(sourceId, page, forceRefresh))
+        }
+
+    // --- offline downloads ---
+
+    @ReactMethod
+    fun downloadPage(sourceId: String, chapterUrl: String, pageJson: String, promise: Promise) =
+        resolve(promise) {
+            val page = json.decodeFromString<PageDto>(pageJson)
+            facade.downloadPage(sourceId, chapterUrl, page)
+        }
+
+    @ReactMethod
+    fun fetchDownloadedImage(
+        sourceId: String,
+        chapterUrl: String,
+        pageIndex: Int,
+        promise: Promise,
+    ) = resolve(promise) {
+        json.encodeToString(facade.fetchDownloadedImage(sourceId, chapterUrl, pageIndex))
     }
+
+    @ReactMethod
+    fun deleteDownloadedChapter(sourceId: String, chapterUrl: String, promise: Promise) =
+        resolve(promise) {
+            facade.deleteDownloadedChapter(sourceId, chapterUrl)
+            ""
+        }
 
     /** Runs [block] on the IO scope and bridges the result/error to the Promise. */
     private fun resolve(promise: Promise, block: suspend () -> String) {

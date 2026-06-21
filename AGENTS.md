@@ -49,10 +49,13 @@ React Native UI (TypeScript)
   parses them). Manga identity is always `(sourceId, url)`.
 - **The UI never imports the engine directly** — always go through `getEngine()`
   from `src/engine/index.ts`.
-- **Image bytes ~~never~~ should not cross the bridge.** The native `resolveImage`
-  returns a URL + headers; the reader currently renders that URL with RN
-  `<Image>`. See **Known gaps** — this is the one place that isn't yet
-  Mihon-correct.
+- **Image bytes stay native-side.** `fetchImage(sourceId, page)` downloads the
+  page through the *source's own* OkHttp client (headers + Cloudflare cookies),
+  caches it under `cacheDir/reader_images/<sourceId>/`, and returns a `file://`
+  URI (plus dimensions and, for very tall webtoon images, pre-sliced JPEG
+  **tiles** so the GPU texture limit isn't blown). The reader renders that local
+  URI with `<Image>`. `resolveImage` (URL + headers only) still exists as a
+  lighter seam.
 
 ---
 
@@ -129,23 +132,45 @@ When you add a new persisted store, follow the favorites pattern (in-memory stat
 
 - **Home** (`HomeScreen` + `HomeBlockView`): configurable blocks
   (featured/popular/latest/recommended + a "Continue" rail that shows the
-  **library**). Browse blocks pull from a per-block source chosen in **Customize
-  Home**; with none chosen they fall back to `pickDefaultSource` (English &
-  non-NSFW first — `src/utils/sourceSelect.ts`). Empty rails auto-hide.
+  **library**). Source resolution per browse block is **per-block override →
+  universal source → `pickDefaultSource`** (English & non-NSFW first —
+  `src/utils/sourceSelect.ts`), skipping any candidate that can't do "Latest".
+  The **universal source** (set in **Customize Home**, persisted in `HomeConfig`)
+  drives every section at once so you don't have to set each one; per-section
+  pickers remain as optional overrides. Empty rails auto-hide.
   - **Featured** isn't curated — it's the source's **Popular** list. The block
     renders the top `FEATURED_COUNT` (6) entries that have cover art as an
     auto-rotating, swipeable `FeaturedCarousel` (genre-based taglines; pauses on
     drag; page dots). Browse stubs aren't `initialized`, so there's no
     description/rating to rank "editorially" by without extra detail fetches.
-- **Discover**: source picker (`SourcePickerSheet`, grouped by extension with
-  language + NSFW tags), debounced search, popular browse, typed error/empty states.
+- **Discover**: a **Source | Global** segmented toggle.
+  - **Source** mode: single-source picker (`SourcePickerSheet`, grouped by
+    extension with language + NSFW tags), debounced search, popular browse,
+    typed error/empty states.
+  - **Global** mode: fans the query out to the user's **pinned sources**
+    (`src/sources/pinned.ts`, persisted) and renders one horizontal rail per
+    source, each loading independently (tap a rail header to jump into that
+    source). Pinned set is chosen via `GlobalSourcesSheet`. Like Mihon, global
+    search is curated (pinned) rather than literally all installed sources to
+    avoid hammering every source.
 - **Library**: grid of favorites with **category filter chips** (All / each
   category / Uncategorized).
 - **MangaDetail**: bookmark toggles favorite; long-press (or the "Add to category"
   row) opens `CategoryAssignSheet` to assign categories.
 - **Reader** (`ReaderScreen` + `src/reader/readerSettings.ts`): four modes —
   **webtoon** (continuous long strip), **vertical** (one page/swipe), **ltr**,
-  **rtl** (paged). Mode is selectable from the reader's settings sheet.
+  **rtl** (paged). Mode is selectable from the reader's settings sheet. Pages
+  load via the native `fetchImage` cache (queued, retried) and render tall
+  webtoon images as stitched tiles. A failed page shows a **Retry** button and any
+  page can be **long-pressed to refresh** it; retry passes `forceRefresh` to
+  `EngineFacade.fetchImage`, which busts the disk cache and re-downloads.
+  Freshly-downloaded files that don't decode are rejected (not cached) so a
+  truncated download can't keep rendering black. Opening a chapter records history.
+- **Updates tab** (`UpdatesScreen`): a **Updates | History** segmented screen.
+  **History** is a real feed — opening a chapter records a last-read entry
+  (`src/library/history.ts`, persisted), grouped by day with resume + per-item
+  remove + clear-all. **Updates** stays an honest empty state until per-manga
+  chapter snapshots exist. Per-chapter read state on MangaDetail is still TODO.
 
 ---
 
@@ -156,13 +181,15 @@ src/
   engine/        Engine contract (types.ts), nativeEngine, repoClient
                  (fetch/parse real index.min.json), index (selector)
   store/         persist.ts (AsyncStorage wrapper)
-  library/       favorites.ts, categories.ts (persisted, reactive)
+  library/       favorites.ts, categories.ts, history.ts (persisted, reactive)
+  sources/       pinned.ts (pinned sources for global search; persisted, reactive)
   reader/        readerSettings.ts (reading modes)
   theme/         Design tokens (tokens.ts) + ThemeProvider (dark/light/system)
-  home/          Configurable, persisted home-block model (HomeConfig)
+  home/          Configurable, persisted home-block model (HomeConfig + universal source)
   utils/         lang.ts (lang labels), sourceSelect.ts (default/sort), color.ts
   components/    Cover, FeaturedHero, CoverRail, SectionHeader, Icon, Skeleton,
-                 HomeBlockView, SourcePickerSheet, CategoryAssignSheet, ...
+                 HomeBlockView, SourcePickerSheet, GlobalSourcesSheet,
+                 CategoryAssignSheet, ...
   navigation/    RootNavigator, TabsScreen (local-state tabs), GlassTabBar, types
   screens/       Home, Library, Discover, Updates, Profile, MangaDetail, Reader,
                  CustomizeHome, Extensions, Categories
@@ -233,14 +260,29 @@ With no extensions installed you'll see empty states. Install a repo + extension
 
 ## Known gaps / next up
 
-- **Reader image loading is not yet Mihon-correct.** Mihon fetches each page
-  through the *source's own* OkHttp client (headers + Cloudflare cookies +
-  per-source **descramble interceptors**, e.g. MangaFire). We render the page URL
-  with RN `<Image>` (Fresco), which works for simple sources but fails for
-  scrambled/cookie-gated ones. Fix: add a native `fetchImage(sourceId, page)` that
-  downloads via `HttpSource.getImage()`, writes processed bytes to cache, and
-  returns a `file://` path for `<Image>`. The `resolveImage` seam already exists.
-- Untrusted-extension trust-prompt UI (engine supports `trustSignature`).
+- **Suspend (extension-lib 1.6) source API not mirrored.** `ExtensionLoader`
+  accepts lib versions up to `1.6`, but the vendored `Source`/`CatalogueSource`
+  expose only the deprecated RxJava `fetch*` methods, and `EngineFacade` calls
+  those. Most keiyoushi `ParsedHttpSource` extensions override request/parse so
+  the Rx path works; sources that override *only* the suspend `getPopularManga`/
+  `getPageList`/etc. will not. Fix: add the suspend methods (with Rx-bridging
+  defaults) to the vendored API and call them preferentially — or cap
+  `LIB_VERSION_MAX` lower and say so.
+- **Search filters are declared but unused.** TS has the full `FilterDto` schema,
+  but native `getFilters` returns `[]` and `search(...)` ignores `filtersJson`
+  (`ManhwaEngineModule.kt`). Wire `FilterList` ⇄ `FilterDto` (de)serialization so
+  sources with genre/sort/status filters work.
+- **Read history exists; per-chapter read-state + real updates feed do not.**
+  Reading history is now persisted (`src/library/history.ts`) and shown in the
+  **History** tab. Still missing: per-chapter read/unread state on MangaDetail
+  and a real **Updates** feed (needs per-manga chapter snapshots, following the
+  `favorites`/`categories` store pattern). *Don't reintroduce faked read/update
+  data* — the Updates tab stays an empty state until snapshots exist.
+- **Per-source descramble interceptors.** `fetchImage` routes through the source
+  OkHttp client, but a few sources (e.g. MangaFire/MangaPlus) need custom
+  image-descramble interceptors; verify those render correctly.
+- Untrusted-extension trust-prompt UI (we currently **auto-trust** explicitly
+  installed extensions; `trustSignature` exists if you want Mihon's boundary).
 - Pull-to-refresh on Updates/Library; theme/accent refresh.
 
 ---
@@ -254,13 +296,18 @@ With no extensions installed you'll see empty states. Install a repo + extension
 - [x] Repo management (add/remove), real `index.min.json` parsing; APK
       install/uninstall (FileProvider + system installer)
 - [x] Discover browse/search; grouped `SourcePickerSheet`
+- [x] Global search across pinned sources (per-source rails; `GlobalSourcesSheet`)
+- [x] Reading history (persisted) in a Updates | History segmented tab
 - [x] Library favorites (persisted, merge-safe) + Categories (create/rename/delete,
       filter, assignment)
-- [x] Configurable + persisted Home with per-section source picker
+- [x] Configurable + persisted Home with universal source + per-section overrides
 - [x] Reader modes (webtoon / vertical / ltr / rtl); white-screen overlay fixed
-- [ ] OkHttp-backed native reader image (`fetchImage` → `file://`) for
-      scrambled/Cloudflare sources
-- [ ] Untrusted-extension trust prompt UI
+- [x] OkHttp-backed native reader image (`fetchImage` → cached `file://`, with
+      webtoon tiling) routed through the source's client
+- [ ] Suspend (extension-lib 1.6) source API mirrored + called preferentially
+- [ ] Search filters wired (`FilterList` ⇄ `FilterDto`)
+- [ ] Per-chapter read-state on MangaDetail + real Updates feed (chapter snapshots)
+- [ ] Untrusted-extension trust prompt UI (auto-trust today)
 
 ---
 
