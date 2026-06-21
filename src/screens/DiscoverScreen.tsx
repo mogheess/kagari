@@ -19,6 +19,7 @@ import { Cover } from '../components/Cover';
 import { Icon } from '../components/Icon';
 import { SourcePickerSheet } from '../components/SourcePickerSheet';
 import { langLabel } from '../utils/lang';
+import { pickDefaultSource, sortSourcesForPicker } from '../utils/sourceSelect';
 import type { RootStackParamList } from '../navigation/types';
 import type { MangaDto, SourceDto } from '../engine/types';
 
@@ -40,14 +41,9 @@ export function DiscoverScreen() {
 
   useEffect(() => {
     engine.listSources().then(s => {
-      // English-first, then alphabetical, so the default pick is usable.
-      const sorted = [...s].sort(
-        (a, b) =>
-          Number(b.lang === 'en') - Number(a.lang === 'en') ||
-          a.name.localeCompare(b.name),
-      );
-      setSources(sorted);
-      if (sorted[0]) setSourceId(sorted[0].id);
+      setSources(sortSourcesForPicker(s));
+      const def = pickDefaultSource(s);
+      if (def) setSourceId(def.id);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

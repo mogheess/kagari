@@ -17,8 +17,10 @@ import { useAsync } from '../hooks/useAsync';
 import { getEngine } from '../engine';
 import { Icon } from '../components/Icon';
 import { Skeleton } from '../components/Skeleton';
+import { CategoryAssignSheet } from '../components/CategoryAssignSheet';
 import { seededColor, withAlpha } from '../utils/color';
-import { toggleFavorite, useIsFavorite } from '../library/favorites';
+import { toggleFavorite, useFavorite, setMangaCategories } from '../library/favorites';
+import { useCategories } from '../library/categories';
 import type { RootStackParamList } from '../navigation/types';
 import type { MangaDto, ChapterDto } from '../engine/types';
 
@@ -43,6 +45,7 @@ export function MangaDetailScreen() {
   const engine = getEngine();
 
   const [expanded, setExpanded] = useState(false);
+  const [catSheet, setCatSheet] = useState(false);
 
   const { data: details } = useAsync<MangaDto>(
     () => engine.getMangaDetails(params.sourceId, params.mangaUrl),
@@ -56,7 +59,20 @@ export function MangaDetailScreen() {
   const manga = details ?? params.preview;
   const tint = seededColor(manga?.thumbnailUrl ?? manga?.title ?? 'x', 0.5, 0.32);
   const backdropHeight = Math.round(width * 0.78);
-  const favorited = useIsFavorite(params.sourceId, params.mangaUrl);
+  const favorite = useFavorite(params.sourceId, params.mangaUrl);
+  const favorited = favorite != null;
+  const categories = useCategories();
+  const assignedNames = categories
+    .filter(c => favorite?.categoryIds.includes(c.id))
+    .map(c => c.name);
+
+  const onToggleCategory = (categoryId: string) => {
+    if (!favorite) return;
+    const next = favorite.categoryIds.includes(categoryId)
+      ? favorite.categoryIds.filter(id => id !== categoryId)
+      : [...favorite.categoryIds, categoryId];
+    setMangaCategories(params.sourceId, params.mangaUrl, next);
+  };
 
   const openReader = (chapter: ChapterDto) =>
     navigation.navigate('Reader', {
@@ -148,7 +164,12 @@ export function MangaDetailScreen() {
             </Text>
           </Pressable>
           <Pressable
-            onPress={() => manga && toggleFavorite(manga)}
+            onPress={() => {
+              if (!manga) return;
+              const nowFav = toggleFavorite(manga);
+              if (nowFav && categories.length > 0) setCatSheet(true);
+            }}
+            onLongPress={() => favorited && setCatSheet(true)}
             style={[
               styles.secondaryBtn,
               {
@@ -165,6 +186,16 @@ export function MangaDetailScreen() {
             />
           </Pressable>
         </View>
+
+        {favorited ? (
+          <Pressable onPress={() => setCatSheet(true)} style={styles.catRow}>
+            <Icon name="bookmark" size={14} color={theme.colors.textMuted} />
+            <Text style={{ color: theme.colors.textMuted, fontSize: 13, flex: 1 }} numberOfLines={1}>
+              {assignedNames.length > 0 ? assignedNames.join(', ') : 'Add to category'}
+            </Text>
+            <Icon name="chevronRight" size={15} color={theme.colors.textFaint} />
+          </Pressable>
+        ) : null}
 
         {/* Description */}
         {manga?.description ? (
@@ -223,6 +254,17 @@ export function MangaDetailScreen() {
               );
             })}
       </ScrollView>
+
+      <CategoryAssignSheet
+        visible={catSheet}
+        selectedIds={favorite?.categoryIds ?? []}
+        onToggle={onToggleCategory}
+        onManage={() => {
+          setCatSheet(false);
+          navigation.navigate('Categories');
+        }}
+        onClose={() => setCatSheet(false)}
+      />
     </View>
   );
 }
@@ -302,6 +344,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
+  },
+  catRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    marginTop: 14,
+    paddingVertical: 0,
   },
   descWrap: {
     paddingHorizontal: 16,

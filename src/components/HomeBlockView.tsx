@@ -8,6 +8,7 @@ import { CoverRail } from './CoverRail';
 import { FeaturedHero } from './FeaturedHero';
 import { blockLabel, type HomeBlock } from '../home/HomeConfig';
 import { useFavorites, favoriteToManga } from '../library/favorites';
+import { pickDefaultSource } from '../utils/sourceSelect';
 import type { MangaDto, SourceDto } from '../engine/types';
 
 interface HomeBlockViewProps {
@@ -60,8 +61,10 @@ function BrowseBlock({
   const theme = useTheme();
   const engine = getEngine();
 
-  const source = sources.find(s => s.id === block.sourceId) ?? sources[0];
   const wantsLatest = block.kind === 'latest';
+  const source =
+    sources.find(s => s.id === block.sourceId) ??
+    pickDefaultSource(sources, { needsLatest: wantsLatest });
   const usable = source && (!wantsLatest || source.supportsLatest);
   const sourceId = source?.id;
 

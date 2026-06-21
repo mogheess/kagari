@@ -1,16 +1,33 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, ScrollView, Switch } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeProvider';
-import { useHomeConfig, blockLabel } from '../home/HomeConfig';
+import { useHomeConfig, blockLabel, isBrowseBlock } from '../home/HomeConfig';
 import { Icon } from '../components/Icon';
+import { SourcePickerSheet } from '../components/SourcePickerSheet';
+import { getEngine } from '../engine';
+import { sortSourcesForPicker } from '../utils/sourceSelect';
+import { langLabel } from '../utils/lang';
+import type { SourceDto } from '../engine/types';
 
 export function CustomizeHomeScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
-  const { blocks, toggle, move, remove } = useHomeConfig();
+  const { blocks, toggle, move, remove, setSource } = useHomeConfig();
+
+  const [sources, setSources] = useState<SourceDto[]>([]);
+  const [pickerFor, setPickerFor] = useState<string | null>(null);
+
+  useEffect(() => {
+    getEngine()
+      .listSources()
+      .then(s => setSources(sortSourcesForPicker(s)))
+      .catch(() => setSources([]));
+  }, []);
+
+  const pickerBlock = blocks.find(b => b.id === pickerFor);
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
@@ -26,61 +43,93 @@ export function CustomizeHomeScreen() {
 
       <ScrollView contentContainerStyle={{ padding: theme.spacing.lg, paddingBottom: 40 }}>
         <Text style={{ color: theme.colors.textMuted, textAlign: 'center', marginBottom: 18, fontSize: 13 }}>
-          Reorder and toggle sections on your home screen.
+          Reorder sections, toggle them, and pick which source each one pulls from.
         </Text>
 
-        {blocks.map((block, index) => (
-          <View
-            key={block.id}
-            style={[styles.block, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
-          >
-            <View style={styles.moveCol}>
-              <Pressable hitSlop={6} onPress={() => move(index, index - 1)} disabled={index === 0}>
-                <Icon name="chevronDown" size={16} color={index === 0 ? theme.colors.textFaint : theme.colors.textMuted} />
-              </Pressable>
-              <Icon name="drag" size={18} color={theme.colors.textFaint} />
-              <Pressable
-                hitSlop={6}
-                onPress={() => move(index, index + 1)}
-                disabled={index === blocks.length - 1}
-                style={{ transform: [{ rotate: '180deg' }] }}
-              >
-                <Icon
-                  name="chevronDown"
-                  size={16}
-                  color={index === blocks.length - 1 ? theme.colors.textFaint : theme.colors.textMuted}
+        {blocks.map((block, index) => {
+          const browse = isBrowseBlock(block);
+          const blockSource = sources.find(s => s.id === block.sourceId);
+          return (
+            <View
+              key={block.id}
+              style={[styles.block, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+            >
+              <View style={styles.topRow}>
+                <View style={styles.moveCol}>
+                  <Pressable hitSlop={6} onPress={() => move(index, index - 1)} disabled={index === 0}>
+                    <Icon name="chevronDown" size={16} color={index === 0 ? theme.colors.textFaint : theme.colors.textMuted} />
+                  </Pressable>
+                  <Icon name="drag" size={18} color={theme.colors.textFaint} />
+                  <Pressable
+                    hitSlop={6}
+                    onPress={() => move(index, index + 1)}
+                    disabled={index === blocks.length - 1}
+                    style={{ transform: [{ rotate: '180deg' }] }}
+                  >
+                    <Icon
+                      name="chevronDown"
+                      size={16}
+                      color={index === blocks.length - 1 ? theme.colors.textFaint : theme.colors.textMuted}
+                    />
+                  </Pressable>
+                </View>
+
+                <Text style={[theme.typography.bodyStrong, { color: theme.colors.text, flex: 1 }]}>
+                  {blockLabel(block).split(' \u00B7 ')[0]}
+                </Text>
+
+                <Switch
+                  value={block.enabled}
+                  onValueChange={() => toggle(block.id)}
+                  trackColor={{ true: theme.colors.accent, false: theme.colors.border }}
+                  thumbColor="#fff"
                 />
-              </Pressable>
+                <Pressable hitSlop={8} onPress={() => remove(block.id)} style={{ marginLeft: 10 }}>
+                  <Icon name="minus" size={20} color={theme.colors.textFaint} />
+                </Pressable>
+              </View>
+
+              {browse ? (
+                <Pressable
+                  onPress={() => setPickerFor(block.id)}
+                  style={({ pressed }) => [
+                    styles.sourceRow,
+                    { borderColor: theme.colors.border, opacity: pressed ? 0.7 : 1 },
+                  ]}
+                >
+                  <Icon name="globe" size={15} color={theme.colors.accent} />
+                  <Text style={{ color: theme.colors.textMuted, fontSize: 13, flex: 1 }} numberOfLines={1}>
+                    {blockSource
+                      ? blockSource.name
+                      : block.sourceName ?? 'Auto (first available source)'}
+                  </Text>
+                  {blockSource ? (
+                    <Text style={[styles.langTag, { color: theme.colors.textMuted, borderColor: theme.colors.border }]}>
+                      {langLabel(blockSource.lang)}
+                    </Text>
+                  ) : null}
+                  <Icon name="chevronRight" size={15} color={theme.colors.textFaint} />
+                </Pressable>
+              ) : null}
             </View>
+          );
+        })}
 
-            <Text style={[theme.typography.bodyStrong, { color: theme.colors.text, flex: 1 }]}>
-              {blockLabel(block)}
-            </Text>
-
-            <Switch
-              value={block.enabled}
-              onValueChange={() => toggle(block.id)}
-              trackColor={{ true: theme.colors.accent, false: theme.colors.border }}
-              thumbColor="#fff"
-            />
-            <Pressable hitSlop={8} onPress={() => remove(block.id)} style={{ marginLeft: 10 }}>
-              <Icon name="minus" size={20} color={theme.colors.textFaint} />
-            </Pressable>
-          </View>
-        ))}
-
-        <Pressable
-          style={[styles.addBlock, { borderColor: theme.colors.accent }]}
-          onPress={() => {}}
-        >
-          <Icon name="plus" size={18} color={theme.colors.accent} />
-          <Text style={{ color: theme.colors.accent, fontWeight: '700' }}>Add Block</Text>
-        </Pressable>
-
-        <Text style={{ color: theme.colors.textFaint, textAlign: 'center', marginTop: 18, fontSize: 12 }}>
+        <Text style={{ color: theme.colors.textFaint, textAlign: 'center', marginTop: 8, fontSize: 12 }}>
           Sections pull from your installed extensions
         </Text>
       </ScrollView>
+
+      <SourcePickerSheet
+        visible={pickerFor != null}
+        sources={sources}
+        selectedId={pickerBlock?.sourceId ?? ''}
+        onSelect={id => {
+          const s = sources.find(x => x.id === id);
+          if (pickerFor && s) setSource(pickerFor, s.id, s.name);
+        }}
+        onClose={() => setPickerFor(null)}
+      />
     </View>
   );
 }
@@ -95,28 +144,36 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   block: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 14,
+    paddingVertical: 12,
     paddingHorizontal: 12,
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
     marginBottom: 12,
   },
+  topRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
   moveCol: {
     alignItems: 'center',
     gap: 1,
   },
-  addBlock: {
+  sourceRow: {
     flexDirection: 'row',
-    gap: 8,
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderStyle: 'dashed',
-    marginTop: 6,
+    gap: 8,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  langTag: {
+    fontSize: 11,
+    fontWeight: '700',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
   },
 });

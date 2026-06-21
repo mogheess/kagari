@@ -7,6 +7,7 @@ import { MangaDetailScreen } from '../screens/MangaDetailScreen';
 import { ReaderScreen } from '../screens/ReaderScreen';
 import { CustomizeHomeScreen } from '../screens/CustomizeHomeScreen';
 import { ExtensionsScreen } from '../screens/ExtensionsScreen';
+import { CategoriesScreen } from '../screens/CategoriesScreen';
 import type { RootStackParamList } from './types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -48,6 +49,7 @@ export function RootNavigator() {
           options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
         />
         <Stack.Screen name="Extensions" component={ExtensionsScreen} />
+        <Stack.Screen name="Categories" component={CategoriesScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

@@ -13,4 +13,5 @@ export type RootStackParamList = {
   };
   CustomizeHome: undefined;
   Extensions: undefined;
+  Categories: undefined;
 };
