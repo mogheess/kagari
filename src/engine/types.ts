@@ -90,6 +90,25 @@ export interface ImageRequestDto {
   headers: Record<string, string>;
 }
 
+/** Local cached image fetched through the source's native HTTP client. */
+export interface ImageFileDto {
+  uri: string;
+  sourceUrl?: string;
+  bytes?: number;
+  cached?: boolean;
+  width?: number;
+  height?: number;
+  contentType?: string;
+  tiles?: ImageTileDto[];
+}
+
+export interface ImageTileDto {
+  uri: string;
+  width: number;
+  height: number;
+  index: number;
+}
+
 /** A configured extension repository (Mihon-style index URL). */
 export interface RepoDto {
   url: string;
@@ -195,4 +214,5 @@ export interface Engine {
   getChapters(sourceId: string, mangaUrl: string): Promise<ChapterDto[]>;
   getPages(sourceId: string, chapterUrl: string): Promise<PageDto[]>;
   resolveImage(sourceId: string, page: PageDto): Promise<ImageRequestDto>;
+  fetchImage(sourceId: string, page: PageDto): Promise<ImageFileDto>;
 }

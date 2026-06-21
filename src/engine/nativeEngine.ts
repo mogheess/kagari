@@ -16,6 +16,7 @@ import type {
   ChapterDto,
   PageDto,
   ImageRequestDto,
+  ImageFileDto,
   FilterDto,
   RepoDto,
   AvailableExtensionDto,
@@ -41,6 +42,7 @@ interface ManhwaEngineNative {
   getChapters(sourceId: string, mangaUrl: string): Promise<string>;
   getPages(sourceId: string, chapterUrl: string): Promise<string>;
   resolveImage(sourceId: string, pageJson: string): Promise<string>;
+  fetchImage(sourceId: string, pageJson: string): Promise<string>;
 }
 
 const Native = NativeModules.ManhwaEngine as ManhwaEngineNative | undefined;
@@ -125,6 +127,14 @@ export function createNativeEngine(): Engine | null {
     async resolveImage(sourceId, page: PageDto) {
       return parse<ImageRequestDto>(
         await Native.resolveImage(sourceId, JSON.stringify(page)),
+      );
+    },
+    async fetchImage(sourceId, page: PageDto) {
+      if (typeof Native.fetchImage !== 'function') {
+        throw new Error('Native image fetching is unavailable on this build.');
+      }
+      return parse<ImageFileDto>(
+        await Native.fetchImage(sourceId, JSON.stringify(page)),
       );
     },
   };

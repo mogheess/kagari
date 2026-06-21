@@ -228,7 +228,7 @@ export function MangaDetailScreen() {
               const read = i > (chapters?.length ?? 0) - 4; // sample: oldest few "read"
               return (
                 <Pressable
-                  key={ch.url}
+                  key={`${ch.url}:${i}`}
                   onPress={() => openReader(ch)}
                   style={({ pressed }) => [
                     styles.chapterRow,

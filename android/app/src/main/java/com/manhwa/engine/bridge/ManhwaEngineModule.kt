@@ -20,9 +20,8 @@ import kotlinx.serialization.json.Json
  * React Native bridge for the extension engine. Exposes the EngineFacade to JS.
  *
  * Browse/detail/list results are returned as JSON strings (see `nativeEngine.ts`
- * which parses them). Image BYTES are never sent across the bridge \u2014 only the
- * URL + headers via `resolveImage`, so the reader can stream through the source's
- * HTTP client natively.
+ * which parses them). Image bytes stay native-side: `fetchImage` downloads via
+ * the source's OkHttp client and returns a cached file URI for React Native.
  */
 class ManhwaEngineModule(
     private val reactContext: ReactApplicationContext,
@@ -141,6 +140,12 @@ class ManhwaEngineModule(
     fun resolveImage(sourceId: String, pageJson: String, promise: Promise) = resolve(promise) {
         val page = json.decodeFromString<PageDto>(pageJson)
         json.encodeToString(facade.resolveImage(sourceId, page))
+    }
+
+    @ReactMethod
+    fun fetchImage(sourceId: String, pageJson: String, promise: Promise) = resolve(promise) {
+        val page = json.decodeFromString<PageDto>(pageJson)
+        json.encodeToString(facade.fetchImage(sourceId, page))
     }
 
     /** Runs [block] on the IO scope and bridges the result/error to the Promise. */
