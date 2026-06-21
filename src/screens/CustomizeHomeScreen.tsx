@@ -7,15 +7,28 @@ import { useHomeConfig, blockLabel, isBrowseBlock } from '../home/HomeConfig';
 import { Icon } from '../components/Icon';
 import { SourcePickerSheet } from '../components/SourcePickerSheet';
 import { getEngine } from '../engine';
-import { sortSourcesForPicker } from '../utils/sourceSelect';
+import { sortSourcesForPicker, pickDefaultSource } from '../utils/sourceSelect';
 import { langLabel } from '../utils/lang';
 import type { SourceDto } from '../engine/types';
+
+const UNIVERSAL = '__universal__';
 
 export function CustomizeHomeScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
-  const { blocks, toggle, move, remove, setSource } = useHomeConfig();
+  const {
+    blocks,
+    toggle,
+    move,
+    remove,
+    setSource,
+    clearSource,
+    clearAllSources,
+    universalSourceId,
+    universalSourceName,
+    setUniversalSource,
+  } = useHomeConfig();
 
   const [sources, setSources] = useState<SourceDto[]>([]);
   const [pickerFor, setPickerFor] = useState<string | null>(null);
@@ -28,6 +41,10 @@ export function CustomizeHomeScreen() {
   }, []);
 
   const pickerBlock = blocks.find(b => b.id === pickerFor);
+  const universalSource = sources.find(s => s.id === universalSourceId);
+  // What "Auto" actually resolves to, so the universal default isn't a mystery.
+  const autoDefault = sources.length ? pickDefaultSource(sources) : undefined;
+  const hasOverrides = blocks.some(b => b.sourceId);
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
@@ -43,7 +60,55 @@ export function CustomizeHomeScreen() {
 
       <ScrollView contentContainerStyle={{ padding: theme.spacing.lg, paddingBottom: 40 }}>
         <Text style={{ color: theme.colors.textMuted, textAlign: 'center', marginBottom: 18, fontSize: 13 }}>
-          Reorder sections, toggle them, and pick which source each one pulls from.
+          Pick one source for the whole home screen, or override individual sections.
+        </Text>
+
+        <View style={[styles.block, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+          <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>Universal source</Text>
+          <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginTop: 2 }}>
+            Every section uses this unless it has its own override.
+          </Text>
+          <Pressable
+            onPress={() => setPickerFor(UNIVERSAL)}
+            style={({ pressed }) => [
+              styles.sourceRow,
+              { borderColor: theme.colors.border, opacity: pressed ? 0.7 : 1 },
+            ]}
+          >
+            <Icon name="globe" size={15} color={theme.colors.accent} />
+            <Text style={{ color: theme.colors.textMuted, fontSize: 13, flex: 1 }} numberOfLines={1}>
+              {universalSource?.name ??
+                universalSourceName ??
+                (autoDefault ? `Auto \u00B7 ${autoDefault.name}` : 'Auto (smart default)')}
+            </Text>
+            {universalSource ? (
+              <Text style={[styles.langTag, { color: theme.colors.textMuted, borderColor: theme.colors.border }]}>
+                {langLabel(universalSource.lang)}
+              </Text>
+            ) : null}
+            {universalSourceId ? (
+              <Pressable hitSlop={8} onPress={() => setUniversalSource(undefined, undefined)}>
+                <Icon name="close" size={16} color={theme.colors.textFaint} />
+              </Pressable>
+            ) : null}
+            <Icon name="chevronRight" size={15} color={theme.colors.textFaint} />
+          </Pressable>
+
+          {hasOverrides ? (
+            <Pressable
+              onPress={clearAllSources}
+              style={({ pressed }) => [styles.applyAll, { opacity: pressed ? 0.6 : 1 }]}
+            >
+              <Icon name="refresh" size={14} color={theme.colors.accent} />
+              <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 12.5 }}>
+                Apply to all sections
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
+
+        <Text style={{ color: theme.colors.textFaint, marginBottom: 10, marginTop: 4, fontSize: 12 }}>
+          SECTIONS
         </Text>
 
         {blocks.map((block, index) => {
@@ -101,12 +166,19 @@ export function CustomizeHomeScreen() {
                   <Text style={{ color: theme.colors.textMuted, fontSize: 13, flex: 1 }} numberOfLines={1}>
                     {blockSource
                       ? blockSource.name
-                      : block.sourceName ?? 'Auto (first available source)'}
+                      : universalSource
+                        ? `Universal \u00B7 ${universalSource.name}`
+                        : 'Auto (smart default)'}
                   </Text>
                   {blockSource ? (
-                    <Text style={[styles.langTag, { color: theme.colors.textMuted, borderColor: theme.colors.border }]}>
-                      {langLabel(blockSource.lang)}
-                    </Text>
+                    <>
+                      <Text style={[styles.langTag, { color: theme.colors.textMuted, borderColor: theme.colors.border }]}>
+                        {langLabel(blockSource.lang)}
+                      </Text>
+                      <Pressable hitSlop={8} onPress={() => clearSource(block.id)}>
+                        <Icon name="close" size={16} color={theme.colors.textFaint} />
+                      </Pressable>
+                    </>
                   ) : null}
                   <Icon name="chevronRight" size={15} color={theme.colors.textFaint} />
                 </Pressable>
@@ -123,10 +195,12 @@ export function CustomizeHomeScreen() {
       <SourcePickerSheet
         visible={pickerFor != null}
         sources={sources}
-        selectedId={pickerBlock?.sourceId ?? ''}
+        selectedId={(pickerFor === UNIVERSAL ? universalSourceId : pickerBlock?.sourceId) ?? ''}
         onSelect={id => {
           const s = sources.find(x => x.id === id);
-          if (pickerFor && s) setSource(pickerFor, s.id, s.name);
+          if (!s) return;
+          if (pickerFor === UNIVERSAL) setUniversalSource(s.id, s.name);
+          else if (pickerFor) setSource(pickerFor, s.id, s.name);
         }}
         onClose={() => setPickerFor(null)}
       />
@@ -166,6 +240,13 @@ const styles = StyleSheet.create({
     marginTop: 12,
     paddingTop: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  applyAll: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 10,
   },
   langTag: {
     fontSize: 11,

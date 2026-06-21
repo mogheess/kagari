@@ -28,6 +28,8 @@ export type IconName =
   | 'columns'
   | 'arrowRight'
   | 'trash'
+  | 'refresh'
+  | 'edit'
   | 'globe';
 
 interface IconProps {
@@ -93,6 +95,13 @@ function renderPaths(
         <>
           <Path {...c} d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
           <Path {...c} d="M13.5 21a2 2 0 0 1-3 0" />
+        </>
+      );
+    case 'refresh':
+      return (
+        <>
+          <Polyline {...c} points="23 4 23 10 17 10" />
+          <Path {...c} d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
         </>
       );
     case 'profile':
@@ -213,6 +222,13 @@ function renderPaths(
           <Polyline {...c} points="4,7 20,7" />
           <Path {...c} d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
           <Path {...c} d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13" />
+        </>
+      );
+    case 'edit':
+      return (
+        <>
+          <Path {...c} d="M12 20h9" />
+          <Path {...c} d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
         </>
       );
     case 'globe':

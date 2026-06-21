@@ -1,28 +1,23 @@
 import React, { useMemo, useState } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  FlatList,
-  Pressable,
-  Modal,
-  StyleSheet,
-} from 'react-native';
+import { View, Text, TextInput, FlatList, Pressable, Modal, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeProvider';
 import { Icon } from './Icon';
 import { langLabel } from '../utils/lang';
 import { LanguageFilterRow } from './LanguageFilterRow';
 import { useEnabledLanguages, filterByLanguages } from '../sources/languageFilter';
+import { usePinnedSources, togglePinned } from '../sources/pinned';
 import type { SourceDto } from '../engine/types';
 
-interface SourcePickerSheetProps {
+interface GlobalSourcesSheetProps {
   visible: boolean;
   sources: SourceDto[];
-  selectedId: string;
-  onSelect: (id: string) => void;
   onClose: () => void;
 }
+
+type Row =
+  | { kind: 'group'; key: string; label: string }
+  | { kind: 'source'; key: string; source: SourceDto };
 
 /** Cleans an extension package id into a readable group label. */
 function extLabel(pkg: string): string {
@@ -30,26 +25,19 @@ function extLabel(pkg: string): string {
   return seg.charAt(0).toUpperCase() + seg.slice(1);
 }
 
-type Row =
-  | { kind: 'group'; key: string; label: string; count: number }
-  | { kind: 'source'; key: string; source: SourceDto };
-
 /**
- * Bottom-sheet source selector. Replaces a long, repetitive chip bar with a
- * searchable, grouped list — many extensions expose one source per language,
- * so grouping by extension keeps duplicates legible.
+ * Multi-select chooser for which sources global search queries. This is the
+ * "pinned" set: checking a source includes it in global search. Grouped by
+ * extension and filterable, matching the single-select `SourcePickerSheet`.
  */
-export function SourcePickerSheet({
-  visible,
-  sources,
-  selectedId,
-  onSelect,
-  onClose,
-}: SourcePickerSheetProps) {
+export function GlobalSourcesSheet({ visible, sources, onClose }: GlobalSourcesSheetProps) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const pinned = usePinnedSources();
   const [query, setQuery] = useState('');
   const enabledLangs = useEnabledLanguages();
+
+  const pinnedCount = pinned.length;
 
   const rows = useMemo<Row[]>(() => {
     const byLang = filterByLanguages(sources, enabledLangs);
@@ -81,7 +69,7 @@ export function SourcePickerSheet({
           a.lang.localeCompare(b.lang) ||
           a.name.localeCompare(b.name),
       );
-      out.push({ kind: 'group', key: `g:${pkg}`, label: extLabel(pkg), count: list.length });
+      out.push({ kind: 'group', key: `g:${pkg}`, label: extLabel(pkg) });
       for (const s of list) out.push({ kind: 'source', key: s.id, source: s });
     }
     return out;
@@ -93,27 +81,23 @@ export function SourcePickerSheet({
       <View
         style={[
           styles.sheet,
-          {
-            backgroundColor: theme.colors.bg,
-            paddingBottom: insets.bottom + 8,
-            borderColor: theme.colors.border,
-          },
+          { backgroundColor: theme.colors.bg, paddingBottom: insets.bottom + 8, borderColor: theme.colors.border },
         ]}
       >
         <View style={styles.grabber} />
         <View style={styles.headerRow}>
-          <Text style={[theme.typography.heading, { color: theme.colors.text }]}>Sources</Text>
+          <View>
+            <Text style={[theme.typography.heading, { color: theme.colors.text }]}>Search sources</Text>
+            <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginTop: 2 }}>
+              {pinnedCount > 0 ? `${pinnedCount} selected for global search` : 'Select sources to search'}
+            </Text>
+          </View>
           <Pressable hitSlop={10} onPress={onClose}>
             <Icon name="close" size={22} color={theme.colors.textMuted} />
           </Pressable>
         </View>
 
-        <View
-          style={[
-            styles.search,
-            { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
-          ]}
-        >
+        <View style={[styles.search, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
           <Icon name="search" size={17} color={theme.colors.textMuted} />
           <TextInput
             value={query}
@@ -137,27 +121,33 @@ export function SourcePickerSheet({
             if (item.kind === 'group') {
               return (
                 <Text style={[styles.groupLabel, { color: theme.colors.textFaint }]}>
-                  {item.label.toUpperCase()} · {item.count}
+                  {item.label.toUpperCase()}
                 </Text>
               );
             }
             const s = item.source;
-            const active = s.id === selectedId;
+            const checked = pinned.includes(s.id);
             return (
               <Pressable
-                onPress={() => {
-                  onSelect(s.id);
-                  onClose();
-                }}
+                onPress={() => togglePinned(s.id)}
                 style={({ pressed }) => [
                   styles.row,
                   { backgroundColor: pressed ? theme.colors.surface : 'transparent' },
                 ]}
               >
+                <View
+                  style={[
+                    styles.checkbox,
+                    {
+                      borderColor: checked ? theme.colors.accent : theme.colors.border,
+                      backgroundColor: checked ? theme.colors.accent : 'transparent',
+                    },
+                  ]}
+                >
+                  {checked ? <Icon name="check" size={14} color={theme.colors.onAccent} /> : null}
+                </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
-                    {s.name}
-                  </Text>
+                  <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>{s.name}</Text>
                   <View style={styles.tags}>
                     <Text style={[styles.langTag, { color: theme.colors.textMuted, borderColor: theme.colors.border }]}>
                       {langLabel(s.lang)}
@@ -169,7 +159,6 @@ export function SourcePickerSheet({
                     ) : null}
                   </View>
                 </View>
-                {active ? <Icon name="check" size={20} color={theme.colors.accent} /> : null}
               </Pressable>
             );
           }}
@@ -243,6 +232,14 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 8,
     borderRadius: 10,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   tags: {
     flexDirection: 'row',

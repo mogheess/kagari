@@ -1,77 +1,238 @@
-import React from 'react';
-import { View, Text, FlatList, Image, Pressable, StyleSheet } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { View, Text, StyleSheet, Pressable, Image, FlatList } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme } from '../theme/ThemeProvider';
-import { useAsync } from '../hooks/useAsync';
-import { getEngine } from '../engine';
+import { Icon } from '../components/Icon';
+import { useHistory, removeFromHistory, clearHistory, historyToManga, type HistoryEntry } from '../library/history';
+import { seededColor } from '../utils/color';
 import type { RootStackParamList } from '../navigation/types';
-import type { MangaDto } from '../engine/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
+type Tab = 'updates' | 'history';
 const TAB_BAR_SPACE = 110;
+
+function dayLabel(ms: number): string {
+  const d = new Date(ms);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  if (sameDay(d, today)) return 'Today';
+  if (sameDay(d, yesterday)) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function timeAgo(ms: number): string {
+  const diff = Date.now() - ms;
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  return new Date(ms).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
+type Row = { kind: 'header'; key: string; label: string } | { kind: 'entry'; key: string; entry: HistoryEntry };
 
 export function UpdatesScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
-  const engine = getEngine();
+  const history = useHistory();
+  const [tab, setTab] = useState<Tab>('history');
 
-  const { data } = useAsync<MangaDto[]>(async () => {
-    const res = await engine.getLatest('1002', 1);
-    return res.manga;
-  }, []);
+  const rows = useMemo<Row[]>(() => {
+    const out: Row[] = [];
+    let lastDay = '';
+    for (const e of history) {
+      const label = dayLabel(e.readAt);
+      if (label !== lastDay) {
+        out.push({ kind: 'header', key: `h:${label}`, label });
+        lastDay = label;
+      }
+      out.push({ kind: 'entry', key: `${e.sourceId}:${e.mangaUrl}`, entry: e });
+    }
+    return out;
+  }, [history]);
+
+  const openManga = (e: HistoryEntry) =>
+    navigation.navigate('MangaDetail', {
+      sourceId: e.sourceId,
+      mangaUrl: e.mangaUrl,
+      preview: historyToManga(e),
+    });
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
-      <FlatList
-        data={data ?? []}
-        keyExtractor={(m, i) => `${m.url}:${i}`}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: TAB_BAR_SPACE }}
-        ListHeaderComponent={
-          <Text
-            style={[
-              theme.typography.title,
-              { color: theme.colors.text, paddingHorizontal: theme.spacing.lg, marginBottom: 12 },
-            ]}
-          >
-            Updates
-          </Text>
-        }
-        renderItem={({ item, index }) => (
-          <Pressable
-            onPress={() =>
-              navigation.navigate('MangaDetail', {
-                sourceId: item.sourceId,
-                mangaUrl: item.url,
-                preview: item,
-              })
+      <View style={{ paddingTop: insets.top + 8, paddingHorizontal: theme.spacing.lg }}>
+        <View style={styles.titleRow}>
+          <Text style={[theme.typography.title, { color: theme.colors.text }]}>Activity</Text>
+          {tab === 'history' && history.length > 0 ? (
+            <Pressable hitSlop={8} onPress={clearHistory}>
+              <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 13 }}>Clear</Text>
+            </Pressable>
+          ) : null}
+        </View>
+
+        <View style={[styles.segment, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+          {(['updates', 'history'] as const).map(t => {
+            const active = tab === t;
+            return (
+              <Pressable
+                key={t}
+                onPress={() => setTab(t)}
+                style={[styles.segmentItem, active && { backgroundColor: theme.colors.accent }]}
+              >
+                <Text
+                  style={{
+                    color: active ? theme.colors.onAccent : theme.colors.textMuted,
+                    fontWeight: '700',
+                    fontSize: 13,
+                  }}
+                >
+                  {t === 'updates' ? 'Updates' : 'History'}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+
+      {tab === 'updates' ? (
+        <EmptyState
+          icon="updates"
+          title="No updates yet"
+          subtitle="New chapters from the manga in your library will appear here once chapter tracking is available."
+        />
+      ) : history.length === 0 ? (
+        <EmptyState
+          icon="book"
+          title="No reading history"
+          subtitle="Chapters you open show up here so you can pick up right where you left off."
+        />
+      ) : (
+        <FlatList
+          data={rows}
+          keyExtractor={r => r.key}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingTop: 14, paddingBottom: TAB_BAR_SPACE, paddingHorizontal: theme.spacing.lg }}
+          renderItem={({ item }) => {
+            if (item.kind === 'header') {
+              return <Text style={[styles.dayHeader, { color: theme.colors.textFaint }]}>{item.label.toUpperCase()}</Text>;
             }
-            style={[styles.row, { paddingHorizontal: theme.spacing.lg }]}
-          >
-            <Image
-              source={{ uri: item.thumbnailUrl }}
-              style={[styles.thumb, { backgroundColor: theme.colors.skeleton }]}
+            return (
+              <HistoryRow
+                entry={item.entry}
+                onPress={() => openManga(item.entry)}
+                onRemove={() => removeFromHistory(item.entry.sourceId, item.entry.mangaUrl)}
+              />
+            );
+          }}
+        />
+      )}
+    </View>
+  );
+}
+
+function HistoryRow({
+  entry,
+  onPress,
+  onRemove,
+}: {
+  entry: HistoryEntry;
+  onPress: () => void;
+  onRemove: () => void;
+}) {
+  const theme = useTheme();
+  const tint = seededColor(entry.thumbnailUrl ?? entry.title, 0.5, 0.3);
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.row, { opacity: pressed ? 0.7 : 1 }]}
+    >
+      <View style={[styles.thumb, { backgroundColor: tint }]}>
+        {entry.thumbnailUrl ? (
+          <Image source={{ uri: entry.thumbnailUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        ) : null}
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]} numberOfLines={1}>
+          {entry.title}
+        </Text>
+        <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginTop: 2 }} numberOfLines={1}>
+          {entry.chapterName}
+        </Text>
+        <Text style={{ color: theme.colors.textFaint, fontSize: 11.5, marginTop: 3 }}>
+          {entry.lastPage && entry.pageCount
+            ? `Page ${Math.min(entry.lastPage, entry.pageCount)} of ${entry.pageCount} \u00B7 ${timeAgo(entry.readAt)}`
+            : timeAgo(entry.readAt)}
+        </Text>
+        {entry.lastPage && entry.pageCount ? (
+          <View style={[styles.progressTrack, { backgroundColor: theme.colors.border }]}>
+            <View
+              style={[
+                styles.progressFill,
+                {
+                  backgroundColor: theme.colors.accent,
+                  width: `${Math.min(100, Math.round((entry.lastPage / entry.pageCount) * 100))}%`,
+                },
+              ]}
             />
-            <View style={{ flex: 1 }}>
-              <Text numberOfLines={1} style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
-                {item.title}
-              </Text>
-              <Text style={{ color: theme.colors.textMuted, fontSize: 13, marginTop: 2 }}>
-                Chapter {(index % 50) + 1}
-              </Text>
-            </View>
-            <Text style={{ color: theme.colors.textFaint, fontSize: 12 }}>{index + 1}h ago</Text>
-          </Pressable>
-        )}
-      />
+          </View>
+        ) : null}
+      </View>
+      <Pressable hitSlop={10} onPress={onRemove} style={{ padding: 4 }}>
+        <Icon name="close" size={18} color={theme.colors.textFaint} />
+      </Pressable>
+    </Pressable>
+  );
+}
+
+function EmptyState({ icon, title, subtitle }: { icon: 'updates' | 'book'; title: string; subtitle: string }) {
+  const theme = useTheme();
+  return (
+    <View style={[styles.center, { paddingBottom: TAB_BAR_SPACE }]}>
+      <View style={[styles.card, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+        <Icon name={icon} size={26} color={theme.colors.accent} />
+        <Text style={[theme.typography.heading, { color: theme.colors.text, marginTop: 12 }]}>{title}</Text>
+        <Text style={[styles.sub, { color: theme.colors.textMuted }]}>{subtitle}</Text>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  segment: {
+    flexDirection: 'row',
+    padding: 3,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: 3,
+    marginBottom: 4,
+  },
+  segmentItem: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    borderRadius: 9,
+  },
+  dayHeader: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    marginTop: 16,
+    marginBottom: 6,
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -79,8 +240,40 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   thumb: {
-    width: 44,
-    height: 60,
+    width: 46,
+    height: 64,
     borderRadius: 8,
+    overflow: 'hidden',
+  },
+  progressTrack: {
+    height: 3,
+    borderRadius: 2,
+    marginTop: 6,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: 3,
+    borderRadius: 2,
+  },
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  card: {
+    width: '100%',
+    maxWidth: 420,
+    alignItems: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 20,
+    paddingVertical: 28,
+    paddingHorizontal: 22,
+  },
+  sub: {
+    fontSize: 13.5,
+    lineHeight: 19,
+    textAlign: 'center',
+    marginTop: 6,
   },
 });

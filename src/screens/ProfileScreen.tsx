@@ -79,7 +79,7 @@ export function ProfileScreen() {
         />
         <Row icon="grid" label="Customize Home" onPress={() => navigation.navigate('CustomizeHome')} />
         <Row icon="bookmark" label="Categories" onPress={() => navigation.navigate('Categories')} />
-        <Row icon="download" label="Downloads" />
+        <Row icon="download" label="Downloads" onPress={() => navigation.navigate('Downloads')} />
       </ScrollView>
     </View>
   );

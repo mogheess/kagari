@@ -101,16 +101,18 @@ On first launch the app logs which engine it resolved:
 - **`adb: device offline` / "waiting for device"** → `adb reconnect offline`
   (or `adb kill-server && adb start-server`); target `emulator-5554`.
 - **Stray Gradle daemons eating FDs** → `cd android && ./gradlew --stop`.
-- **A chapter/page fails to load on some sources** → known gap: the reader loads
-  page URLs with RN `<Image>` rather than the source's OkHttp client, so
-  scrambled/Cloudflare-gated images may not render. See "Known gaps" in
-  `AGENTS.md`.
+- **A chapter/page fails to load on some sources** → reader pages now fetch
+  natively through the source's OkHttp client (`fetchImage`), cache to a
+  `file://`, and tile tall images. If a specific source still fails, check
+  `adb logcat -s KagariReaderImage` — a few sources need custom image-descramble
+  interceptors (see "Known gaps" in `AGENTS.md`).
 
 ## Native engine notes
 
 The native runtime that lets installed sources actually return data lives under
 `android/app/src/main/java/eu/kanade/tachiyomi/` (vendored source-api +
 `HttpSource`, `NetworkHelper` with Cloudflare/cookie/UA interceptors, Injekt DI)
-and `com/manhwa/engine/` (`EngineFacade`, loaders, mappers, bridge). See
-**AGENTS.md → The engine** for the full breakdown and the remaining TODOs
-(OkHttp-backed reader image component; untrusted-extension trust prompt).
+and `com/manhwa/engine/` (`EngineFacade`, loaders, mappers, bridge, native
+`fetchImage` reader cache). See **AGENTS.md → The engine** and **Known gaps**
+for the full breakdown and remaining TODOs (suspend 1.6 source API, search
+filter serialization, read-progress/Updates storage, trust-prompt UI).

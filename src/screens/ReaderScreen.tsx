@@ -17,6 +17,8 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAsync } from '../hooks/useAsync';
 import { getEngine } from '../engine';
+import { recordProgress } from '../library/history';
+import { useDownloadEntry } from '../library/downloads';
 import { Icon } from '../components/Icon';
 import { useTheme } from '../theme/ThemeProvider';
 import {
@@ -50,9 +52,18 @@ export function ReaderScreen() {
   const [mode, setMode] = useState<ReaderMode>(getReaderMode());
   const [settingsOpen, setSettingsOpen] = useState(false);
 
+  // If this chapter is downloaded, read its pages from local storage (offline)
+  // instead of resolving page URLs over the network.
+  const downloadEntry = useDownloadEntry(params.sourceId, params.chapter.url);
+  const offlinePageCount = downloadEntry?.status === 'done' ? downloadEntry.pageCount : 0;
+  const offline = offlinePageCount > 0;
+
   const { data: pages, loading, error } = useAsync<PageDto[]>(
-    () => engine.getPages(params.sourceId, params.chapter.url),
-    [params.chapter.url],
+    () =>
+      offline
+        ? Promise.resolve(Array.from({ length: offlinePageCount }, (_, i) => ({ index: i })))
+        : engine.getPages(params.sourceId, params.chapter.url),
+    [params.chapter.url, offline, offlinePageCount],
   );
 
   const total = pages?.length ?? 0;
@@ -67,10 +78,31 @@ export function ReaderScreen() {
     if (first?.index != null) setCurrent(first.index);
   }).current;
 
+  // Persist reading progress (furthest page) like Mihon — debounced while
+  // reading, then flushed on exit. Works for any source, library or not.
+  const progressRef = useRef({ page: 0, total: 0 });
+  useEffect(() => {
+    if (total <= 0) return;
+    progressRef.current = { page: current + 1, total };
+    const t = setTimeout(() => {
+      recordProgress(params.sourceId, params.mangaUrl, current + 1, total);
+    }, 600);
+    return () => clearTimeout(t);
+  }, [current, total, params.sourceId, params.mangaUrl]);
+
+  useEffect(() => {
+    return () => {
+      const { page, total: t } = progressRef.current;
+      if (t > 0) recordProgress(params.sourceId, params.mangaUrl, page, t);
+    };
+  }, [params.sourceId, params.mangaUrl]);
+
   const renderPage = useCallback(
     ({ item }: { item: PageDto }) => (
       <ReaderPage
         sourceId={params.sourceId}
+        chapterUrl={params.chapter.url}
+        downloaded={offline}
         page={item}
         width={width}
         screenHeight={height}
@@ -78,7 +110,7 @@ export function ReaderScreen() {
         onPress={toggleChrome}
       />
     ),
-    [params.sourceId, width, height, paged, toggleChrome],
+    [params.sourceId, params.chapter.url, offline, width, height, paged, toggleChrome],
   );
 
   return (
@@ -128,7 +160,6 @@ export function ReaderScreen() {
         />
       )}
 
-      {/* Top bar */}
       {chrome ? (
         <View style={[styles.topBar, { paddingTop: insets.top + 6 }]}>
           <Pressable hitSlop={10} onPress={() => navigation.goBack()}>
@@ -143,7 +174,6 @@ export function ReaderScreen() {
         </View>
       ) : null}
 
-      {/* Bottom bar */}
       {chrome && total > 0 ? (
         <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 12 }]}>
           <View style={styles.progressTrack}>
@@ -181,11 +211,6 @@ function labelFor(mode: ReaderMode): string {
   return READER_MODES.find(m => m.mode === mode)?.label ?? mode;
 }
 
-function logReaderImage(message: string, details: Record<string, unknown>): void {
-  if (!__DEV__) return;
-  console.log(`[reader:image] ${message}`, details);
-}
-
 function wait(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -199,10 +224,14 @@ function drainImageFetchQueue(): void {
   }
 }
 
-function enqueueNativeImageFetch(sourceId: string, page: PageDto): Promise<ImageFileDto> {
+function enqueueNativeImageFetch(
+  sourceId: string,
+  page: PageDto,
+  forceRefresh = false,
+): Promise<ImageFileDto> {
   return new Promise((resolve, reject) => {
     const run = () => {
-      fetchNativeImageWithRetry(sourceId, page)
+      fetchNativeImageWithRetry(sourceId, page, forceRefresh)
         .then(resolve)
         .catch(reject)
         .finally(() => {
@@ -218,20 +247,16 @@ function enqueueNativeImageFetch(sourceId: string, page: PageDto): Promise<Image
 async function fetchNativeImageWithRetry(
   sourceId: string,
   page: PageDto,
+  forceRefresh: boolean,
 ): Promise<ImageFileDto> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= IMAGE_FETCH_RETRIES; attempt += 1) {
     try {
-      return await getEngine().fetchImage(sourceId, page);
+      // Force a fresh download on the user's manual retry, and on any later
+      // auto-retry attempt, so a corrupt cached file can't keep coming back.
+      return await getEngine().fetchImage(sourceId, page, forceRefresh || attempt > 1);
     } catch (error) {
       lastError = error;
-      logReaderImage('native fetch attempt failed', {
-        page: page.index,
-        attempt,
-        message: error instanceof Error ? error.message : String(error),
-        pageUrl: page.url,
-        imageUrl: page.imageUrl,
-      });
       if (attempt < IMAGE_FETCH_RETRIES) {
         await wait(250 * attempt);
       }
@@ -242,6 +267,8 @@ async function fetchNativeImageWithRetry(
 
 function ReaderPage({
   sourceId,
+  chapterUrl,
+  downloaded,
   page,
   width,
   screenHeight,
@@ -249,6 +276,8 @@ function ReaderPage({
   onPress,
 }: {
   sourceId: string;
+  chapterUrl: string;
+  downloaded: boolean;
   page: PageDto;
   width: number;
   screenHeight: number;
@@ -259,6 +288,9 @@ function ReaderPage({
   const [uri, setUri] = useState<string | null>(null);
   const [tiles, setTiles] = useState<ImageTileDto[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+
+  const retry = useCallback(() => setReloadToken(t => t + 1), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -267,45 +299,31 @@ function ReaderPage({
     setLoadError(null);
     setRatio(1.5);
 
-    enqueueNativeImageFetch(sourceId, page)
+    const request = downloaded
+      ? getEngine().fetchDownloadedImage(sourceId, chapterUrl, page.index)
+      : enqueueNativeImageFetch(sourceId, page, reloadToken > 0);
+    request
       .then(image => {
-        const sortedTiles = sortTiles(image);
-        logReaderImage('native fetch', {
-          page: page.index,
-          cached: image.cached,
-          bytes: image.bytes,
-          nativeWidth: image.width,
-          nativeHeight: image.height,
-          contentType: image.contentType,
-          tiles: sortedTiles.length,
-          sourceUrl: image.sourceUrl,
-          uri: image.uri,
-        });
         if (!cancelled) {
           setUri(image.uri);
-          setTiles(sortedTiles);
+          setTiles(sortTiles(image));
         }
       })
       .catch(error => {
-        const message = error instanceof Error ? error.message : String(error);
-        logReaderImage('native fetch failed', {
-          page: page.index,
-          message,
-        });
-        if (!cancelled) setLoadError(message);
+        if (!cancelled) setLoadError(error instanceof Error ? error.message : String(error));
       });
 
     return () => {
       cancelled = true;
     };
-  }, [page, sourceId]);
-
-  const tileHeight = tiles.length > 0 ? scaledTilesHeight(tiles, width) : 0;
+  }, [page, sourceId, chapterUrl, downloaded, reloadToken]);
 
   if (layout === 'page') {
     return (
       <Pressable
         onPress={onPress}
+        onLongPress={retry}
+        delayLongPress={350}
         style={{ width, height: screenHeight, justifyContent: 'center', backgroundColor: '#000' }}
       >
         {uri ? (
@@ -314,21 +332,9 @@ function ReaderPage({
             style={{ width, height: screenHeight }}
             resizeMode="contain"
             resizeMethod="scale"
-            onLoad={e => {
-              const { width: w, height: h } = e.nativeEvent.source;
-              logReaderImage('rendered page image', {
-                page: page.index,
-                layout,
-                decodedWidth: w,
-                decodedHeight: h,
-                viewWidth: width,
-                viewHeight: screenHeight,
-                uri,
-              });
-            }}
           />
         ) : loadError ? (
-          <ReaderImageError message={loadError} />
+          <ReaderImageError message={loadError} onRetry={retry} />
         ) : (
           <ActivityIndicator color="#fff" />
         )}
@@ -340,6 +346,8 @@ function ReaderPage({
     return (
       <Pressable
         onPress={onPress}
+        onLongPress={retry}
+        delayLongPress={350}
         style={{ width, backgroundColor: '#0a0a0a' }}
       >
         {tiles.map(tile => {
@@ -351,20 +359,6 @@ function ReaderPage({
               style={{ width, height }}
               resizeMode="stretch"
               resizeMethod="scale"
-              onLoad={e => {
-                const { width: w, height: h } = e.nativeEvent.source;
-                logReaderImage('rendered tile image', {
-                  page: page.index,
-                  tile: tile.index,
-                  decodedWidth: w,
-                  decodedHeight: h,
-                  viewWidth: width,
-                  viewHeight: height,
-                  tileUri: tile.uri,
-                  fullUri: uri,
-                  totalViewHeight: tileHeight,
-                });
-              }}
             />
           );
         })}
@@ -375,6 +369,8 @@ function ReaderPage({
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={retry}
+      delayLongPress={350}
       style={{ width, height: width * ratio, backgroundColor: '#0a0a0a', justifyContent: 'center' }}
     >
       {uri ? (
@@ -385,20 +381,11 @@ function ReaderPage({
           resizeMethod="scale"
           onLoad={e => {
             const { width: w, height: h } = e.nativeEvent.source;
-            logReaderImage('rendered strip image', {
-              page: page.index,
-              layout,
-              decodedWidth: w,
-              decodedHeight: h,
-              viewWidth: width,
-              viewHeight: width * ratio,
-              uri,
-            });
             if (w && h) setRatio(h / w);
           }}
         />
       ) : loadError ? (
-        <ReaderImageError message={loadError} />
+        <ReaderImageError message={loadError} onRetry={retry} />
       ) : (
         <ActivityIndicator color="#fff" />
       )}
@@ -406,21 +393,26 @@ function ReaderPage({
   );
 }
 
-function ReaderImageError({ message }: { message: string }) {
+function ReaderImageError({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <View style={styles.imageError}>
+      <Icon name="refresh" size={24} color="rgba(255,255,255,0.55)" />
       <Text style={styles.imageErrorTitle}>Image failed to load</Text>
       <Text style={styles.imageErrorText}>{message}</Text>
+      <Pressable
+        onPress={onRetry}
+        hitSlop={8}
+        style={({ pressed }) => [styles.retryBtn, { opacity: pressed ? 0.8 : 1 }]}
+      >
+        <Icon name="refresh" size={15} color="#000" />
+        <Text style={styles.retryBtnText}>Retry</Text>
+      </Pressable>
     </View>
   );
 }
 
 function sortTiles(image: ImageFileDto): ImageTileDto[] {
   return [...(image.tiles ?? [])].sort((a, b) => a.index - b.index);
-}
-
-function scaledTilesHeight(tiles: ImageTileDto[], width: number): number {
-  return tiles.reduce((sum, tile) => sum + Math.max(1, Math.round((width * tile.height) / tile.width)), 0);
 }
 
 function ReaderSettingsSheet({
@@ -518,6 +510,21 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     marginTop: 8,
     textAlign: 'center',
+  },
+  retryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    marginTop: 16,
+    paddingHorizontal: 18,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+  },
+  retryBtnText: {
+    color: '#000',
+    fontSize: 14,
+    fontWeight: '700',
   },
   topBar: {
     position: 'absolute',

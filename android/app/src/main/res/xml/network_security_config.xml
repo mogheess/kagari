@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Many manga sources (and especially their image CDNs) still serve content over
+  plain HTTP. Release builds disable cleartext traffic by default, which would
+  silently break those sources. Mihon permits cleartext for the same reason, so
+  we opt in here explicitly. System CA trust anchors are used for HTTPS.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

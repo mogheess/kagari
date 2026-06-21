@@ -8,6 +8,7 @@ import { ReaderScreen } from '../screens/ReaderScreen';
 import { CustomizeHomeScreen } from '../screens/CustomizeHomeScreen';
 import { ExtensionsScreen } from '../screens/ExtensionsScreen';
 import { CategoriesScreen } from '../screens/CategoriesScreen';
+import { DownloadsScreen } from '../screens/DownloadsScreen';
 import type { RootStackParamList } from './types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -43,13 +44,10 @@ export function RootNavigator() {
           component={ReaderScreen}
           options={{ animation: 'fade' }}
         />
-        <Stack.Screen
-          name="CustomizeHome"
-          component={CustomizeHomeScreen}
-          options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
-        />
+        <Stack.Screen name="CustomizeHome" component={CustomizeHomeScreen} />
         <Stack.Screen name="Extensions" component={ExtensionsScreen} />
         <Stack.Screen name="Categories" component={CategoriesScreen} />
+        <Stack.Screen name="Downloads" component={DownloadsScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

@@ -6,6 +6,8 @@ import {
   ScrollView,
   Pressable,
   StyleSheet,
+  ActivityIndicator,
+  Alert,
   useWindowDimensions,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
@@ -21,6 +23,13 @@ import { CategoryAssignSheet } from '../components/CategoryAssignSheet';
 import { seededColor, withAlpha } from '../utils/color';
 import { toggleFavorite, useFavorite, setMangaCategories } from '../library/favorites';
 import { useCategories } from '../library/categories';
+import { recordRead } from '../library/history';
+import {
+  useDownloadEntry,
+  enqueueDownload,
+  removeDownload,
+  retryDownload,
+} from '../library/downloads';
 import type { RootStackParamList } from '../navigation/types';
 import type { MangaDto, ChapterDto } from '../engine/types';
 
@@ -74,13 +83,15 @@ export function MangaDetailScreen() {
     setMangaCategories(params.sourceId, params.mangaUrl, next);
   };
 
-  const openReader = (chapter: ChapterDto) =>
+  const openReader = (chapter: ChapterDto) => {
+    if (manga) recordRead(manga, chapter);
     navigation.navigate('Reader', {
       sourceId: params.sourceId,
       mangaUrl: params.mangaUrl,
       chapter,
       chapters: chapters ?? [chapter],
     });
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
@@ -224,35 +235,27 @@ export function MangaDetailScreen() {
                 <Skeleton width="60%" height={14} />
               </View>
             ))
-          : (chapters ?? []).map((ch, i) => {
-              const read = i > (chapters?.length ?? 0) - 4; // sample: oldest few "read"
-              return (
-                <Pressable
-                  key={`${ch.url}:${i}`}
-                  onPress={() => openReader(ch)}
-                  style={({ pressed }) => [
-                    styles.chapterRow,
-                    { borderColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surface : 'transparent' },
-                  ]}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text
-                      style={[
-                        theme.typography.bodyStrong,
-                        { color: read ? theme.colors.textFaint : theme.colors.text },
-                      ]}
-                    >
-                      {ch.name}
-                    </Text>
-                    <Text style={{ color: theme.colors.textFaint, fontSize: 12, marginTop: 2 }}>
-                      {formatDate(ch.dateUpload)}
-                      {ch.scanlator ? `  \u00B7  ${ch.scanlator}` : ''}
-                    </Text>
-                  </View>
-                  <Icon name={read ? 'check' : 'download'} size={20} color={read ? theme.colors.accent : theme.colors.textMuted} />
-                </Pressable>
-              );
-            })}
+          : (chapters ?? []).map((ch, i) => (
+              <Pressable
+                key={`${ch.url}:${i}`}
+                onPress={() => openReader(ch)}
+                style={({ pressed }) => [
+                  styles.chapterRow,
+                  { borderColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surface : 'transparent' },
+                ]}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
+                    {ch.name}
+                  </Text>
+                  <Text style={{ color: theme.colors.textFaint, fontSize: 12, marginTop: 2 }}>
+                    {formatDate(ch.dateUpload)}
+                    {ch.scanlator ? `  \u00B7  ${ch.scanlator}` : ''}
+                  </Text>
+                </View>
+                <ChapterDownloadButton manga={manga} chapter={ch} />
+              </Pressable>
+            ))}
       </ScrollView>
 
       <CategoryAssignSheet
@@ -271,6 +274,73 @@ export function MangaDetailScreen() {
 
 function cap(s: string): string {
   return s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+/** Per-chapter download control: download / progress / done / retry. */
+function ChapterDownloadButton({
+  manga,
+  chapter,
+}: {
+  manga: MangaDto | undefined;
+  chapter: ChapterDto;
+}) {
+  const theme = useTheme();
+  const entry = useDownloadEntry(chapter.sourceId, chapter.url);
+  const status = entry?.status;
+
+  const onPress = () => {
+    if (!status) {
+      if (manga) enqueueDownload(manga, chapter);
+      return;
+    }
+    if (status === 'error') {
+      retryDownload(chapter.sourceId, chapter.url);
+      return;
+    }
+    if (status === 'done') {
+      Alert.alert('Remove download', `Delete the downloaded "${chapter.name}"?`, [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => removeDownload(chapter.sourceId, chapter.url),
+        },
+      ]);
+      return;
+    }
+    // queued or downloading -> cancel
+    removeDownload(chapter.sourceId, chapter.url);
+  };
+
+  let content: React.ReactNode;
+  if (status === 'done') {
+    content = (
+      <View style={[styles.dlDone, { backgroundColor: theme.colors.accent }]}>
+        <Icon name="check" size={12} color={theme.colors.bg} />
+      </View>
+    );
+  } else if (status === 'downloading') {
+    const pct =
+      entry && entry.pageCount > 0 ? Math.round((entry.downloaded / entry.pageCount) * 100) : null;
+    content =
+      pct != null ? (
+        <Text style={{ color: theme.colors.accent, fontSize: 11, fontWeight: '800' }}>{pct}%</Text>
+      ) : (
+        <ActivityIndicator size="small" color={theme.colors.accent} />
+      );
+  } else if (status === 'queued') {
+    content = <ActivityIndicator size="small" color={theme.colors.textMuted} />;
+  } else if (status === 'error') {
+    content = <Icon name="refresh" size={17} color="#E5604D" />;
+  } else {
+    content = <Icon name="download" size={18} color={theme.colors.textMuted} />;
+  }
+
+  return (
+    <Pressable hitSlop={10} onPress={onPress} style={styles.dlBtn}>
+      {content}
+    </Pressable>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -373,5 +443,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 13,
     borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  dlBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dlDone: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
