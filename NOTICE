@@ -1,0 +1,28 @@
+Manhwa
+Copyright 2026 The Manhwa Authors
+
+This product includes software developed as part of the Mihon and Tachiyomi
+projects (https://github.com/mihonapp/mihon, https://github.com/tachiyomiorg),
+licensed under the Apache License, Version 2.0.
+
+The following files are adaptations of Mihon/Tachiyomi "source-api" code and the
+extension loading mechanism. They have been modified for this project. The
+original copyright belongs to the Mihon/Tachiyomi contributors.
+
+  android/app/src/main/java/eu/kanade/tachiyomi/source/Source.kt
+  android/app/src/main/java/eu/kanade/tachiyomi/source/CatalogueSource.kt
+  android/app/src/main/java/eu/kanade/tachiyomi/source/SourceFactory.kt
+  android/app/src/main/java/eu/kanade/tachiyomi/source/online/HttpSource.kt
+  android/app/src/main/java/eu/kanade/tachiyomi/source/model/SManga.kt
+  android/app/src/main/java/eu/kanade/tachiyomi/source/model/SChapter.kt
+  android/app/src/main/java/eu/kanade/tachiyomi/source/model/Page.kt
+  android/app/src/main/java/eu/kanade/tachiyomi/source/model/Filter.kt
+  android/app/src/main/java/com/manhwa/engine/loader/ExtensionLoader.kt (mechanism)
+
+A copy of the Apache License, Version 2.0, is available at:
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Trademarks: "Tachiyomi" and "Mihon" names and logos are NOT licensed under
+Apache 2.0 and are not used as branding for this application. References to the
+`tachiyomi.extension*` metadata keys and `eu.kanade.tachiyomi.*` package names
+exist solely for functional compatibility with the existing extension ecosystem.
