@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
+  RefreshControl,
   useWindowDimensions,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
@@ -16,7 +17,7 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme } from '../theme/ThemeProvider';
 import { useAsync } from '../hooks/useAsync';
-import { getEngine } from '../engine';
+import { loadMangaDetails, loadChapters, invalidateManga } from '../engine/mangaCache';
 import { Icon } from '../components/Icon';
 import { Skeleton } from '../components/Skeleton';
 import { CategoryAssignSheet } from '../components/CategoryAssignSheet';
@@ -51,19 +52,28 @@ export function MangaDetailScreen() {
   const navigation = useNavigation<Nav>();
   const { params } = useRoute<DetailRoute>();
   const { width } = useWindowDimensions();
-  const engine = getEngine();
 
   const [expanded, setExpanded] = useState(false);
   const [catSheet, setCatSheet] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const { data: details } = useAsync<MangaDto>(
-    () => engine.getMangaDetails(params.sourceId, params.mangaUrl),
+  const { data: details, reload: reloadDetails } = useAsync<MangaDto>(
+    () => loadMangaDetails(params.sourceId, params.mangaUrl),
     [params.sourceId, params.mangaUrl],
   );
-  const { data: chapters, loading: chaptersLoading } = useAsync<ChapterDto[]>(
-    () => engine.getChapters(params.sourceId, params.mangaUrl),
+  const { data: chapters, loading: chaptersLoading, reload: reloadChapters } = useAsync<ChapterDto[]>(
+    () => loadChapters(params.sourceId, params.mangaUrl),
     [params.sourceId, params.mangaUrl],
   );
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    invalidateManga(params.sourceId, params.mangaUrl);
+    reloadDetails();
+    reloadChapters();
+    // The reloads resolve quickly; release the spinner after a short beat.
+    setTimeout(() => setRefreshing(false), 700);
+  }, [params.sourceId, params.mangaUrl, reloadDetails, reloadChapters]);
 
   const manga = details ?? params.preview;
   const tint = seededColor(manga?.thumbnailUrl ?? manga?.title ?? 'x', 0.5, 0.32);
@@ -95,7 +105,19 @@ export function MangaDetailScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 40 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.colors.accent}
+            colors={[theme.colors.accent]}
+            progressBackgroundColor={theme.colors.surface}
+          />
+        }
+      >
         {/* Backdrop */}
         <View style={{ height: backdropHeight }}>
           {manga?.thumbnailUrl ? (
