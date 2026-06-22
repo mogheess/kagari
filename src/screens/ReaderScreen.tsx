@@ -15,6 +15,14 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  useAnimatedReaction,
+  withTiming,
+  runOnJS,
+} from 'react-native-reanimated';
 import { useAsync } from '../hooks/useAsync';
 import { getEngine } from '../engine';
 import { recordProgress } from '../library/history';
@@ -51,6 +59,38 @@ export function ReaderScreen() {
   const [current, setCurrent] = useState(0);
   const [mode, setMode] = useState<ReaderMode>(getReaderMode());
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [zoomed, setZoomed] = useState(false);
+  // Controlled per-page reload counters so a long-press (or the error Retry
+  // button) can force a fresh fetch of a specific page.
+  const [reloadTokens, setReloadTokens] = useState<Record<number, number>>({});
+  const retryPage = useCallback(
+    (index: number) => setReloadTokens(m => ({ ...m, [index]: (m[index] ?? 0) + 1 })),
+    [],
+  );
+
+  const scale = useSharedValue(1);
+  const savedScale = useSharedValue(1);
+  const tx = useSharedValue(0);
+  const ty = useSharedValue(0);
+  const savedTx = useSharedValue(0);
+  const savedTy = useSharedValue(0);
+
+  const resetZoom = useCallback(() => {
+    scale.value = withTiming(1);
+    savedScale.value = 1;
+    tx.value = withTiming(0);
+    ty.value = withTiming(0);
+    savedTx.value = 0;
+    savedTy.value = 0;
+  }, [scale, savedScale, tx, ty, savedTx, savedTy]);
+
+  // Keep `zoomed` (drives scroll-lock) in sync with the live scale.
+  useAnimatedReaction(
+    () => scale.value > 1.01,
+    (z, prev) => {
+      if (z !== prev) runOnJS(setZoomed)(z);
+    },
+  );
 
   // If this chapter is downloaded, read its pages from local storage (offline)
   // instead of resolving page URLs over the network.
@@ -107,10 +147,82 @@ export function ReaderScreen() {
         width={width}
         screenHeight={height}
         layout={paged ? 'page' : 'strip'}
-        onPress={toggleChrome}
+        reloadToken={reloadTokens[item.index] ?? 0}
+        onRetry={() => retryPage(item.index)}
       />
     ),
-    [params.sourceId, params.chapter.url, offline, width, height, paged, toggleChrome],
+    [params.sourceId, params.chapter.url, offline, width, height, paged, reloadTokens, retryPage],
+  );
+
+  // Reset zoom when switching reading modes (the list remounts via key).
+  useEffect(() => {
+    resetZoom();
+  }, [mode, resetZoom]);
+
+  const zoomStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: tx.value }, { translateY: ty.value }, { scale: scale.value }],
+  }));
+
+  const pinch = Gesture.Pinch()
+    .onUpdate(e => {
+      scale.value = Math.min(Math.max(savedScale.value * e.scale, 1), 4);
+    })
+    .onEnd(() => {
+      savedScale.value = scale.value;
+      if (scale.value <= 1.01) {
+        scale.value = withTiming(1);
+        tx.value = withTiming(0);
+        ty.value = withTiming(0);
+        savedScale.value = 1;
+        savedTx.value = 0;
+        savedTy.value = 0;
+      }
+    });
+
+  const pan = Gesture.Pan()
+    .enabled(zoomed)
+    .onUpdate(e => {
+      tx.value = savedTx.value + e.translationX;
+      ty.value = savedTy.value + e.translationY;
+    })
+    .onEnd(() => {
+      savedTx.value = tx.value;
+      savedTy.value = ty.value;
+    });
+
+  const doubleTap = Gesture.Tap()
+    .numberOfTaps(2)
+    .maxDuration(260)
+    .onEnd(() => {
+      if (scale.value > 1.01) {
+        scale.value = withTiming(1);
+        tx.value = withTiming(0);
+        ty.value = withTiming(0);
+        savedScale.value = 1;
+        savedTx.value = 0;
+        savedTy.value = 0;
+      } else {
+        scale.value = withTiming(2);
+        savedScale.value = 2;
+      }
+    });
+
+  const singleTap = Gesture.Tap()
+    .maxDuration(260)
+    .onEnd(() => {
+      runOnJS(toggleChrome)();
+    });
+
+  const longPress = Gesture.LongPress()
+    .minDuration(500)
+    .onStart(() => {
+      runOnJS(retryPage)(current);
+    });
+
+  const gesture = Gesture.Simultaneous(
+    pinch,
+    pan,
+    Gesture.Exclusive(doubleTap, singleTap, longPress),
   );
 
   return (
@@ -134,30 +246,35 @@ export function ReaderScreen() {
           </Text>
         </Pressable>
       ) : (
-        <FlatList
-          key={mode}
-          data={pages ?? []}
-          keyExtractor={p => String(p.index)}
-          renderItem={renderPage}
-          horizontal={horizontal}
-          inverted={inverted}
-          pagingEnabled={paged}
-          removeClippedSubviews={false}
-          showsVerticalScrollIndicator={false}
-          showsHorizontalScrollIndicator={false}
-          onViewableItemsChanged={onViewable}
-          viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
-          getItemLayout={
-            paged
-              ? (_, index) => {
-                  const size = horizontal ? width : height;
-                  return { length: size, offset: size * index, index };
-                }
-              : undefined
-          }
-          initialScrollIndex={paged && current > 0 ? current : undefined}
-          ListFooterComponent={paged ? null : <View style={{ height: 80 }} />}
-        />
+        <GestureDetector gesture={gesture}>
+          <Animated.View style={[styles.zoomLayer, zoomStyle]}>
+            <FlatList
+              key={mode}
+              data={pages ?? []}
+              keyExtractor={p => String(p.index)}
+              renderItem={renderPage}
+              horizontal={horizontal}
+              inverted={inverted}
+              pagingEnabled={paged}
+              scrollEnabled={!zoomed}
+              removeClippedSubviews={false}
+              showsVerticalScrollIndicator={false}
+              showsHorizontalScrollIndicator={false}
+              onViewableItemsChanged={onViewable}
+              viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
+              getItemLayout={
+                paged
+                  ? (_, index) => {
+                      const size = horizontal ? width : height;
+                      return { length: size, offset: size * index, index };
+                    }
+                  : undefined
+              }
+              initialScrollIndex={paged && current > 0 ? current : undefined}
+              ListFooterComponent={paged ? null : <View style={{ height: 80 }} />}
+            />
+          </Animated.View>
+        </GestureDetector>
       )}
 
       {chrome ? (
@@ -273,7 +390,8 @@ function ReaderPage({
   width,
   screenHeight,
   layout,
-  onPress,
+  reloadToken,
+  onRetry,
 }: {
   sourceId: string;
   chapterUrl: string;
@@ -282,15 +400,13 @@ function ReaderPage({
   width: number;
   screenHeight: number;
   layout: 'strip' | 'page';
-  onPress: () => void;
+  reloadToken: number;
+  onRetry: () => void;
 }) {
   const [ratio, setRatio] = useState(1.5);
   const [uri, setUri] = useState<string | null>(null);
   const [tiles, setTiles] = useState<ImageTileDto[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [reloadToken, setReloadToken] = useState(0);
-
-  const retry = useCallback(() => setReloadToken(t => t + 1), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -320,10 +436,7 @@ function ReaderPage({
 
   if (layout === 'page') {
     return (
-      <Pressable
-        onPress={onPress}
-        onLongPress={retry}
-        delayLongPress={350}
+      <View
         style={{ width, height: screenHeight, justifyContent: 'center', backgroundColor: '#000' }}
       >
         {uri ? (
@@ -334,22 +447,17 @@ function ReaderPage({
             resizeMethod="scale"
           />
         ) : loadError ? (
-          <ReaderImageError message={loadError} onRetry={retry} />
+          <ReaderImageError message={loadError} onRetry={onRetry} />
         ) : (
           <ActivityIndicator color="#fff" />
         )}
-      </Pressable>
+      </View>
     );
   }
 
   if (tiles.length > 0) {
     return (
-      <Pressable
-        onPress={onPress}
-        onLongPress={retry}
-        delayLongPress={350}
-        style={{ width, backgroundColor: '#0a0a0a' }}
-      >
+      <View style={{ width, backgroundColor: '#0a0a0a' }}>
         {tiles.map(tile => {
           const height = Math.max(1, Math.round((width * tile.height) / tile.width));
           return (
@@ -362,15 +470,12 @@ function ReaderPage({
             />
           );
         })}
-      </Pressable>
+      </View>
     );
   }
 
   return (
-    <Pressable
-      onPress={onPress}
-      onLongPress={retry}
-      delayLongPress={350}
+    <View
       style={{ width, height: width * ratio, backgroundColor: '#0a0a0a', justifyContent: 'center' }}
     >
       {uri ? (
@@ -385,11 +490,11 @@ function ReaderPage({
           }}
         />
       ) : loadError ? (
-        <ReaderImageError message={loadError} onRetry={retry} />
+        <ReaderImageError message={loadError} onRetry={onRetry} />
       ) : (
         <ActivityIndicator color="#fff" />
       )}
-    </Pressable>
+    </View>
   );
 }
 
@@ -471,6 +576,10 @@ function ReaderSettingsSheet({
 }
 
 const styles = StyleSheet.create({
+  zoomLayer: {
+    flex: 1,
+    overflow: 'hidden',
+  },
   center: {
     position: 'absolute',
     top: 0,
