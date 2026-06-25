@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import { View, Text, ScrollView, Pressable, StyleSheet, RefreshControl } from 'react-native';
+import { BlurView } from '@react-native-community/blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -10,6 +11,8 @@ import { HomeBlockView } from '../components/HomeBlockView';
 import { Icon } from '../components/Icon';
 import { useAsync } from '../hooks/useAsync';
 import { getEngine } from '../engine';
+import { useAppUpdate } from '../app/appUpdate';
+import { useExtensionUpdates } from '../sources/extensionUpdates';
 import type { RootStackParamList } from '../navigation/types';
 import type { MangaDto, SourceDto } from '../engine/types';
 
@@ -32,6 +35,13 @@ export function HomeScreen() {
   const { data: sources, loading, reload } = useAsync<SourceDto[]>(() => engine.listSources(), []);
   const hasSources = (sources?.length ?? 0) > 0;
 
+  const appUpdate = useAppUpdate();
+  const extUpdates = useExtensionUpdates();
+  const hasUpdates = appUpdate.available || extUpdates.length > 0;
+
+  // Measured so the scroll content starts exactly beneath the floating header.
+  const [headerHeight, setHeaderHeight] = useState(insets.top + 80);
+
   const [refreshing, setRefreshing] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const onRefresh = useCallback(() => {
@@ -46,18 +56,55 @@ export function HomeScreen() {
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: TAB_BAR_SPACE }}
+        contentContainerStyle={{
+          paddingTop: headerHeight + theme.spacing.md,
+          paddingBottom: TAB_BAR_SPACE,
+        }}
+        scrollIndicatorInsets={{ top: headerHeight }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
             tintColor={theme.colors.accent}
             colors={[theme.colors.accent]}
-            progressViewOffset={insets.top + 8}
+            progressViewOffset={headerHeight + 8}
           />
         }
       >
-        <View style={[styles.header, { paddingHorizontal: theme.spacing.lg }]}>
+        {!loading && !hasSources ? (
+          <HomeEmptyState onBrowse={() => navigation.navigate('Extensions')} />
+        ) : (
+          enabled.map(block => (
+            <HomeBlockView
+              key={block.id}
+              block={block}
+              sources={sources ?? []}
+              onOpenManga={openManga}
+              refreshKey={refreshKey}
+            />
+          ))
+        )}
+      </ScrollView>
+
+      {/* Floating frosted header — always-on glass blur, full width, square,
+          no edge outline. */}
+      <View
+        style={styles.headerOverlay}
+        onLayout={e => setHeaderHeight(e.nativeEvent.layout.height)}
+      >
+        <BlurView
+          style={StyleSheet.absoluteFill}
+          blurType={theme.scheme === 'dark' ? 'dark' : 'light'}
+          blurAmount={20}
+          reducedTransparencyFallbackColor={theme.colors.bg}
+        />
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.colors.glass }]} />
+        <View
+          style={[
+            styles.headerContent,
+            { paddingTop: insets.top + 10, paddingHorizontal: theme.spacing.lg },
+          ]}
+        >
           <View>
             <Text style={[styles.greeting, { color: theme.colors.textMuted }]}>Good evening</Text>
             <Text style={[theme.typography.title, { color: theme.colors.text }]}>Home</Text>
@@ -76,24 +123,15 @@ export function HomeScreen() {
               style={[styles.iconBtn, { borderColor: theme.colors.border }]}
             >
               <Icon name="settings" size={19} color={theme.colors.text} />
+              {hasUpdates ? (
+                <View
+                  style={[styles.updateDot, { backgroundColor: theme.colors.accent, borderColor: theme.colors.bg }]}
+                />
+              ) : null}
             </Pressable>
           </View>
         </View>
-
-        {!loading && !hasSources ? (
-          <HomeEmptyState onBrowse={() => navigation.navigate('Extensions')} />
-        ) : (
-          enabled.map(block => (
-            <HomeBlockView
-              key={block.id}
-              block={block}
-              sources={sources ?? []}
-              onOpenManga={openManga}
-              refreshKey={refreshKey}
-            />
-          ))
-        )}
-      </ScrollView>
+      </View>
     </View>
   );
 }
@@ -130,11 +168,18 @@ function HomeEmptyState({ onBrowse }: { onBrowse: () => void }) {
 }
 
 const styles = StyleSheet.create({
-  header: {
+  headerOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    overflow: 'hidden',
+  },
+  headerContent: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-between',
-    marginBottom: 18,
+    paddingBottom: 14,
   },
   greeting: {
     fontSize: 13,
@@ -151,6 +196,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
+  },
+  updateDot: {
+    position: 'absolute',
+    top: 7,
+    right: 7,
+    width: 9,
+    height: 9,
+    borderRadius: 999,
+    borderWidth: 1.5,
   },
   emptyCard: {
     borderRadius: 22,

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -21,6 +21,7 @@ import { Icon } from '../components/Icon';
 import { SourcePickerSheet } from '../components/SourcePickerSheet';
 import { GlobalSourcesSheet } from '../components/GlobalSourcesSheet';
 import { usePinnedSources } from '../sources/pinned';
+import { useSourceHealth, unhealthyIds, recordSourceResult } from '../sources/sourceHealth';
 import { langLabel } from '../utils/lang';
 import { pickDefaultSource, sortSourcesForPicker } from '../utils/sourceSelect';
 import type { RootStackParamList } from '../navigation/types';
@@ -56,15 +57,29 @@ export function DiscoverScreen() {
   const [chooserOpen, setChooserOpen] = useState(false);
 
   const pinned = usePinnedSources();
+  const health = useSourceHealth();
+  const userPicked = useRef(false);
 
   useEffect(() => {
-    engine.listSources().then(s => {
-      setSources(sortSourcesForPicker(s));
-      const def = pickDefaultSource(s);
-      if (def) setSourceId(def.id);
-    });
+    engine.listSources().then(s => setSources(sortSourcesForPicker(s)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Choose (and auto-correct) the default source until the user picks one. If the
+  // current default is a source that recently errored, fall back to a working one.
+  useEffect(() => {
+    if (sources.length === 0 || userPicked.current) return;
+    const unhealthy = unhealthyIds(health);
+    const current = sources.find(s => s.id === sourceId);
+    if (current && !unhealthy.has(current.id)) return;
+    const def = pickDefaultSource(sources, { unhealthy });
+    if (def && def.id !== sourceId) setSourceId(def.id);
+  }, [sources, health, sourceId]);
+
+  const selectSource = (id: string) => {
+    userPicked.current = true;
+    setSourceId(id);
+  };
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(query), 350);
@@ -166,7 +181,7 @@ export function DiscoverScreen() {
           query={debounced}
           onOpenManga={openManga}
           onOpenSource={s => {
-            setSourceId(s.id);
+            selectSource(s.id);
             setMode('source');
           }}
           onChooseSources={() => setChooserOpen(true)}
@@ -177,7 +192,7 @@ export function DiscoverScreen() {
         visible={pickerOpen}
         sources={sources}
         selectedId={sourceId}
-        onSelect={setSourceId}
+        onSelect={selectSource}
         onClose={() => setPickerOpen(false)}
       />
       <GlobalSourcesSheet visible={chooserOpen} sources={sources} onClose={() => setChooserOpen(false)} />
@@ -242,12 +257,16 @@ function SourceBrowse({
 
   const { data, loading, error } = useAsync<MangaDto[]>(async () => {
     if (!sourceId) return [];
-    if (query.trim()) {
-      const res = await engine.search(sourceId, query, 1);
+    try {
+      const res = query.trim()
+        ? await engine.search(sourceId, query, 1)
+        : await engine.getPopular(sourceId, 1);
+      recordSourceResult(sourceId, true);
       return res.manga;
+    } catch (e) {
+      recordSourceResult(sourceId, false);
+      throw e;
     }
-    const res = await engine.getPopular(sourceId, 1);
-    return res.manga;
   }, [sourceId, query]);
 
   const gap = 12;
@@ -387,8 +406,14 @@ function GlobalSearchRow({
   const engine = getEngine();
 
   const { data, loading, error } = useAsync<MangaDto[]>(async () => {
-    const res = await engine.search(source.id, query, 1);
-    return res.manga.slice(0, 15);
+    try {
+      const res = await engine.search(source.id, query, 1);
+      recordSourceResult(source.id, true);
+      return res.manga.slice(0, 15);
+    } catch (e) {
+      recordSourceResult(source.id, false);
+      throw e;
+    }
   }, [source.id, query]);
 
   const count = data?.length ?? 0;

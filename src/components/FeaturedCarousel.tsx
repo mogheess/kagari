@@ -79,7 +79,12 @@ export function FeaturedCarousel({ data, onOpenManga }: FeaturedCarouselProps) {
 
   if (data.length === 1) {
     return (
-      <View style={{ paddingHorizontal: theme.spacing.lg, marginBottom: theme.spacing.xxl }}>
+      <View
+        style={{
+          paddingHorizontal: theme.spacing.lg,
+          marginBottom: theme.spacing.xxl,
+        }}
+      >
         <FeaturedHero
           manga={data[0]}
           tagline={heroTagline(data[0])}

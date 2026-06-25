@@ -124,6 +124,7 @@ export function MangaDetailScreen() {
             tintColor={theme.colors.accent}
             colors={[theme.colors.accent]}
             progressBackgroundColor={theme.colors.surface}
+            progressViewOffset={insets.top + 28}
           />
         }
       >

@@ -14,6 +14,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeProvider';
 import { getEngine } from '../engine';
 import { Icon } from '../components/Icon';
+import { computeExtensionUpdates, setExtensionUpdates } from '../sources/extensionUpdates';
 import type { AvailableExtensionDto, ExtensionDto, RepoDto } from '../engine/types';
 
 const KEIYOUSHI = 'https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.min.json';
@@ -165,10 +166,25 @@ export function ExtensionsScreen() {
     [installedExts],
   );
 
+  // Installed extensions whose repo has a newer version.
+  const extUpdates = useMemo(
+    () => computeExtensionUpdates(installedExts, available),
+    [installedExts, available],
+  );
+  const updatesByPkg = useMemo(
+    () => new Map(extUpdates.map(u => [u.pkg, u])),
+    [extUpdates],
+  );
+
+  // Keep the global update store in sync so Profile/Home badges reflect reality.
+  useEffect(() => {
+    setExtensionUpdates(extUpdates);
+  }, [extUpdates]);
+
   // Drives FlatList row re-renders when install state or in-flight pkg changes.
   const listExtra = useMemo(
-    () => ({ installedPkgs, busyPkg, failedPkgs }),
-    [installedPkgs, busyPkg, failedPkgs],
+    () => ({ installedPkgs, busyPkg, failedPkgs, updatesByPkg }),
+    [installedPkgs, busyPkg, failedPkgs, updatesByPkg],
   );
 
   // Language chips, most common first.
@@ -213,6 +229,26 @@ export function ExtensionsScreen() {
           );
         })}
       </View>
+
+      {extUpdates.length > 0 ? (
+        <Pressable
+          onPress={() => setTab('installed')}
+          style={[styles.updateBanner, { backgroundColor: theme.colors.surface, borderColor: theme.colors.accent }]}
+        >
+          <View style={[styles.updateBannerIcon, { backgroundColor: theme.colors.elevated }]}>
+            <Icon name="download" size={18} color={theme.colors.accent} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
+              {extUpdates.length} update{extUpdates.length === 1 ? '' : 's'} available
+            </Text>
+            <Text style={{ color: theme.colors.textMuted, fontSize: 12, marginTop: 2 }}>
+              {tab === 'installed' ? 'Update your extensions below' : 'Tap to review in Installed'}
+            </Text>
+          </View>
+          {tab === 'browse' ? <Icon name="chevronRight" size={18} color={theme.colors.textFaint} /> : null}
+        </Pressable>
+      ) : null}
 
       {/* Repos */}
       <Text style={[styles.sectionLabel, { color: theme.colors.textFaint, marginTop: 22 }]}>
@@ -433,6 +469,7 @@ export function ExtensionsScreen() {
 
   const renderInstalledRow = (ext: ExtensionDto) => {
     const busy = busyPkg === ext.pkg;
+    const update = updatesByPkg.get(ext.pkg);
     return (
       <View
         style={[styles.extRow, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
@@ -444,17 +481,36 @@ export function ExtensionsScreen() {
           <Text numberOfLines={1} style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
             {ext.name}
           </Text>
-          <Text style={{ color: theme.colors.textFaint, fontSize: 11.5, marginTop: 2 }}>
-            {`v${ext.versionName} \u00B7 ${ext.lang.toUpperCase()}${ext.trusted ? '' : '  \u00B7  untrusted'}`}
-          </Text>
-        </View>
-        <Pressable disabled={busy} hitSlop={8} onPress={() => onUninstall(ext.pkg)}>
-          {busy ? (
-            <ActivityIndicator size="small" color={theme.colors.textMuted} />
+          {update ? (
+            <Text style={{ color: theme.colors.accent, fontSize: 11.5, marginTop: 2, fontWeight: '600' }}>
+              {`v${ext.versionName} \u2192 v${update.availableVersionName}`}
+            </Text>
           ) : (
-            <Icon name="trash" size={18} color={theme.colors.textMuted} />
+            <Text style={{ color: theme.colors.textFaint, fontSize: 11.5, marginTop: 2 }}>
+              {`v${ext.versionName} \u00B7 ${ext.lang.toUpperCase()}${ext.trusted ? '' : '  \u00B7  untrusted'}`}
+            </Text>
           )}
-        </Pressable>
+        </View>
+        {busy ? (
+          <ActivityIndicator size="small" color={theme.colors.textMuted} />
+        ) : (
+          <>
+            {update ? (
+              <Pressable
+                onPress={() => onInstall(update.ext)}
+                style={[styles.updatePill, { backgroundColor: theme.colors.accent }]}
+              >
+                <Icon name="download" size={13} color={theme.colors.onAccent} />
+                <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 12.5 }}>
+                  Update
+                </Text>
+              </Pressable>
+            ) : null}
+            <Pressable hitSlop={8} onPress={() => onUninstall(ext.pkg)}>
+              <Icon name="trash" size={18} color={theme.colors.textMuted} />
+            </Pressable>
+          </>
+        )}
       </View>
     );
   };
@@ -486,6 +542,7 @@ export function ExtensionsScreen() {
         <FlatList
           data={installedExts}
           keyExtractor={e => e.pkg}
+          extraData={listExtra}
           ListHeaderComponent={renderHeader()}
           renderItem={({ item }) => renderInstalledRow(item)}
           contentContainerStyle={{ padding: 16, paddingBottom: 48 }}
@@ -609,6 +666,30 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
+  },
+  updateBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginTop: 16,
+  },
+  updateBannerIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  updatePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    height: 32,
+    paddingHorizontal: 12,
+    borderRadius: 999,
   },
   extRow: {
     flexDirection: 'row',
