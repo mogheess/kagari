@@ -34,13 +34,13 @@ loads Tachiyomi/Mihon-compatible extension APKs.
    - Create an AVD (API 34+ recommended), or
    - Connect a physical device with USB debugging (`adb devices`).
 
-4. **Watchman (macOS — strongly recommended)**
+4. **Watchman (macOS, strongly recommended)**
    - `brew install watchman`
    - Without it, Metro can crash on startup with
      `EMFILE: too many open files, watch` because RN's fallback file watcher
      exhausts file descriptors (worse when other dev servers are running).
    - A `.watchmanconfig` is committed; it ignores `android/build`, `.gradle`,
-     `.cxx`, `ios/build`. **It must never ignore `node_modules`** — Metro resolves
+     `.cxx`, `ios/build`. **It must never ignore `node_modules`**; Metro resolves
      dependencies from there.
 
 ## Install JS dependencies
@@ -90,6 +90,39 @@ On first launch the app logs which engine it resolved:
 > The app ships with **no default extensions or repos** by design (see the
 > licensing/content notes in `README.md`). You supply your own.
 
+## Releasing a signed APK
+
+Debug builds load JS from Metro; **release** builds bundle the JS automatically,
+so the release APK is self-contained.
+
+1. **Generate a release keystore** (once). Back it up somewhere safe: if you lose
+   it you can't ship updates under the same app identity.
+   ```sh
+   keytool -genkeypair -v -keystore kagari-release.keystore \
+     -alias kagari -keyalg RSA -keysize 2048 -validity 10000
+   ```
+2. **Point Gradle at it** via `~/.gradle/gradle.properties` (never commit these):
+   ```properties
+   KAGARI_STORE_FILE=/absolute/path/to/kagari-release.keystore
+   KAGARI_STORE_PASSWORD=********
+   KAGARI_KEY_ALIAS=kagari
+   KAGARI_KEY_PASSWORD=********
+   ```
+   When `KAGARI_STORE_FILE` is set, `android/app/build.gradle` signs release
+   builds with it; otherwise it falls back to the debug key (fine for local
+   testing, never for distribution).
+3. **Build the APK:**
+   ```sh
+   cd android && ./gradlew assembleRelease
+   # output: android/app/build/outputs/apk/release/app-release.apk
+   ```
+4. **Test it on a device:** `adb install -r app-release.apk`.
+5. **Publish:** create a GitHub Release, tag it `vX.Y.Z`, and attach
+   `app-release.apk`. The in-app update check compares the installed version
+   against the latest GitHub Release, so cutting a release is what notifies
+   users. Bump `versionCode` (must increase) and `versionName` in
+   `android/app/build.gradle` for each release.
+
 ## Troubleshooting
 
 - **Metro: `EMFILE: too many open files, watch`** → install Watchman (above).
@@ -104,7 +137,7 @@ On first launch the app logs which engine it resolved:
 - **A chapter/page fails to load on some sources** → reader pages now fetch
   natively through the source's OkHttp client (`fetchImage`), cache to a
   `file://`, and tile tall images. If a specific source still fails, check
-  `adb logcat -s KagariReaderImage` — a few sources need custom image-descramble
+  `adb logcat -s KagariReaderImage`; a few sources need custom image-descramble
   interceptors (see "Known gaps" in `AGENTS.md`).
 
 ## Native engine notes

@@ -103,7 +103,7 @@ export function CategoriesScreen() {
               No categories yet
             </Text>
             <Text style={{ color: theme.colors.textMuted, fontSize: 13, textAlign: 'center', marginTop: 4 }}>
-              Create one above to organize your library — then assign manga from their detail page.
+              Create one above to organize your library, then assign manga from their detail page.
             </Text>
           </View>
         }

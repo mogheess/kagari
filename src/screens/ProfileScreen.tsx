@@ -134,7 +134,7 @@ export function ProfileScreen() {
                 : appUpdate.available && appUpdate.latest
                   ? `v${appUpdate.latest.version} available`
                   : appUpdate.error
-                    ? "Couldn't check — tap to retry"
+                    ? "Couldn't check, tap to retry"
                     : appUpdate.checkedAt
                       ? "You're on the latest version"
                       : 'Tap to check for updates'}
