@@ -13,9 +13,13 @@ project license is **[Apache 2.0](./LICENSE)**.
   community sources possible. Kagari adapts parts of this code under Apache 2.0
   (see [NOTICE](./NOTICE)). Kagari is **not** affiliated with or endorsed by
   these projects, and does not use their names or logos as its own branding.
-- The broader **extension-developer community** (e.g. the keiyoushi ecosystem),
-  who maintain the sources that readers like Kagari rely on. Kagari ships none of
-  these — users add the repositories and sources they choose.
+- The broader **extension-developer community** — including the
+  **[Keiyoushi](https://github.com/keiyoushi)** project, which maintains the
+  community `extensions-lib` API and many of the sources readers rely on. Kagari
+  keeps its source interface compatible with that Apache-2.0 API so those
+  extensions can run, but **ships none of them** (you add the repositories and
+  sources you choose) and is **not affiliated with or endorsed by** Keiyoushi or
+  any source repository.
 
 ## Core open-source libraries
 

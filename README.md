@@ -89,5 +89,14 @@ Kagari does not use the "Tachiyomi" or "Mihon" names or logos as its own
 branding; those references exist only so the app stays compatible with the
 existing source ecosystem.
 
-> Kagari is a neutral reader. You are responsible for the sources you add and the
-> content you access with them. This project is provided as-is, without warranty.
+## Disclaimer
+
+Kagari does not host, store, or distribute any manga, comics, or other content,
+and it ships with no sources or repositories built in. Everything you browse and
+read comes from sources **you** choose to add. The developers of Kagari have **no
+affiliation** with any content provider, source, or repository reachable through
+those sources, and do not endorse any of them.
+
+You are responsible for the sources you add and the content you access through
+them, including compliance with the copyright laws and regulations of your
+country. Kagari is provided as-is, without warranty.
