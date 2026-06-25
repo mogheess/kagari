@@ -80,7 +80,7 @@ android {
 
     namespace "com.manhwa"
     defaultConfig {
-        applicationId "com.manhwa"
+        applicationId "app.kagari"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
