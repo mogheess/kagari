@@ -1,18 +1,21 @@
 import type { SourceDto } from '../engine/types';
 
 /**
- * Picks a sensible default browse source. Prefers English and non-NSFW so the
- * app doesn't land on a broken or adult source out of the box. When a block
- * needs "latest", only sources that support it are considered.
+ * Picks a sensible default browse source. Sources that recently errored sink to
+ * the bottom (so we don't keep landing on a broken one), then we prefer English
+ * and non-NSFW so the app doesn't open on an adult source out of the box. When a
+ * block needs "latest", only sources that support it are considered.
  */
 export function pickDefaultSource(
   sources: SourceDto[],
-  opts?: { needsLatest?: boolean },
+  opts?: { needsLatest?: boolean; unhealthy?: Set<string> },
 ): SourceDto | undefined {
   if (sources.length === 0) return undefined;
   const candidates = opts?.needsLatest ? sources.filter(s => s.supportsLatest) : sources;
   const pool = candidates.length > 0 ? candidates : sources;
-  const score = (s: SourceDto) => (s.lang === 'en' ? 2 : 0) + (s.isNsfw ? 0 : 1);
+  const unhealthy = opts?.unhealthy;
+  const score = (s: SourceDto) =>
+    (unhealthy?.has(s.id) ? 0 : 100) + (s.lang === 'en' ? 2 : 0) + (s.isNsfw ? 0 : 1);
   return [...pool].sort((a, b) => score(b) - score(a) || a.name.localeCompare(b.name))[0];
 }
 

@@ -3,7 +3,6 @@ import { View, Text, Image, Pressable, StyleSheet, useWindowDimensions } from 'r
 import LinearGradient from 'react-native-linear-gradient';
 import { useTheme } from '../theme/ThemeProvider';
 import { Icon } from './Icon';
-import { seededColor, withAlpha } from '../utils/color';
 import type { MangaDto } from '../engine/types';
 
 interface FeaturedHeroProps {
@@ -13,15 +12,14 @@ interface FeaturedHeroProps {
 }
 
 /**
- * Contained, rounded cinematic hero card. Cover art carries the energy; a
- * dynamic-color gradient (seeded from the cover) melts into the lower edge.
+ * Contained, rounded cinematic hero card. The cover art stays fully visible; a
+ * neutral bottom scrim keeps the title legible without tinting the artwork.
  */
 export function FeaturedHero({ manga, tagline, onPress }: FeaturedHeroProps) {
   const theme = useTheme();
   const { width } = useWindowDimensions();
   const cardWidth = width - theme.spacing.lg * 2;
   const cardHeight = Math.round(cardWidth * 0.62);
-  const tint = seededColor(manga.thumbnailUrl ?? manga.title, 0.55, 0.38);
 
   return (
     <Pressable
@@ -31,7 +29,7 @@ export function FeaturedHero({ manga, tagline, onPress }: FeaturedHeroProps) {
         {
           width: cardWidth,
           height: cardHeight,
-          borderRadius: theme.radius.xl,
+          borderRadius: theme.radius.lg,
           backgroundColor: theme.colors.surface,
           transform: [{ scale: pressed ? 0.99 : 1 }],
         },
@@ -42,8 +40,8 @@ export function FeaturedHero({ manga, tagline, onPress }: FeaturedHeroProps) {
       ) : null}
 
       <LinearGradient
-        colors={['transparent', withAlpha(tint, 0.35), withAlpha(tint, 0.92)]}
-        locations={[0, 0.55, 1]}
+        colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.38)', 'rgba(0,0,0,0.86)']}
+        locations={[0.28, 0.66, 1]}
         style={StyleSheet.absoluteFill}
       />
 
@@ -58,7 +56,7 @@ export function FeaturedHero({ manga, tagline, onPress }: FeaturedHeroProps) {
           </Text>
         ) : null}
 
-        <View style={[styles.readPill, { backgroundColor: 'rgba(255,255,255,0.16)' }]}>
+        <View style={styles.readPill}>
           <Icon name="book" size={16} color="#fff" />
           <Text style={styles.readText}>Read</Text>
           <Icon name="chevronRight" size={15} color="#fff" />
@@ -106,6 +104,7 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     paddingHorizontal: 14,
     borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.16)',
   },
   readText: {
     color: '#fff',

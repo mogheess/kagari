@@ -3,8 +3,10 @@
  *
  * Extension repos expose the same source in many languages, which makes the
  * picker overwhelming. Like Mihon's "enabled languages" setting, this lets the
- * user narrow the lists to the languages they actually read. An empty set means
- * "show all" (the default), so nothing is hidden until the user opts in.
+ * user narrow the lists to the languages they actually read. On first launch we
+ * default to English so the picker isn't flooded with every localization; the
+ * user can add languages or clear the filter (empty set = "show all") and that
+ * choice is respected from then on.
  * Persisted with AsyncStorage and exposed reactively via useSyncExternalStore.
  */
 import { useSyncExternalStore } from 'react';
@@ -13,7 +15,10 @@ import type { SourceDto } from '../engine/types';
 
 const store = makePersistence<string[]>('@kagari/enabled-languages/v1');
 
-let enabled: string[] = [];
+/** Seeded once on first run; an explicit (even empty) saved value wins after. */
+const DEFAULT_LANGUAGES = ['en'];
+
+let enabled: string[] = DEFAULT_LANGUAGES;
 const listeners = new Set<() => void>();
 
 function emit(): void {
@@ -22,7 +27,12 @@ function emit(): void {
 
 async function hydrate(): Promise<void> {
   const stored = await store.load();
-  if (stored && Array.isArray(stored)) enabled = stored;
+  if (stored && Array.isArray(stored)) {
+    enabled = stored;
+  } else {
+    // No prior preference: persist the English-only default so it sticks.
+    store.save(enabled);
+  }
   emit();
 }
 

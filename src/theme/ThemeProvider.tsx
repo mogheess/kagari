@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useMemo, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from 'react';
 import { useColorScheme } from 'react-native';
+import { makePersistence } from '../store/persist';
 import {
   palettes,
   spacing,
@@ -11,6 +12,10 @@ import {
 } from './tokens';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
+
+/** Dark by default; persisted so the user's choice sticks across launches. */
+const DEFAULT_PREFERENCE: ThemePreference = 'dark';
+const prefStore = makePersistence<ThemePreference>('@kagari/theme-preference/v1');
 
 export interface Theme {
   scheme: ColorScheme;
@@ -31,7 +36,19 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const systemScheme = useColorScheme();
-  const [preference, setPreference] = useState<ThemePreference>('system');
+  const [preference, setPreference] = useState<ThemePreference>(DEFAULT_PREFERENCE);
+
+  useEffect(() => {
+    let active = true;
+    prefStore.load().then(stored => {
+      if (active && (stored === 'system' || stored === 'light' || stored === 'dark')) {
+        setPreference(stored);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const scheme: ColorScheme =
     preference === 'system' ? (systemScheme === 'light' ? 'light' : 'dark') : preference;
@@ -48,7 +65,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     [scheme],
   );
 
-  const setPref = useCallback((p: ThemePreference) => setPreference(p), []);
+  const setPref = useCallback((p: ThemePreference) => {
+    setPreference(p);
+    prefStore.save(p);
+  }, []);
 
   const value = useMemo(
     () => ({ theme, preference, setPreference: setPref }),
