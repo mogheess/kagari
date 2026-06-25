@@ -313,7 +313,7 @@ function SourceBrowse({
                 {error
                   ? `${source?.name ?? 'The source'} returned an error${
                       /\b(\d{3})\b/.test(error.message) ? ` (${error.message})` : ''
-                    }. It may be blocked or temporarily down — try another source.`
+                    }. It may be blocked or temporarily down. Try another source.`
                   : query.trim()
                     ? `No manga matched "${query.trim()}" on ${source?.name ?? 'this source'}.`
                     : 'Pick a source above to start browsing.'}
