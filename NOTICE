@@ -1,9 +1,16 @@
-Manhwa
-Copyright 2026 The Manhwa Authors
+Kagari
+Copyright 2026 The Kagari Authors
 
 This product includes software developed as part of the Mihon and Tachiyomi
 projects (https://github.com/mihonapp/mihon, https://github.com/tachiyomiorg),
 licensed under the Apache License, Version 2.0.
+
+The source-API surface is kept signature-compatible with the community
+`extensions-lib` artifact (originally tachiyomiorg/extensions-lib, now maintained
+by the Keiyoushi project, https://github.com/keiyoushi/extensions-lib), which is
+also licensed under the Apache License, Version 2.0. This compatibility exists so
+that community extensions compiled against that API can run; it does not imply any
+affiliation with, or endorsement by, that project.
 
 The following files are adaptations of Mihon/Tachiyomi "source-api", network,
 and extension-loading code. They have been modified for this project. The

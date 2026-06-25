@@ -2,157 +2,101 @@
 
 > _Kagari_ (篝) — a watchfire; the light you read by after dark.
 
-A modern, custom manga/manhwa reader for Android with a premium UI and support
-for **Tachiyomi/Mihon-compatible extensions**. Not a Mihon fork — a fresh app
-that reuses the (Apache 2.0) extension *engine* concepts while building an
-entirely new, configurable UI.
+A modern manga & manhwa reader for Android. Add the sources you want, shape a
+home screen that's yours, and read in a clean, fast, premium interface — light
+or dark.
 
-> The launcher label is **Kagari**. The internal RN component id and Android
-> package (`com.manhwa`) are kept as-is for build stability; rename before a
-> public release if desired.
+---
 
-> **Extensions only — no bundled/demo content.** Everything you see comes from
-> extensions you install. With none installed, the app shows empty states that
-> point you to the Extensions screen.
+## What it is
 
-- **UI:** React Native + TypeScript (premium dark/light, cinematic covers,
-  Notion-style configurable home, frosted-glass navigation, spring motion).
-- **Engine:** native Kotlin module that loads extension APKs via Android package
-  APIs + a child-first `PathClassLoader`, exposing a Tachiyomi-style source API
-  with a real network stack (OkHttp + Cloudflare/cookie handling, Injekt, Jsoup,
-  RxJava→suspend).
+Kagari is a **reader, not a content library**. It ships with **no manga and no
+sources** of its own. Instead, you add the sources you want, and Kagari gives you
+a beautiful place to browse, search, follow, download, and read them — with your
+library and reading history kept entirely on your device.
 
-## Design direction
-
-Cinematic cover art (Apple Music) + calm restrained chrome (Linear) + modular
-configurable home blocks (Notion) + frosted-glass floating nav, in both light
-and dark. See `assets/` for the locked mockups.
-
-## Architecture
-
-```
-React Native UI (TypeScript)
-        │  getEngine()  -> Engine interface (src/engine/types.ts)
-        ▼
- ┌──────────────────────────────────────────────┐
- │ nativeEngine.ts -> ManhwaEngine (RN bridge)    │
- │ (or a no-op "unavailable" engine -> empty UI)  │
- └───────────────────────┬──────────────────────┘
-                         ▼
-              EngineFacade (Kotlin, suspend API)
-              ExtensionLoader + SignatureTrust + ChildFirstClassLoader
-                         ▼
-        Vendored Tachiyomi runtime (Apache 2.0):
-        source-api · HttpSource · NetworkHelper (OkHttp +
-        Cloudflare + cookies) · Injekt DI · Jsoup · RxJava1 ·
-        kotlinx.serialization · coroutines
-                         ▼
-              Extension APKs (user-supplied)
-```
-
-Key design choices:
-
-- **One JSON DTO contract** (`src/engine/types.ts` ↔ `engine/dto/Dtos.kt`).
-  Identity is always `(sourceId, url)`, mirroring Tachiyomi. The native side
-  returns JSON strings; `nativeEngine.ts` parses them into typed DTOs.
-- **Extensions resolve the host's classes at runtime.** APKs are compiled
-  `compileOnly` against `extensions-lib` and load `eu.kanade.tachiyomi.*` from
-  the host via a child-first classloader — so the host *vendors* that runtime
-  under `eu.kanade.tachiyomi.*` (those exact package names are required).
-- **Local state persists** (library, categories, home layout) via AsyncStorage,
-  wrapped in small reactive stores (`src/store`, `src/library`).
-- **Reader images load natively.** `fetchImage` downloads each page through the
-  source's OkHttp client (headers + Cloudflare cookies), caches it to a local
-  `file://`, and tiles very tall webtoon images — so the bridge never carries
-  image bytes. Remaining gaps (filters, suspend 1.6 API, read history) are in
-  Status.
+If you've used a Tachiyomi/Mihon-style reader before, Kagari works with the same
+kind of community sources — just wrapped in a new, more polished interface.
 
 ## Features
 
-- **Home** — configurable, reorderable blocks (featured / popular / latest /
-  recommended) plus a "Continue" rail showing your library. Set one **universal
-  source** for the whole home screen (or override individual sections); sensible
-  default is English & non-NSFW. Layout + source choices persist.
-- **Discover** — **Source** mode (grouped, searchable source picker with language
-  + NSFW tags, debounced search) and **Global** mode that searches your chosen
-  (pinned) sources at once, one result rail per source.
-- **Library** — your favorites, with **categories**: create/rename/delete, filter
-  by category, and assign manga from their detail page. Persisted, reactive.
-- **Updates / History** — segmented tab; **History** records the chapters you
-  open (grouped by day, resume, persisted). Updates is reserved for real
-  new-chapter tracking.
-- **Reader** — four modes: webtoon long-strip, vertical paged, left-to-right,
-  right-to-left.
+- **A home screen that's yours.** Reorderable blocks (Featured, Popular, Latest,
+  your Library) you can arrange however you like, with one source powering the
+  whole home or a different source per section.
+- **Discover & search.** Browse a clean, grouped source picker, or run a global
+  search across your favorite sources at once.
+- **Library & categories.** Follow titles, then organize them into categories you
+  create, rename, and filter.
+- **A great reader.** Webtoon long-strip, vertical paged, and left-to-right or
+  right-to-left modes, with pinch-to-zoom and tap-to-retry on any page that
+  fails to load.
+- **Downloads & offline reading.** Save chapters and read them with no
+  connection.
+- **History.** Picks up where you left off, with per-chapter read progress.
+- **Update notifications.** Tells you when a new app version or a newer version
+  of one of your installed sources is available.
+- **Premium look & feel.** Cinematic cover art, frosted-glass navigation, smooth
+  spring motion, and a polished dark theme by default.
 
-## Project layout
+## Getting started
 
-```
-src/
-  engine/        # Engine contract + native impl + selector (no mock)
-  store/         # AsyncStorage wrapper (persist.ts)
-  library/       # favorites.ts, categories.ts, history.ts (persisted, reactive)
-  sources/       # pinned.ts (pinned sources for global search)
-  reader/        # readerSettings.ts (reading modes)
-  theme/         # Design tokens + ThemeProvider (dark/light)
-  home/          # Configurable, persisted home-block model (Notion-style)
-  utils/         # lang labels, default-source selection, color
-  components/    # Cover, FeaturedHero, Icon, SourcePickerSheet, CategoryAssignSheet, ...
-  navigation/    # Root stack + tabs + glass tab bar
-  screens/       # Home, Library, Discover, Updates, Profile, MangaDetail,
-                 # Reader, CustomizeHome, Extensions, Categories
-android/app/src/main/java/
-  eu/kanade/tachiyomi/   # Vendored runtime: source/, network/, util/ (Apache 2.0, see NOTICE)
-  com/manhwa/engine/     # Loader, trust, facade, mappers, Injekt, RN bridge
-```
+1. **Install Kagari** — download the latest APK from the
+   [Releases page](https://github.com/mogheess/kagari/releases/latest) and open
+   it on your Android device (you may need to allow installs from your browser /
+   file manager).
+2. **Add a source** — open **Profile → Extensions & Repos**, add a source
+   repository, and install a source you want.
+3. **Read** — head to **Discover** or **Home**, tap a title to open it, tap the
+   heart to follow it, and tap a chapter to start reading.
 
-## Running
+## FAQ
 
-You need the Android toolchain (this is an extensions-only app — there is no
-JS-only demo mode). See **[BUILD.md](./BUILD.md)** for full setup (JDK 17,
-Android SDK, and **Watchman on macOS**).
+**Is it on the Google Play Store?**
+No. This category of app isn't permitted on Google Play, so Kagari is distributed
+as a direct APK through GitHub Releases.
 
-```sh
-npm install
-npm start          # Metro (one instance)
-npm run android    # build + launch (needs Android SDK)
-```
+**Does it come with any manga?**
+No. Kagari is just the reader. All content comes from sources you choose to
+install — nothing is bundled.
 
-Then add a repo + install an extension from **Profile → Extensions & Repos**.
+**Does it track me or need an account?**
+No account, no analytics, no tracking. Your library, categories, downloads, and
+history live on your device. The app only talks to the sources you install (to
+fetch what you read) and to GitHub (to check for updates).
 
-## Licensing & content
+**Is it free and open source?**
+Yes — see [Credits & license](#credits--license) below.
 
-- This project reuses Mihon/Tachiyomi code under **Apache 2.0**. Attribution and
-  the list of adapted files are in **[NOTICE](./NOTICE)**. Keep it intact and
-  update it when you vendor more.
-- **"Tachiyomi"/"Mihon" trademarks are not used** as branding here. Metadata keys
-  (`tachiyomi.extension*`) and `eu.kanade.tachiyomi.*` package names are used
-  only for functional extension compatibility.
-- **No extensions or repositories ship with the app.** It is a neutral engine;
-  users supply their own repo URLs / APKs.
-- The app honors the extension **NSFW flag**.
-- Google Play prohibits this category; plan for direct APK / your own repo
-  distribution.
+## For developers
 
-> This is not legal advice. For a shipping product, have a lawyer review the
-> content and distribution model.
+Kagari is a React Native (TypeScript) app over a native Android engine that runs
+community sources. To build from source, see **[BUILD.md](./BUILD.md)**; for an
+overview of the architecture and conventions, see **[AGENTS.md](./AGENTS.md)**.
 
-## Status
+## Credits & license
 
-- [x] Premium RN UI (all core screens), teal theme, glass nav
-- [x] Extensions-only engine (mock data removed); empty states everywhere
-- [x] Native runtime that **runs** installed sources: `HttpSource`,
-      `NetworkHelper` + Cloudflare/cookie/UA interceptors, Injekt, `FilterList`,
-      RxJava1→suspend
-- [x] Repo management (add/remove), real index parsing, Browse/Installed UI
-- [x] APK install/uninstall (download + `FileProvider` + system installer)
-- [x] Library favorites (persisted, merge-safe) + Categories
-- [x] Global search across pinned sources (per-source rails)
-- [x] Reading history (persisted) in a Updates | History tab
-- [x] Configurable + persisted Home with universal source + per-section overrides
-- [x] Reader modes (webtoon / vertical / ltr / rtl)
-- [x] Native reader image loading via the source's OkHttp client (cached
-      `file://` + webtoon tiling)
-- [ ] Search filters wired (`FilterList` ⇄ `FilterDto`)
-- [ ] Suspend (extension-lib 1.6) source API; per-chapter read-state + Updates feed
-- [ ] Untrusted-extension trust prompt UI
-```
+Kagari stands on the shoulders of the open-source manga-reader community —
+especially the **Mihon / Tachiyomi** projects, whose source-API and networking
+foundations make community sources possible.
+
+- **[CREDITS.md](./CREDITS.md)** — acknowledgments and the projects Kagari builds
+  on.
+- **[NOTICE](./NOTICE)** — required attributions for the Apache-2.0 code Kagari
+  adapts.
+- **[LICENSE](./LICENSE)** — Kagari is released under the **Apache License 2.0**.
+
+Kagari does not use the "Tachiyomi" or "Mihon" names or logos as its own
+branding; those references exist only so the app stays compatible with the
+existing source ecosystem.
+
+## Disclaimer
+
+Kagari does not host, store, or distribute any manga, comics, or other content,
+and it ships with no sources or repositories built in. Everything you browse and
+read comes from sources **you** choose to add. The developers of Kagari have **no
+affiliation** with any content provider, source, or repository reachable through
+those sources, and do not endorse any of them.
+
+You are responsible for the sources you add and the content you access through
+them, including compliance with the copyright laws and regulations of your
+country. Kagari is provided as-is, without warranty.
