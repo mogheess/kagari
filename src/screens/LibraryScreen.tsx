@@ -1,12 +1,13 @@
-import React, { useMemo, useState } from 'react';
-import { View, Text, FlatList, Pressable, StyleSheet, useWindowDimensions } from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { View, Text, FlatList, Pressable, StyleSheet, RefreshControl, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme } from '../theme/ThemeProvider';
 import { Cover } from '../components/Cover';
 import { Icon } from '../components/Icon';
-import { useFavorites, favoriteToManga } from '../library/favorites';
+import { SwipeTabs } from '../components/SwipeTabs';
+import { useFavorites, favoriteToManga, reloadFavorites } from '../library/favorites';
 import { useCategories } from '../library/categories';
 import type { RootStackParamList } from '../navigation/types';
 
@@ -25,6 +26,13 @@ export function LibraryScreen() {
   const favorites = useFavorites();
   const categories = useCategories();
   const [selected, setSelected] = useState<string>(ALL);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await reloadFavorites();
+    setRefreshing(false);
+  }, []);
 
   const hasUncategorized = favorites.some(f => f.categoryIds.length === 0);
 
@@ -36,6 +44,8 @@ export function LibraryScreen() {
     }
     return out;
   }, [categories, hasUncategorized]);
+
+  const selIdx = Math.max(0, chips.findIndex(c => c.id === selected));
 
   const visible = useMemo(() => {
     const list =
@@ -54,95 +64,111 @@ export function LibraryScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
-      <FlatList
-        data={visible}
-        numColumns={cols}
-        keyExtractor={(m, i) => `${m.sourceId}:${m.url}:${i}`}
-        showsVerticalScrollIndicator={false}
-        columnWrapperStyle={{ paddingHorizontal: sidePad, gap }}
-        contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: TAB_BAR_SPACE, gap: 16 }}
-        ListHeaderComponent={
-          <View style={{ marginBottom: 16 }}>
-            <View style={[styles.header, { paddingHorizontal: sidePad }]}>
-              <Text style={[theme.typography.title, { color: theme.colors.text }]}>Library</Text>
-              <Pressable hitSlop={10} onPress={() => navigation.navigate('Categories')}>
-                <Icon name="settings" size={21} color={theme.colors.text} />
-              </Pressable>
-            </View>
+      <View style={{ paddingTop: insets.top + 8, paddingBottom: 12 }}>
+        <View style={[styles.header, { paddingHorizontal: sidePad }]}>
+          <Text style={[theme.typography.title, { color: theme.colors.text }]}>Library</Text>
+          <Pressable hitSlop={10} onPress={() => navigation.navigate('Categories')}>
+            <Icon name="settings" size={21} color={theme.colors.text} />
+          </Pressable>
+        </View>
 
-            {chips.length > 1 ? (
-              <FlatList
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                data={chips}
-                keyExtractor={c => c.id}
-                contentContainerStyle={{ paddingHorizontal: sidePad, gap: 8, marginTop: 14 }}
-                renderItem={({ item }) => {
-                  const active = item.id === selected;
-                  return (
-                    <Pressable
-                      onPress={() => setSelected(item.id)}
-                      style={[
-                        styles.chip,
-                        {
-                          backgroundColor: active ? theme.colors.accent : theme.colors.surface,
-                          borderColor: active ? theme.colors.accent : theme.colors.border,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={{
-                          color: active ? theme.colors.onAccent : theme.colors.textMuted,
-                          fontWeight: '600',
-                          fontSize: 13,
-                        }}
-                      >
-                        {item.label}
-                      </Text>
-                    </Pressable>
-                  );
-                }}
-              />
-            ) : null}
-          </View>
-        }
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <View style={[styles.emptyIcon, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-              <Icon name="bookmark" size={26} color={theme.colors.textMuted} />
-            </View>
-            <Text style={[theme.typography.heading, { color: theme.colors.text, marginTop: 16 }]}>
-              {selected === ALL ? 'No saved manga yet' : 'Nothing in this category'}
-            </Text>
-            <Text
-              style={{
-                color: theme.colors.textMuted,
-                fontSize: 13.5,
-                lineHeight: 20,
-                textAlign: 'center',
-                marginTop: 6,
-              }}
-            >
-              {selected === ALL
-                ? 'Tap the bookmark on any manga to add it here.'
-                : 'Assign manga to this category from their detail page.'}
-            </Text>
-          </View>
-        }
-        renderItem={({ item }) => (
-          <Cover
-            manga={item}
-            width={coverWidth}
-            onPress={() =>
-              navigation.navigate('MangaDetail', {
-                sourceId: item.sourceId,
-                mangaUrl: item.url,
-                preview: item,
-              })
-            }
+        {chips.length > 1 ? (
+          <FlatList
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            data={chips}
+            keyExtractor={c => c.id}
+            contentContainerStyle={{ paddingHorizontal: sidePad, gap: 8, marginTop: 14 }}
+            renderItem={({ item }) => {
+              const active = item.id === selected;
+              return (
+                <Pressable
+                  onPress={() => setSelected(item.id)}
+                  style={[
+                    styles.chip,
+                    {
+                      backgroundColor: active ? theme.colors.accent : theme.colors.surface,
+                      borderColor: active ? theme.colors.accent : theme.colors.border,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={{
+                      color: active ? theme.colors.onAccent : theme.colors.textMuted,
+                      fontWeight: '600',
+                      fontSize: 13,
+                    }}
+                  >
+                    {item.label}
+                  </Text>
+                </Pressable>
+              );
+            }}
           />
-        )}
-      />
+        ) : null}
+      </View>
+
+      <SwipeTabs
+        index={selIdx}
+        count={Math.max(1, chips.length)}
+        onIndexChange={i => setSelected(chips[i]?.id ?? ALL)}
+      >
+        <FlatList
+          data={visible}
+          numColumns={cols}
+          style={{ flex: 1 }}
+          keyExtractor={(m, i) => `${m.sourceId}:${m.url}:${i}`}
+          showsVerticalScrollIndicator={false}
+          columnWrapperStyle={{ paddingHorizontal: sidePad, gap }}
+          contentContainerStyle={{ paddingTop: 4, paddingBottom: TAB_BAR_SPACE, gap: 16 }}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={theme.colors.accent}
+              colors={[theme.colors.accent]}
+              progressBackgroundColor={theme.colors.surface}
+            />
+          }
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <View style={[styles.emptyIcon, { backgroundColor: theme.colors.elevated, borderColor: theme.colors.border }]}>
+                <Icon name="bookmark" size={30} color={theme.colors.accent} />
+              </View>
+              <Text style={[theme.typography.heading, { color: theme.colors.text, marginTop: 18 }]}>
+                {selected === ALL ? 'No saved manga yet' : 'Nothing in this category'}
+              </Text>
+              <Text
+                style={{
+                  color: theme.colors.textMuted,
+                  fontSize: 13.5,
+                  lineHeight: 20,
+                  textAlign: 'center',
+                  marginTop: 8,
+                  maxWidth: 300,
+                }}
+              >
+                {selected === ALL
+                  ? 'Tap the bookmark on any manga to add it here.'
+                  : 'Assign manga to this category from their detail page.'}
+              </Text>
+            </View>
+          }
+          renderItem={({ item }) => (
+            <Cover
+              manga={item}
+              width={coverWidth}
+              onPress={() =>
+                navigation.navigate('MangaDetail', {
+                  sourceId: item.sourceId,
+                  mangaUrl: item.url,
+                  preview: item,
+                })
+              }
+            />
+          )}
+        />
+      </SwipeTabs>
     </View>
   );
 }
@@ -162,13 +188,13 @@ const styles = StyleSheet.create({
   empty: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 48,
+    paddingHorizontal: 32,
     paddingTop: 80,
   },
   emptyIcon: {
-    width: 60,
-    height: 60,
-    borderRadius: 18,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,

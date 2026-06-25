@@ -16,9 +16,10 @@ export function SectionHeader({ title, source, onSeeAll }: SectionHeaderProps) {
       <Text style={[theme.typography.heading, { color: theme.colors.text }]}>
         {title}
         {source ? (
-          <Text style={{ color: theme.colors.textFaint, fontWeight: '400' }}>
-            {'  \u00B7  '}
-            {source}
+          <Text style={{ color: theme.colors.textFaint, fontWeight: '400', fontSize: 13 }}>
+            {'  ('}
+            {source.toLowerCase()}
+            {')'}
           </Text>
         ) : null}
       </Text>

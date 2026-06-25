@@ -2,7 +2,7 @@
  * Design tokens for the locked visual direction:
  * cinematic cover art + Linear-calm chrome + Notion modular home + glass nav.
  *
- * One restrained teal accent. Real color/energy comes from cover artwork
+ * One restrained ember/amber accent. Real color/energy comes from cover artwork
  * (see `dynamicColor` usage in the Featured hero), not from UI chrome.
  */
 
@@ -45,8 +45,8 @@ const dark: Palette = {
   text: '#F4F4F6',
   textMuted: '#9A9AA3',
   textFaint: '#6E6E77',
-  accent: '#19B79E',
-  onAccent: '#04221D',
+  accent: '#F5A623',
+  onAccent: '#2A1705',
   glass: 'rgba(28,28,32,0.62)',
   glassHighlight: 'rgba(255,255,255,0.10)',
   scrim: 'rgba(0,0,0,0.35)',
@@ -61,7 +61,7 @@ const light: Palette = {
   text: '#1A1A1D',
   textMuted: '#6B6B72',
   textFaint: '#9B9BA2',
-  accent: '#0C8E79',
+  accent: '#C26A0A',
   onAccent: '#FFFFFF',
   glass: 'rgba(250,249,247,0.66)',
   glassHighlight: 'rgba(255,255,255,0.70)',

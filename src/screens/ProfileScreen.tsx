@@ -146,11 +146,6 @@ export function ProfileScreen() {
             <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 12.5 }}>Check</Text>
           )}
         </Pressable>
-
-        <Text style={[styles.disclaimer, { color: theme.colors.textFaint }]}>
-          Kagari hosts no content and isn't affiliated with any source or content
-          provider. Everything you read comes from sources you choose to add.
-        </Text>
       </ScrollView>
     </View>
   );
@@ -257,11 +252,5 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  disclaimer: {
-    fontSize: 11.5,
-    lineHeight: 17,
-    marginTop: 18,
-    paddingHorizontal: 4,
   },
 });

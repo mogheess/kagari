@@ -59,6 +59,17 @@ async function hydrate(): Promise<void> {
   persist();
 }
 
+/** Re-reads favorites from storage (drives pull-to-refresh in the Library). */
+export async function reloadFavorites(): Promise<void> {
+  const stored = await store.load();
+  if (stored && Array.isArray(stored)) {
+    favorites = stored
+      .map(f => ({ ...f, categoryIds: f.categoryIds ?? [] }))
+      .sort((a, b) => b.addedAt - a.addedAt);
+  }
+  emit();
+}
+
 export function isFavorited(sourceId: string, url: string): boolean {
   return favorites.some(f => f.sourceId === sourceId && f.url === url);
 }

@@ -12,14 +12,16 @@ interface FeaturedHeroProps {
 }
 
 /**
- * Contained, rounded cinematic hero card. The cover art stays fully visible; a
- * neutral bottom scrim keeps the title legible without tinting the artwork.
+ * Tall rounded poster hero. Sized to portrait cover proportions so the artwork
+ * fills the card edge-to-edge; a bottom scrim keeps the title legible.
  */
 export function FeaturedHero({ manga, tagline, onPress }: FeaturedHeroProps) {
   const theme = useTheme();
   const { width } = useWindowDimensions();
   const cardWidth = width - theme.spacing.lg * 2;
-  const cardHeight = Math.round(cardWidth * 0.62);
+  // Portrait-leaning poster: tall enough that the cover fills the card with only
+  // a small symmetric crop, without dominating the screen.
+  const cardHeight = Math.round(cardWidth * 0.85);
 
   return (
     <Pressable
@@ -36,12 +38,16 @@ export function FeaturedHero({ manga, tagline, onPress }: FeaturedHeroProps) {
       ]}
     >
       {manga.thumbnailUrl ? (
-        <Image source={{ uri: manga.thumbnailUrl }} style={styles.image} resizeMode="cover" />
+        <Image
+          source={{ uri: manga.thumbnailUrl }}
+          style={StyleSheet.absoluteFill}
+          resizeMode="cover"
+        />
       ) : null}
 
       <LinearGradient
-        colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.38)', 'rgba(0,0,0,0.86)']}
-        locations={[0.28, 0.66, 1]}
+        colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.35)', 'rgba(0,0,0,0.85)']}
+        locations={[0.5, 0.8, 1]}
         style={StyleSheet.absoluteFill}
       />
 
@@ -69,13 +75,6 @@ export function FeaturedHero({ manga, tagline, onPress }: FeaturedHeroProps) {
 const styles = StyleSheet.create({
   card: {
     overflow: 'hidden',
-  },
-  image: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    width: '100%',
-    height: '100%',
   },
   content: {
     position: 'absolute',

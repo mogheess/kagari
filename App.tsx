@@ -14,6 +14,8 @@ import { RootNavigator } from './src/navigation/RootNavigator';
 import { getEngine } from './src/engine';
 import { checkForAppUpdate } from './src/app/appUpdate';
 import { checkExtensionUpdates } from './src/sources/extensionUpdates';
+import { initWhatsNew } from './src/app/whatsNew';
+import { WhatsNewSheet } from './src/components/WhatsNewSheet';
 
 function ThemedStatusBar() {
   const theme = useTheme();
@@ -27,6 +29,8 @@ function ThemedStatusBar() {
  */
 function UpdateBootstrap() {
   useEffect(() => {
+    // One-time post-update release notes (runs once per launch).
+    void initWhatsNew();
     const run = () => {
       void checkForAppUpdate();
       void checkExtensionUpdates(getEngine());
@@ -52,6 +56,7 @@ function App() {
             <ThemedStatusBar />
             <UpdateBootstrap />
             <RootNavigator />
+            <WhatsNewSheet />
           </HomeConfigProvider>
         </ThemeProvider>
       </SafeAreaProvider>
