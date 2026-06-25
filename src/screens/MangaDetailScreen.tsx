@@ -17,7 +17,7 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme } from '../theme/ThemeProvider';
 import { useAsync } from '../hooks/useAsync';
-import { loadMangaDetails, loadChapters, invalidateManga } from '../engine/mangaCache';
+import { peekManga, loadMangaDetails, loadChapters, invalidateManga } from '../engine/mangaCache';
 import { Icon } from '../components/Icon';
 import { Skeleton } from '../components/Skeleton';
 import { CategoryAssignSheet } from '../components/CategoryAssignSheet';
@@ -25,6 +25,7 @@ import { seededColor, withAlpha } from '../utils/color';
 import { toggleFavorite, useFavorite, setMangaCategories } from '../library/favorites';
 import { useCategories } from '../library/categories';
 import { recordRead } from '../library/history';
+import { useChapterProgress, chapterKey, type ChapterProgress } from '../library/chapterProgress';
 import {
   useDownloadEntry,
   enqueueDownload,
@@ -46,6 +47,10 @@ function formatDate(ms: number): string {
   });
 }
 
+function formatProgress(p: ChapterProgress): string {
+  return p.pageCount > 0 ? `Page ${p.lastPage} / ${p.pageCount}` : `Page ${p.lastPage}`;
+}
+
 export function MangaDetailScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -57,13 +62,16 @@ export function MangaDetailScreen() {
   const [catSheet, setCatSheet] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
+  const cached = peekManga(params.sourceId, params.mangaUrl);
   const { data: details, reload: reloadDetails } = useAsync<MangaDto>(
     () => loadMangaDetails(params.sourceId, params.mangaUrl),
     [params.sourceId, params.mangaUrl],
+    cached.details,
   );
   const { data: chapters, loading: chaptersLoading, reload: reloadChapters } = useAsync<ChapterDto[]>(
     () => loadChapters(params.sourceId, params.mangaUrl),
     [params.sourceId, params.mangaUrl],
+    cached.chapters,
   );
 
   const onRefresh = useCallback(() => {
@@ -78,6 +86,7 @@ export function MangaDetailScreen() {
   const manga = details ?? params.preview;
   const tint = seededColor(manga?.thumbnailUrl ?? manga?.title ?? 'x', 0.5, 0.32);
   const backdropHeight = Math.round(width * 0.78);
+  const progressMap = useChapterProgress();
   const favorite = useFavorite(params.sourceId, params.mangaUrl);
   const favorited = favorite != null;
   const categories = useCategories();
@@ -251,33 +260,50 @@ export function MangaDetailScreen() {
           <Icon name="filter" size={18} color={theme.colors.textMuted} />
         </View>
 
-        {chaptersLoading
+        {!chapters && chaptersLoading
           ? Array.from({ length: 6 }).map((_, i) => (
               <View key={i} style={{ paddingHorizontal: theme.spacing.lg, paddingVertical: 12 }}>
                 <Skeleton width="60%" height={14} />
               </View>
             ))
-          : (chapters ?? []).map((ch, i) => (
-              <Pressable
-                key={`${ch.url}:${i}`}
-                onPress={() => openReader(ch)}
-                style={({ pressed }) => [
-                  styles.chapterRow,
-                  { borderColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surface : 'transparent' },
-                ]}
-              >
-                <View style={{ flex: 1 }}>
-                  <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
-                    {ch.name}
-                  </Text>
-                  <Text style={{ color: theme.colors.textFaint, fontSize: 12, marginTop: 2 }}>
-                    {formatDate(ch.dateUpload)}
-                    {ch.scanlator ? `  \u00B7  ${ch.scanlator}` : ''}
-                  </Text>
-                </View>
-                <ChapterDownloadButton manga={manga} chapter={ch} />
-              </Pressable>
-            ))}
+          : (chapters ?? []).map((ch, i) => {
+              const prog = progressMap[chapterKey(params.sourceId, ch.url)];
+              const inProgress = !!prog && !prog.read && prog.lastPage > 0;
+              return (
+                <Pressable
+                  key={`${ch.url}:${i}`}
+                  onPress={() => openReader(ch)}
+                  style={({ pressed }) => [
+                    styles.chapterRow,
+                    { borderColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surface : 'transparent' },
+                  ]}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      numberOfLines={1}
+                      style={[
+                        theme.typography.bodyStrong,
+                        { color: prog?.read ? theme.colors.textFaint : theme.colors.text },
+                      ]}
+                    >
+                      {ch.name}
+                    </Text>
+                    <View style={styles.chapterMeta}>
+                      <Text style={{ color: theme.colors.textFaint, fontSize: 12 }}>
+                        {formatDate(ch.dateUpload)}
+                        {ch.scanlator ? `  \u00B7  ${ch.scanlator}` : ''}
+                      </Text>
+                      {inProgress ? (
+                        <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '700' }}>
+                          {formatProgress(prog)}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </View>
+                  <ChapterDownloadButton manga={manga} chapter={ch} />
+                </Pressable>
+              );
+            })}
       </ScrollView>
 
       <CategoryAssignSheet
@@ -465,6 +491,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 13,
     borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  chapterMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 2,
+    flexWrap: 'wrap',
   },
   dlBtn: {
     width: 40,

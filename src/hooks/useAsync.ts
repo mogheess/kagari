@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, DependencyList } from 'react';
+import { useEffect, useRef, useState, useCallback, DependencyList } from 'react';
 
 interface AsyncState<T> {
   data: T | null;
@@ -7,18 +7,33 @@ interface AsyncState<T> {
   reload: () => void;
 }
 
-/** Minimal data-fetching hook with loading/error state and manual reload. */
-export function useAsync<T>(fn: () => Promise<T>, deps: DependencyList): AsyncState<T> {
-  const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState(true);
+/**
+ * Minimal data-fetching hook with loading/error state and manual reload.
+ *
+ * Pass `initialData` (e.g. a synchronous cache hit) to render immediately
+ * without a loading flash; the fetcher still runs to refresh.
+ */
+export function useAsync<T>(
+  fn: () => Promise<T>,
+  deps: DependencyList,
+  initialData?: T | null,
+): AsyncState<T> {
+  const [data, setData] = useState<T | null>(initialData ?? null);
+  const [loading, setLoading] = useState(initialData == null);
   const [error, setError] = useState<Error | null>(null);
   const [nonce, setNonce] = useState(0);
+  const firstRun = useRef(true);
 
   const reload = useCallback(() => setNonce(n => n + 1), []);
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
+    // Keep the seeded data visible (no loading flash) on the first run; later
+    // runs (deps change / reload) show the loading state as usual.
+    if (!(firstRun.current && initialData != null)) {
+      setLoading(true);
+    }
+    firstRun.current = false;
     setError(null);
     fn()
       .then(res => {
