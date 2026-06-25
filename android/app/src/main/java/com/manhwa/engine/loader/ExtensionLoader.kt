@@ -1,3 +1,8 @@
+/*
+ * Extension discovery/loading adapted from the Mihon/Tachiyomi ExtensionLoader
+ * (https://github.com/mihonapp/mihon), licensed under the Apache License 2.0.
+ * Modified for Kagari. See NOTICE for attribution and LICENSE for terms.
+ */
 package com.manhwa.engine.loader
 
 import android.content.Context

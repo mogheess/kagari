@@ -1,3 +1,8 @@
+/*
+ * Child-first classloader adapted from Mihon/Tachiyomi's extension classloader
+ * (https://github.com/mihonapp/mihon), licensed under the Apache License 2.0.
+ * Modified for Kagari. See NOTICE for attribution and LICENSE for terms.
+ */
 package com.manhwa.engine.loader
 
 import dalvik.system.PathClassLoader
