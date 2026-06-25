@@ -26,6 +26,7 @@ import Animated, {
 import { useAsync } from '../hooks/useAsync';
 import { getEngine } from '../engine';
 import { recordProgress } from '../library/history';
+import { recordChapterProgress } from '../library/chapterProgress';
 import { useDownloadEntry } from '../library/downloads';
 import { Icon } from '../components/Icon';
 import { useTheme } from '../theme/ThemeProvider';
@@ -126,16 +127,20 @@ export function ReaderScreen() {
     progressRef.current = { page: current + 1, total };
     const t = setTimeout(() => {
       recordProgress(params.sourceId, params.mangaUrl, current + 1, total);
+      recordChapterProgress(params.sourceId, params.chapter.url, current + 1, total);
     }, 600);
     return () => clearTimeout(t);
-  }, [current, total, params.sourceId, params.mangaUrl]);
+  }, [current, total, params.sourceId, params.mangaUrl, params.chapter.url]);
 
   useEffect(() => {
     return () => {
       const { page, total: t } = progressRef.current;
-      if (t > 0) recordProgress(params.sourceId, params.mangaUrl, page, t);
+      if (t > 0) {
+        recordProgress(params.sourceId, params.mangaUrl, page, t);
+        recordChapterProgress(params.sourceId, params.chapter.url, page, t);
+      }
     };
-  }, [params.sourceId, params.mangaUrl]);
+  }, [params.sourceId, params.mangaUrl, params.chapter.url]);
 
   const renderPage = useCallback(
     ({ item }: { item: PageDto }) => (

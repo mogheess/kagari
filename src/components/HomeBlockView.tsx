@@ -9,6 +9,7 @@ import { FeaturedCarousel } from './FeaturedCarousel';
 import { blockLabel, useHomeConfig, type HomeBlock } from '../home/HomeConfig';
 import { useFavorites, favoriteToManga } from '../library/favorites';
 import { pickDefaultSource } from '../utils/sourceSelect';
+import { useSourceHealth, unhealthyIds, recordSourceResult } from '../sources/sourceHealth';
 import type { MangaDto, SourceDto } from '../engine/types';
 
 /** How many top-popular entries the featured carousel rotates through. */
@@ -32,7 +33,12 @@ export function HomeBlockView({ block, sources, onOpenManga, refreshKey = 0 }: H
     return <ContinueBlock onOpenManga={onOpenManga} />;
   }
   return (
-    <BrowseBlock block={block} sources={sources} onOpenManga={onOpenManga} refreshKey={refreshKey} />
+    <BrowseBlock
+      block={block}
+      sources={sources}
+      onOpenManga={onOpenManga}
+      refreshKey={refreshKey}
+    />
   );
 }
 
@@ -70,6 +76,7 @@ function BrowseBlock({
   const theme = useTheme();
   const engine = getEngine();
   const { universalSourceId } = useHomeConfig();
+  const health = useSourceHealth();
 
   const wantsLatest = block.kind === 'latest';
   // Resolution order: per-section override -> universal source -> smart default.
@@ -81,18 +88,22 @@ function BrowseBlock({
     ? override
     : ok(universal)
       ? universal
-      : pickDefaultSource(sources, { needsLatest: wantsLatest });
+      : pickDefaultSource(sources, { needsLatest: wantsLatest, unhealthy: unhealthyIds(health) });
   const usable = ok(source);
   const sourceId = source?.id;
 
   const { data, loading } = useAsync<MangaDto[]>(async () => {
     if (!sourceId || !usable) return [];
-    if (wantsLatest) {
-      const res = await engine.getLatest(sourceId, 1);
+    try {
+      const res = wantsLatest
+        ? await engine.getLatest(sourceId, 1)
+        : await engine.getPopular(sourceId, 1);
+      recordSourceResult(sourceId, true);
       return res.manga;
+    } catch (e) {
+      recordSourceResult(sourceId, false);
+      throw e;
     }
-    const res = await engine.getPopular(sourceId, 1);
-    return res.manga;
   }, [sourceId, block.kind, usable, refreshKey]);
 
   if (!usable) return null;

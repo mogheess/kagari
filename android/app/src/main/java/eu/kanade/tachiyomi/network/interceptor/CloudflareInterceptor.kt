@@ -59,7 +59,12 @@ class CloudflareInterceptor(
     }
 
     private fun Response.isChallenge(): Boolean {
-        return code in ERROR_CODES && header("Server") in SERVER_CHECK
+        // Classic "I'm under attack" pages serve 403/503 from a cloudflare server;
+        // newer managed challenges (Turnstile) add a `cf-mitigated: challenge`
+        // header. Treat either as a challenge worth solving in the WebView.
+        val fromCloudflare = header("Server") in SERVER_CHECK
+        val managedChallenge = header("cf-mitigated").equals("challenge", ignoreCase = true)
+        return code in ERROR_CODES && (fromCloudflare || managedChallenge)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
