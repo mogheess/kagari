@@ -49,14 +49,15 @@ function emit(): void {
 
 async function hydrate(): Promise<void> {
   const s = await store.load();
-  if (s) {
-    state = {
-      ...state,
-      latest: s.latest,
-      available: s.available,
-      checkedAt: s.checkedAt,
-    };
-    emit();
+  if (!s) return;
+  // Recompute against the *current* build instead of trusting the cached flag:
+  // after the user updates, a stale "available" should clear on its own without
+  // waiting for the throttled re-check (or a manual "Check for updates").
+  const available = !!s.latest && compareVersions(s.latest.version, APP_VERSION) > 0;
+  state = { ...state, latest: s.latest, available, checkedAt: s.checkedAt };
+  emit();
+  if (available !== s.available) {
+    store.save({ latest: s.latest, available, checkedAt: s.checkedAt });
   }
 }
 
