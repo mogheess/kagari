@@ -46,6 +46,8 @@ function createUnavailableEngine(): Engine {
     downloadPage: reject,
     fetchDownloadedImage: reject,
     deleteDownloadedChapter: () => Promise.resolve(),
+    pickMihonBackup: () => Promise.resolve(null),
+    importMihonBackup: reject,
   };
 }
 

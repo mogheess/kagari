@@ -20,6 +20,7 @@ import type {
   FilterDto,
   RepoDto,
   AvailableExtensionDto,
+  MihonBackupDto,
 } from './types';
 import { fetchAllRepos } from './repoClient';
 
@@ -46,6 +47,8 @@ interface ManhwaEngineNative {
   downloadPage(sourceId: string, chapterUrl: string, pageJson: string): Promise<string>;
   fetchDownloadedImage(sourceId: string, chapterUrl: string, pageIndex: number): Promise<string>;
   deleteDownloadedChapter(sourceId: string, chapterUrl: string): Promise<void>;
+  pickMihonBackup(): Promise<string | null>;
+  importMihonBackup(uri: string): Promise<string>;
 }
 
 const Native = NativeModules.ManhwaEngine as ManhwaEngineNative | undefined;
@@ -157,6 +160,13 @@ export function createNativeEngine(): Engine | null {
     async deleteDownloadedChapter(sourceId, chapterUrl) {
       if (typeof Native.deleteDownloadedChapter !== 'function') return;
       await Native.deleteDownloadedChapter(sourceId, chapterUrl);
+    },
+    async pickMihonBackup() {
+      if (typeof Native.pickMihonBackup !== 'function') return null;
+      return await Native.pickMihonBackup();
+    },
+    async importMihonBackup(uri) {
+      return parse<MihonBackupDto>(await Native.importMihonBackup(uri));
     },
   };
 }

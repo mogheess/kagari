@@ -91,6 +91,44 @@ export function recordChapterProgress(
   persist();
 }
 
+export interface ChapterProgressImport {
+  sourceId: string;
+  chapterUrl: string;
+  lastPage: number;
+  pageCount: number;
+  read: boolean;
+  readAt: number;
+}
+
+/**
+ * Bulk-merges chapter read state (used by the Mihon importer). Never downgrades
+ * existing progress: read stays read, and the furthest page only advances.
+ * Returns the number of chapter entries created or upgraded.
+ */
+export function importChapterProgress(entries: ChapterProgressImport[]): number {
+  let changed = 0;
+  const next = { ...progress };
+  for (const e of entries) {
+    const key = chapterKey(e.sourceId, e.chapterUrl);
+    const prev = next[key];
+    const lastPage = Math.max(prev?.lastPage ?? 0, e.lastPage);
+    const read = (prev?.read ?? false) || e.read;
+    const pageCount = Math.max(prev?.pageCount ?? 0, e.pageCount);
+    if (prev && prev.lastPage === lastPage && prev.read === read && prev.pageCount === pageCount) {
+      continue;
+    }
+    next[key] = { lastPage, pageCount, read, readAt: Math.max(prev?.readAt ?? 0, e.readAt) };
+    changed += 1;
+  }
+  if (changed > 0) {
+    progress = next;
+    prune();
+    emit();
+    persist();
+  }
+  return changed;
+}
+
 /** Explicitly sets the read flag for a chapter (e.g. a manual toggle). */
 export function setChapterRead(sourceId: string, chapterUrl: string, read: boolean): void {
   const key = chapterKey(sourceId, chapterUrl);

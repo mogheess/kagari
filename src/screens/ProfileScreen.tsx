@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Linking } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -8,6 +8,8 @@ import { Icon, type IconName } from '../components/Icon';
 import { useAppUpdate, checkForAppUpdate } from '../app/appUpdate';
 import { useExtensionUpdates } from '../sources/extensionUpdates';
 import { APP_VERSION } from '../app/version';
+import { getEngine } from '../engine';
+import { pickAndImportMihonBackup } from '../library/mihonImport';
 import type { RootStackParamList } from '../navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -86,6 +88,11 @@ export function ProfileScreen() {
         <Row icon="grid" label="Customize Home" onPress={() => navigation.navigate('CustomizeHome')} />
         <Row icon="bookmark" label="Categories" onPress={() => navigation.navigate('Categories')} />
         <Row icon="download" label="Downloads" onPress={() => navigation.navigate('Downloads')} />
+
+        <Text style={[styles.sectionLabel, { color: theme.colors.textFaint, marginTop: 28 }]}>
+          DATA
+        </Text>
+        <MihonImportRow />
 
         <Text style={[styles.sectionLabel, { color: theme.colors.textFaint, marginTop: 28 }]}>
           ABOUT
@@ -188,6 +195,88 @@ function Row({
         <Text style={{ color: theme.colors.textFaint, fontSize: 12 }}>{hint}</Text>
       ) : null}
       <Icon name="chevronRight" size={18} color={theme.colors.textFaint} />
+    </Pressable>
+  );
+}
+
+type ImportState =
+  | { status: 'idle' }
+  | { status: 'working' }
+  | { status: 'done'; message: string }
+  | { status: 'error'; message: string };
+
+/**
+ * Imports a Mihon/Tachiyomi `.tachibk` backup: library, categories, read state
+ * and history are merged into the local stores (never destructive).
+ */
+function MihonImportRow() {
+  const theme = useTheme();
+  const [state, setState] = useState<ImportState>({ status: 'idle' });
+  const working = state.status === 'working';
+
+  const run = async () => {
+    if (working) return;
+    setState({ status: 'working' });
+    try {
+      const summary = await pickAndImportMihonBackup(getEngine());
+      if (!summary) {
+        setState({ status: 'idle' });
+        return;
+      }
+      const parts = [`${summary.mangaAdded} added`];
+      if (summary.mangaInBackup > summary.mangaAdded) {
+        parts.push(`${summary.mangaInBackup - summary.mangaAdded} already in library`);
+      }
+      if (summary.categories > 0) parts.push(`${summary.categories} categories`);
+      setState({ status: 'done', message: parts.join(' · ') });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Import failed';
+      setState({ status: 'error', message });
+    }
+  };
+
+  const subtitle =
+    state.status === 'working'
+      ? 'Reading backup…'
+      : state.status === 'done'
+        ? state.message
+        : state.status === 'error'
+          ? state.message
+          : 'Restore a .tachibk library backup';
+
+  return (
+    <Pressable
+      onPress={run}
+      disabled={working}
+      style={({ pressed }) => [
+        styles.row,
+        {
+          backgroundColor: pressed ? theme.colors.elevated : theme.colors.surface,
+          borderColor: state.status === 'error' ? theme.colors.danger : theme.colors.border,
+        },
+      ]}
+    >
+      <Icon name="download" size={20} color={theme.colors.textMuted} />
+      <View style={{ flex: 1 }}>
+        <Text style={[theme.typography.body, { color: theme.colors.text }]}>Import from Mihon</Text>
+        <Text
+          numberOfLines={2}
+          style={{
+            color: state.status === 'error' ? theme.colors.danger : theme.colors.textFaint,
+            fontSize: 12,
+            marginTop: 2,
+          }}
+        >
+          {subtitle}
+        </Text>
+      </View>
+      {working ? (
+        <ActivityIndicator size="small" color={theme.colors.textMuted} />
+      ) : (
+        <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 12.5 }}>
+          {state.status === 'done' ? 'Again' : 'Import'}
+        </Text>
+      )}
     </Pressable>
   );
 }

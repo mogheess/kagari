@@ -130,6 +130,28 @@ export interface AvailableExtensionDto {
   installed: boolean;
 }
 
+/** A Mihon/Tachiyomi backup decoded into the bits Kagari can import. */
+export interface MihonBackupDto {
+  /** Category names, in their original order. */
+  categories: string[];
+  manga: MihonBackupMangaDto[];
+}
+
+export interface MihonBackupMangaDto {
+  sourceId: string;
+  url: string;
+  title: string;
+  thumbnailUrl?: string;
+  author?: string;
+  dateAdded: number;
+  /** Category names this manga belongs to. */
+  categories: string[];
+  /** Chapters with read state worth importing (read or partially read). */
+  chapters: { url: string; name: string; read: boolean; lastPageRead: number }[];
+  /** Most recent read, for the history/continue feed. */
+  lastChapter?: { url: string; name: string; readAt: number };
+}
+
 /**
  * Dynamic filter schema a source exposes (Tachiyomi FilterList) serialized to
  * JSON so the UI can render it generically and pass selections back.
@@ -227,4 +249,11 @@ export interface Engine {
   ): Promise<ImageFileDto>;
   /** Deletes all downloaded pages for a chapter. */
   deleteDownloadedChapter(sourceId: string, chapterUrl: string): Promise<void>;
+  /**
+   * Opens the system file picker for a Mihon/Tachiyomi backup. Resolves with a
+   * content URI, or null if the user cancelled.
+   */
+  pickMihonBackup(): Promise<string | null>;
+  /** Decodes a Mihon/Tachiyomi backup at the given content URI. */
+  importMihonBackup(uri: string): Promise<MihonBackupDto>;
 }

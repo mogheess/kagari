@@ -16,6 +16,8 @@ import com.manhwa.engine.dto.MangaDto
 import com.manhwa.engine.dto.MangasPageDto
 import com.manhwa.engine.dto.PageDto
 import com.manhwa.engine.dto.SourceDto
+import com.manhwa.engine.backup.MihonBackupImporter
+import com.manhwa.engine.backup.MihonImportResult
 import com.manhwa.engine.loader.ExtensionLoader
 import com.manhwa.engine.loader.LoadedExtension
 import com.manhwa.engine.loader.SignatureTrust
@@ -87,6 +89,11 @@ class EngineFacade(context: Context) {
         return extensions.flatMap { ext ->
             ext.sources.map { Mappers.sourceToDto(it, ext.pkg, ext.isNsfw) }
         }
+    }
+
+    /** Decodes a Mihon/Tachiyomi `.tachibk` backup into an importable summary. */
+    fun importMihonBackup(uriString: String): MihonImportResult {
+        return MihonBackupImporter.parse(appContext, uriString)
     }
 
     fun trustSignature(pkg: String, certSha256: String) {

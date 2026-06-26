@@ -100,6 +100,40 @@ export function toggleFavorite(m: MangaDto, categoryIds: string[] = []): boolean
   return !exists;
 }
 
+/**
+ * Bulk-adds favorites (used by the Mihon importer). Existing entries are kept
+ * but have the imported category ids merged in; new entries are inserted.
+ * Returns the number of manga newly added to the library.
+ */
+export function importFavorites(entries: FavoriteManga[]): number {
+  const map = new Map<string, FavoriteManga>();
+  for (const f of favorites) map.set(keyOf(f.sourceId, f.url), f);
+  let added = 0;
+  for (const incoming of entries) {
+    const k = keyOf(incoming.sourceId, incoming.url);
+    const existing = map.get(k);
+    if (existing) {
+      const categoryIds = [...new Set([...existing.categoryIds, ...incoming.categoryIds])];
+      map.set(k, {
+        ...existing,
+        categoryIds,
+        // Backfill metadata we may not have had before.
+        thumbnailUrl: existing.thumbnailUrl ?? incoming.thumbnailUrl,
+        author: existing.author ?? incoming.author,
+        addedAt: Math.min(existing.addedAt, incoming.addedAt),
+      });
+    } else {
+      map.set(k, incoming);
+      removedBeforeHydrate.delete(k);
+      added += 1;
+    }
+  }
+  favorites = [...map.values()].sort((a, b) => b.addedAt - a.addedAt);
+  emit();
+  persist();
+  return added;
+}
+
 /** Sets the category membership for a favorited manga. */
 export function setMangaCategories(sourceId: string, url: string, categoryIds: string[]): void {
   favorites = favorites.map(f =>
