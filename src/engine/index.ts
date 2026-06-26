@@ -46,6 +46,8 @@ function createUnavailableEngine(): Engine {
     downloadPage: reject,
     fetchDownloadedImage: reject,
     deleteDownloadedChapter: () => Promise.resolve(),
+    saveImageToGallery: reject,
+    shareImage: reject,
   };
 }
 

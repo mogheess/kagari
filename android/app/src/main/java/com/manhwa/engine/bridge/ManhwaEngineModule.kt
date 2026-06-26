@@ -175,6 +175,19 @@ class ManhwaEngineModule(
             ""
         }
 
+    // --- save / share ---
+
+    @ReactMethod
+    fun saveImageToGallery(uri: String, promise: Promise) = resolve(promise) {
+        facade.saveImageToGallery(uri)
+    }
+
+    @ReactMethod
+    fun shareImage(uri: String, promise: Promise) = resolve(promise) {
+        facade.shareImage(uri)
+        ""
+    }
+
     /** Runs [block] on the IO scope and bridges the result/error to the Promise. */
     private fun resolve(promise: Promise, block: suspend () -> String) {
         scope.launch {

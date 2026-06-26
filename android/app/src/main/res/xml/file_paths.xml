@@ -2,4 +2,6 @@
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Downloaded extension APKs live in cacheDir/extensions. -->
     <cache-path name="extensions" path="extensions/" />
+    <!-- Reader pages staged for the system share sheet live in cacheDir/shared. -->
+    <cache-path name="shared" path="shared/" />
 </paths>

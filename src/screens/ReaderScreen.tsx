@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   useWindowDimensions,
   StatusBar,
+  ToastAndroid,
   ViewToken,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,8 +28,8 @@ import { useAsync } from '../hooks/useAsync';
 import { getEngine } from '../engine';
 import { recordProgress } from '../library/history';
 import { recordChapterProgress } from '../library/chapterProgress';
-import { useDownloadEntry } from '../library/downloads';
-import { Icon } from '../components/Icon';
+import { useDownloadEntry, enqueueDownload, type DownloadStatus } from '../library/downloads';
+import { Icon, type IconName } from '../components/Icon';
 import { useTheme } from '../theme/ThemeProvider';
 import {
   READER_MODES,
@@ -39,7 +40,11 @@ import {
   type ReaderMode,
 } from '../reader/readerSettings';
 import type { RootStackParamList } from '../navigation/types';
-import type { ImageFileDto, ImageTileDto, PageDto } from '../engine/types';
+import type { ImageFileDto, ImageTileDto, MangaDto, PageDto } from '../engine/types';
+
+function notify(message: string): void {
+  ToastAndroid.show(message, ToastAndroid.SHORT);
+}
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type ReaderRoute = RouteProp<RootStackParamList, 'Reader'>;
@@ -60,6 +65,7 @@ export function ReaderScreen() {
   const [current, setCurrent] = useState(0);
   const [mode, setMode] = useState<ReaderMode>(getReaderMode());
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [zoomed, setZoomed] = useState(false);
   // Controlled per-page reload counters so a long-press (or the error Retry
   // button) can force a fresh fetch of a specific page.
@@ -113,6 +119,65 @@ export function ReaderScreen() {
   const inverted = mode === 'rtl';
 
   const toggleChrome = useCallback(() => setChrome(c => !c), []);
+
+  // Resolve the current page to a local file:// uri (cache-backed, so this is
+  // cheap once the page has rendered) for the save/share actions.
+  const resolveCurrentUri = useCallback(async (): Promise<string | null> => {
+    const page = pages?.[current];
+    if (!page) return null;
+    try {
+      const image = offline
+        ? await engine.fetchDownloadedImage(params.sourceId, params.chapter.url, page.index)
+        : await engine.fetchImage(params.sourceId, page);
+      return image.uri;
+    } catch {
+      return null;
+    }
+  }, [pages, current, offline, engine, params.sourceId, params.chapter.url]);
+
+  const onSavePage = useCallback(async () => {
+    setMenuOpen(false);
+    const uri = await resolveCurrentUri();
+    if (!uri) {
+      notify('This page has not loaded yet');
+      return;
+    }
+    try {
+      await engine.saveImageToGallery(uri);
+      notify('Saved to gallery');
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Could not save the page');
+    }
+  }, [resolveCurrentUri, engine]);
+
+  const onSharePage = useCallback(async () => {
+    setMenuOpen(false);
+    const uri = await resolveCurrentUri();
+    if (!uri) {
+      notify('This page has not loaded yet');
+      return;
+    }
+    try {
+      await engine.shareImage(uri);
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Could not share the page');
+    }
+  }, [resolveCurrentUri, engine]);
+
+  const onDownloadChapter = useCallback(() => {
+    setMenuOpen(false);
+    const manga: MangaDto = {
+      sourceId: params.sourceId,
+      url: params.mangaUrl,
+      title: params.mangaTitle ?? params.chapter.name,
+      thumbnailUrl: params.mangaThumbnailUrl,
+      genres: [],
+      status: 'unknown',
+      initialized: false,
+    };
+    enqueueDownload(manga, params.chapter);
+    notify('Chapter queued for download');
+  }, [params]);
 
   const onViewable = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
     const first = viewableItems[0];
@@ -224,9 +289,12 @@ export function ReaderScreen() {
       runOnJS(retryPage)(current);
     });
 
-  const gesture = Gesture.Simultaneous(
-    pinch,
-    pan,
+  // Pinch and pan zoom together; the tap family stays in its own Exclusive so
+  // the single/double-tap disambiguation survives. Wrapping everything in one
+  // Simultaneous (the previous shape) made single + double tap fire together,
+  // which swallowed the double-tap-to-zoom.
+  const gesture = Gesture.Race(
+    Gesture.Simultaneous(pinch, pan),
     Gesture.Exclusive(doubleTap, singleTap, longPress),
   );
 
@@ -290,9 +358,14 @@ export function ReaderScreen() {
           <Text numberOfLines={1} style={styles.chapterTitle}>
             {params.chapter.name}
           </Text>
-          <Pressable hitSlop={10} onPress={() => setSettingsOpen(true)}>
-            <Icon name="settings" size={22} color="#fff" />
-          </Pressable>
+          <View style={styles.topActions}>
+            <Pressable hitSlop={10} onPress={() => setMenuOpen(true)}>
+              <Icon name="more" size={22} color="#fff" />
+            </Pressable>
+            <Pressable hitSlop={10} onPress={() => setSettingsOpen(true)}>
+              <Icon name="settings" size={22} color="#fff" />
+            </Pressable>
+          </View>
         </View>
       ) : null}
 
@@ -324,6 +397,15 @@ export function ReaderScreen() {
           setSettingsOpen(false);
         }}
         onClose={() => setSettingsOpen(false)}
+      />
+
+      <ReaderMenuSheet
+        visible={menuOpen}
+        downloadStatus={downloadEntry?.status}
+        onSave={onSavePage}
+        onShare={onSharePage}
+        onDownload={onDownloadChapter}
+        onClose={() => setMenuOpen(false)}
       />
     </View>
   );
@@ -580,6 +662,112 @@ function ReaderSettingsSheet({
   );
 }
 
+function ReaderMenuSheet({
+  visible,
+  downloadStatus,
+  onSave,
+  onShare,
+  onDownload,
+  onClose,
+}: {
+  visible: boolean;
+  downloadStatus?: DownloadStatus;
+  onSave: () => void;
+  onShare: () => void;
+  onDownload: () => void;
+  onClose: () => void;
+}) {
+  const theme = useTheme();
+  const insets = useSafeAreaInsets();
+
+  const downloading = downloadStatus === 'downloading' || downloadStatus === 'queued';
+  const downloadLabel =
+    downloadStatus === 'done'
+      ? 'Chapter downloaded'
+      : downloading
+        ? 'Downloading chapter\u2026'
+        : 'Download chapter';
+  const downloadHint =
+    downloadStatus === 'done'
+      ? 'Saved for offline reading'
+      : downloadStatus === 'error'
+        ? 'Last attempt failed, tap to retry'
+        : 'Save every page for offline reading';
+
+  const items: {
+    key: string;
+    icon: IconName;
+    label: string;
+    hint: string;
+    onPress: () => void;
+    disabled?: boolean;
+  }[] = [
+    {
+      key: 'save',
+      icon: 'image',
+      label: 'Save page to gallery',
+      hint: 'Save the current page as an image',
+      onPress: onSave,
+    },
+    {
+      key: 'share',
+      icon: 'share',
+      label: 'Share page',
+      hint: 'Send the current page to another app',
+      onPress: onShare,
+    },
+    {
+      key: 'download',
+      icon: 'download',
+      label: downloadLabel,
+      hint: downloadHint,
+      onPress: onDownload,
+      disabled: downloadStatus === 'done' || downloading,
+    },
+  ];
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={styles.sheetBackdrop} onPress={onClose} />
+      <View
+        style={[
+          styles.sheet,
+          { backgroundColor: theme.colors.bg, paddingBottom: insets.bottom + 10, borderColor: theme.colors.border },
+        ]}
+      >
+        <View style={styles.grabber} />
+        <Text style={[theme.typography.heading, { color: theme.colors.text, marginBottom: 6 }]}>
+          Page options
+        </Text>
+        {items.map(item => (
+          <Pressable
+            key={item.key}
+            onPress={item.onPress}
+            disabled={item.disabled}
+            style={({ pressed }) => [
+              styles.modeRow,
+              {
+                backgroundColor: pressed ? theme.colors.surface : 'transparent',
+                opacity: item.disabled ? 0.45 : 1,
+              },
+            ]}
+          >
+            <Icon name={item.icon} size={20} color={theme.colors.text} />
+            <View style={{ flex: 1 }}>
+              <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
+                {item.label}
+              </Text>
+              <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginTop: 2 }}>
+                {item.hint}
+              </Text>
+            </View>
+          </Pressable>
+        ))}
+      </View>
+    </Modal>
+  );
+}
+
 const styles = StyleSheet.create({
   zoomLayer: {
     flex: 1,
@@ -659,6 +847,11 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 15,
     fontWeight: '600',
+  },
+  topActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 18,
   },
   bottomBar: {
     position: 'absolute',

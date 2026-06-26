@@ -8,6 +8,9 @@ export type RootStackParamList = {
   Reader: {
     sourceId: string;
     mangaUrl: string;
+    /** Manga title/cover for actions like queuing a download from the reader. */
+    mangaTitle?: string;
+    mangaThumbnailUrl?: string;
     chapter: ChapterDto;
     chapters: ChapterDto[];
   };
