@@ -10,6 +10,8 @@ import { blockLabel, useHomeConfig, type HomeBlock } from '../home/HomeConfig';
 import { useFavorites, favoriteToManga } from '../library/favorites';
 import { pickDefaultSource } from '../utils/sourceSelect';
 import { useSourceHealth, unhealthyIds, recordSourceResult } from '../sources/sourceHealth';
+import { requestDiscover } from '../sources/discoverIntent';
+import { useTabNav } from '../navigation/TabNav';
 import type { MangaDto, SourceDto } from '../engine/types';
 
 /** How many top-popular entries the featured carousel rotates through. */
@@ -44,13 +46,14 @@ export function HomeBlockView({ block, sources, onOpenManga, refreshKey = 0 }: H
 
 function ContinueBlock({ onOpenManga }: { onOpenManga: (m: MangaDto) => void }) {
   const theme = useTheme();
+  const { navigateTab } = useTabNav();
   const favorites = useFavorites();
   if (favorites.length === 0) return null;
 
   return (
     <View style={{ marginBottom: theme.spacing.xxl }}>
       <View style={{ paddingHorizontal: theme.spacing.lg, marginBottom: theme.spacing.md }}>
-        <SectionHeader title="Library" onSeeAll={() => {}} />
+        <SectionHeader title="Library" onSeeAll={() => navigateTab('library')} />
       </View>
       <CoverRail
         data={favorites.map(favoriteToManga)}
@@ -75,6 +78,7 @@ function BrowseBlock({
 }) {
   const theme = useTheme();
   const engine = getEngine();
+  const { navigateTab } = useTabNav();
   const { universalSourceId } = useHomeConfig();
   const health = useSourceHealth();
 
@@ -121,7 +125,14 @@ function BrowseBlock({
         <SectionHeader
           title={blockLabel(block).split(' \u00B7 ')[0]}
           source={source?.name}
-          onSeeAll={() => {}}
+          onSeeAll={
+            sourceId
+              ? () => {
+                  requestDiscover(sourceId, wantsLatest ? 'latest' : 'popular');
+                  navigateTab('discover');
+                }
+              : undefined
+          }
         />
       </View>
       <CoverRail data={data ?? []} loading={loading} coverWidth={112} onPressItem={onOpenManga} />

@@ -58,6 +58,15 @@ async function hydrate(): Promise<void> {
   persist();
 }
 
+/** Re-reads history from storage (drives pull-to-refresh in the Activity tab). */
+export async function reloadHistory(): Promise<void> {
+  const stored = await store.load();
+  if (stored && Array.isArray(stored)) {
+    history = stored.sort((a, b) => b.readAt - a.readAt).slice(0, MAX_ENTRIES);
+  }
+  emit();
+}
+
 /** Records (or refreshes) the last-read chapter for a manga. */
 export function recordRead(manga: MangaDto, chapter: ChapterDto): void {
   const existing = history.find(

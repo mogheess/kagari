@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   Pressable,
   StyleSheet,
   ActivityIndicator,
+  RefreshControl,
   useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,10 +19,12 @@ import { getEngine } from '../engine';
 import { Cover } from '../components/Cover';
 import { CoverRail } from '../components/CoverRail';
 import { Icon } from '../components/Icon';
+import { SwipeTabs } from '../components/SwipeTabs';
 import { SourcePickerSheet } from '../components/SourcePickerSheet';
 import { GlobalSourcesSheet } from '../components/GlobalSourcesSheet';
 import { usePinnedSources } from '../sources/pinned';
 import { useSourceHealth, unhealthyIds, recordSourceResult } from '../sources/sourceHealth';
+import { useDiscoverIntent, type BrowseMode } from '../sources/discoverIntent';
 import { langLabel } from '../utils/lang';
 import { pickDefaultSource, sortSourcesForPicker } from '../utils/sourceSelect';
 import type { RootStackParamList } from '../navigation/types';
@@ -51,6 +54,7 @@ export function DiscoverScreen() {
   const [mode, setMode] = useState<DiscoverMode>('source');
   const [sources, setSources] = useState<SourceDto[]>([]);
   const [sourceId, setSourceId] = useState('');
+  const [browse, setBrowse] = useState<BrowseMode>('popular');
   const [query, setQuery] = useState('');
   const [debounced, setDebounced] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -59,6 +63,8 @@ export function DiscoverScreen() {
   const pinned = usePinnedSources();
   const health = useSourceHealth();
   const userPicked = useRef(false);
+  const intent = useDiscoverIntent();
+  const appliedIntent = useRef(0);
 
   useEffect(() => {
     engine.listSources().then(s => setSources(sortSourcesForPicker(s)));
@@ -80,6 +86,22 @@ export function DiscoverScreen() {
     userPicked.current = true;
     setSourceId(id);
   };
+
+  // A "See all" tap on Home parks a target here; apply it once per request.
+  useEffect(() => {
+    if (!intent || intent.nonce === appliedIntent.current) return;
+    appliedIntent.current = intent.nonce;
+    userPicked.current = true;
+    setMode('source');
+    setSourceId(intent.sourceId);
+    setBrowse(intent.browse);
+  }, [intent]);
+
+  // Keep the browse mode coherent: a source that can't do "latest" falls back.
+  useEffect(() => {
+    const cur = sources.find(s => s.id === sourceId);
+    if (browse === 'latest' && cur && !cur.supportsLatest) setBrowse('popular');
+  }, [sourceId, sources, browse]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(query), 350);
@@ -143,11 +165,20 @@ export function DiscoverScreen() {
         </View>
 
         {mode === 'source' ? (
-          <SourceSelectPill
-            source={sources.find(s => s.id === sourceId)}
-            visible={sources.length > 0}
-            onPress={() => setPickerOpen(true)}
-          />
+          <>
+            <SourceSelectPill
+              source={sources.find(s => s.id === sourceId)}
+              visible={sources.length > 0}
+              onPress={() => setPickerOpen(true)}
+            />
+            {sources.length > 0 && !query.trim() ? (
+              <BrowseToggle
+                browse={browse}
+                supportsLatest={!!sources.find(s => s.id === sourceId)?.supportsLatest}
+                onChange={setBrowse}
+              />
+            ) : null}
+          </>
         ) : (
           <Pressable
             onPress={() => setChooserOpen(true)}
@@ -165,28 +196,35 @@ export function DiscoverScreen() {
         )}
       </View>
 
-      {mode === 'source' ? (
-        <SourceBrowse
-          sourceId={sourceId}
-          source={sources.find(s => s.id === sourceId)}
-          query={debounced}
-          sourcesCount={sources.length}
-          onOpenManga={openManga}
-          onAddExtensions={() => navigation.navigate('Extensions')}
-        />
-      ) : (
-        <GlobalSearch
-          sources={sources}
-          pinned={pinned}
-          query={debounced}
-          onOpenManga={openManga}
-          onOpenSource={s => {
-            selectSource(s.id);
-            setMode('source');
-          }}
-          onChooseSources={() => setChooserOpen(true)}
-        />
-      )}
+      <SwipeTabs
+        index={mode === 'source' ? 0 : 1}
+        count={2}
+        onIndexChange={i => setMode(i === 0 ? 'source' : 'global')}
+      >
+        {mode === 'source' ? (
+          <SourceBrowse
+            sourceId={sourceId}
+            source={sources.find(s => s.id === sourceId)}
+            query={debounced}
+            browse={browse}
+            sourcesCount={sources.length}
+            onOpenManga={openManga}
+            onAddExtensions={() => navigation.navigate('Extensions')}
+          />
+        ) : (
+          <GlobalSearch
+            sources={sources}
+            pinned={pinned}
+            query={debounced}
+            onOpenManga={openManga}
+            onOpenSource={s => {
+              selectSource(s.id);
+              setMode('source');
+            }}
+            onChooseSources={() => setChooserOpen(true)}
+          />
+        )}
+      </SwipeTabs>
 
       <SourcePickerSheet
         visible={pickerOpen}
@@ -235,11 +273,62 @@ function SourceSelectPill({
   );
 }
 
+/** Popular | Latest browse switch shown while browsing a single source. */
+function BrowseToggle({
+  browse,
+  supportsLatest,
+  onChange,
+}: {
+  browse: BrowseMode;
+  supportsLatest: boolean;
+  onChange: (b: BrowseMode) => void;
+}) {
+  const theme = useTheme();
+  const options: { key: BrowseMode; label: string }[] = [
+    { key: 'popular', label: 'Popular' },
+    { key: 'latest', label: 'Latest' },
+  ];
+  // A source that can't serve "latest" only offers Popular.
+  const effective = browse === 'latest' && !supportsLatest ? 'popular' : browse;
+  return (
+    <View style={styles.browseRow}>
+      {options.map(o => {
+        if (o.key === 'latest' && !supportsLatest) return null;
+        const active = effective === o.key;
+        return (
+          <Pressable
+            key={o.key}
+            onPress={() => onChange(o.key)}
+            style={[
+              styles.browseChip,
+              {
+                backgroundColor: active ? theme.colors.accent : theme.colors.surface,
+                borderColor: active ? theme.colors.accent : theme.colors.border,
+              },
+            ]}
+          >
+            <Text
+              style={{
+                color: active ? theme.colors.onAccent : theme.colors.textMuted,
+                fontWeight: '700',
+                fontSize: 13,
+              }}
+            >
+              {o.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 /** Single-source browse/search (the "individual" mode). */
 function SourceBrowse({
   sourceId,
   source,
   query,
+  browse,
   sourcesCount,
   onOpenManga,
   onAddExtensions,
@@ -247,6 +336,7 @@ function SourceBrowse({
   sourceId: string;
   source?: SourceDto;
   query: string;
+  browse: BrowseMode;
   sourcesCount: number;
   onOpenManga: (m: MangaDto) => void;
   onAddExtensions: () => void;
@@ -255,19 +345,31 @@ function SourceBrowse({
   const engine = getEngine();
   const { width } = useWindowDimensions();
 
-  const { data, loading, error } = useAsync<MangaDto[]>(async () => {
+  const wantsLatest = browse === 'latest' && !!source?.supportsLatest;
+  const { data, loading, error, reload } = useAsync<MangaDto[]>(async () => {
     if (!sourceId) return [];
     try {
       const res = query.trim()
         ? await engine.search(sourceId, query, 1)
-        : await engine.getPopular(sourceId, 1);
+        : wantsLatest
+          ? await engine.getLatest(sourceId, 1)
+          : await engine.getPopular(sourceId, 1);
       recordSourceResult(sourceId, true);
       return res.manga;
     } catch (e) {
       recordSourceResult(sourceId, false);
       throw e;
     }
-  }, [sourceId, query]);
+  }, [sourceId, query, wantsLatest]);
+
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    reload();
+  }, [reload]);
+  useEffect(() => {
+    if (!loading) setRefreshing(false);
+  }, [loading]);
 
   const gap = 12;
   const cols = 3;
@@ -276,12 +378,22 @@ function SourceBrowse({
 
   return (
     <FlatList
-      data={loading ? [] : data ?? []}
+      data={loading && !refreshing ? [] : data ?? []}
       numColumns={cols}
+      style={{ flex: 1 }}
       keyExtractor={(m, i) => `${m.url}:${i}`}
       showsVerticalScrollIndicator={false}
       columnWrapperStyle={{ paddingHorizontal: sidePad, gap }}
       contentContainerStyle={{ paddingTop: 14, paddingBottom: TAB_BAR_SPACE, gap: 16 }}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={theme.colors.accent}
+          colors={[theme.colors.accent]}
+          progressBackgroundColor={theme.colors.surface}
+        />
+      }
       renderItem={({ item }) => <Cover manga={item} width={coverWidth} onPress={() => onOpenManga(item)} />}
       ListEmptyComponent={
         loading ? (
@@ -346,6 +458,14 @@ function GlobalSearch({
   const sidePad = theme.spacing.lg;
   const pinnedSources = sources.filter(s => pinned.includes(s.id));
 
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    setRefreshNonce(n => n + 1);
+    setTimeout(() => setRefreshing(false), 700);
+  }, []);
+
   if (pinnedSources.length === 0) {
     return (
       <View style={{ paddingHorizontal: sidePad, paddingTop: 24 }}>
@@ -382,10 +502,26 @@ function GlobalSearch({
     <FlatList
       data={pinnedSources}
       keyExtractor={s => s.id}
+      style={{ flex: 1 }}
       showsVerticalScrollIndicator={false}
       contentContainerStyle={{ paddingTop: 14, paddingBottom: TAB_BAR_SPACE }}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={theme.colors.accent}
+          colors={[theme.colors.accent]}
+          progressBackgroundColor={theme.colors.surface}
+        />
+      }
       renderItem={({ item }) => (
-        <GlobalSearchRow source={item} query={query} onOpenManga={onOpenManga} onOpenSource={onOpenSource} />
+        <GlobalSearchRow
+          source={item}
+          query={query}
+          refreshNonce={refreshNonce}
+          onOpenManga={onOpenManga}
+          onOpenSource={onOpenSource}
+        />
       )}
     />
   );
@@ -394,11 +530,13 @@ function GlobalSearch({
 function GlobalSearchRow({
   source,
   query,
+  refreshNonce,
   onOpenManga,
   onOpenSource,
 }: {
   source: SourceDto;
   query: string;
+  refreshNonce: number;
   onOpenManga: (m: MangaDto) => void;
   onOpenSource: (s: SourceDto) => void;
 }) {
@@ -414,7 +552,8 @@ function GlobalSearchRow({
       recordSourceResult(source.id, false);
       throw e;
     }
-  }, [source.id, query]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source.id, query, refreshNonce]);
 
   const count = data?.length ?? 0;
 
@@ -491,6 +630,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     height: 46,
     borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  browseRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+  },
+  browseChip: {
+    paddingHorizontal: 16,
+    height: 34,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
   },
   selLang: {

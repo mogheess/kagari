@@ -17,8 +17,6 @@ import { Icon } from '../components/Icon';
 import { computeExtensionUpdates, setExtensionUpdates } from '../sources/extensionUpdates';
 import type { AvailableExtensionDto, ExtensionDto, RepoDto } from '../engine/types';
 
-const KEIYOUSHI = 'https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.min.json';
-
 type Tab = 'browse' | 'installed';
 
 /** Turns raw network/HTTP errors into a calmer, human explanation. */
@@ -54,7 +52,7 @@ export function ExtensionsScreen() {
   const [loadingAvail, setLoadingAvail] = useState(false);
   const [repoError, setRepoError] = useState<string | null>(null);
 
-  const [repoInput, setRepoInput] = useState(KEIYOUSHI);
+  const [repoInput, setRepoInput] = useState('');
   const [query, setQuery] = useState('');
   const [debounced, setDebounced] = useState('');
   const [lang, setLang] = useState(''); // '' = all languages
@@ -273,18 +271,10 @@ export function ExtensionsScreen() {
       </View>
 
       {repos.length === 0 ? (
-        <Pressable
-          onPress={() => {
-            setRepoInput(KEIYOUSHI);
-            engine.addRepo(KEIYOUSHI).then(refreshRepos).then(refreshAvailable);
-          }}
-          style={[styles.suggestChip, { borderColor: theme.colors.border }]}
-        >
-          <Icon name="plus" size={14} color={theme.colors.accent} />
-          <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, fontWeight: '600' }}>
-            Add keiyoushi (community repo)
-          </Text>
-        </Pressable>
+        <Text style={[styles.repoHint, { color: theme.colors.textFaint }]}>
+          No repositories yet. Paste a source repository URL above (an index.min.json
+          link) to browse and install extensions.
+        </Text>
       ) : (
         repos.map(r => (
           <View
@@ -608,15 +598,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  suggestChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    alignSelf: 'flex-start',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
+  repoHint: {
+    fontSize: 12.5,
+    lineHeight: 18,
     marginTop: 12,
   },
   repoRow: {

@@ -1,11 +1,20 @@
-import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, Image, FlatList } from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { View, Text, StyleSheet, Pressable, Image, FlatList, RefreshControl, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme } from '../theme/ThemeProvider';
 import { Icon } from '../components/Icon';
-import { useHistory, removeFromHistory, clearHistory, historyToManga, type HistoryEntry } from '../library/history';
+import { SwipeTabs } from '../components/SwipeTabs';
+import { ConfirmDialog } from '../components/ConfirmDialog';
+import {
+  useHistory,
+  removeFromHistory,
+  clearHistory,
+  historyToManga,
+  reloadHistory,
+  type HistoryEntry,
+} from '../library/history';
 import { seededColor } from '../utils/color';
 import type { RootStackParamList } from '../navigation/types';
 
@@ -43,6 +52,14 @@ export function UpdatesScreen() {
   const navigation = useNavigation<Nav>();
   const history = useHistory();
   const [tab, setTab] = useState<Tab>('history');
+  const [refreshing, setRefreshing] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await reloadHistory();
+    setRefreshing(false);
+  }, []);
 
   const rows = useMemo<Row[]>(() => {
     const out: Row[] = [];
@@ -71,7 +88,7 @@ export function UpdatesScreen() {
         <View style={styles.titleRow}>
           <Text style={[theme.typography.title, { color: theme.colors.text }]}>Activity</Text>
           {tab === 'history' && history.length > 0 ? (
-            <Pressable hitSlop={8} onPress={clearHistory}>
+            <Pressable hitSlop={8} onPress={() => setConfirmClear(true)}>
               <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 13 }}>Clear</Text>
             </Pressable>
           ) : null}
@@ -101,38 +118,61 @@ export function UpdatesScreen() {
         </View>
       </View>
 
-      {tab === 'updates' ? (
-        <EmptyState
-          icon="updates"
-          title="No updates yet"
-          subtitle="New chapters from the manga in your library will appear here once chapter tracking is available."
-        />
-      ) : history.length === 0 ? (
-        <EmptyState
-          icon="book"
-          title="No reading history"
-          subtitle="Chapters you open show up here so you can pick up right where you left off."
-        />
-      ) : (
-        <FlatList
-          data={rows}
-          keyExtractor={r => r.key}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingTop: 14, paddingBottom: TAB_BAR_SPACE, paddingHorizontal: theme.spacing.lg }}
-          renderItem={({ item }) => {
-            if (item.kind === 'header') {
-              return <Text style={[styles.dayHeader, { color: theme.colors.textFaint }]}>{item.label.toUpperCase()}</Text>;
-            }
-            return (
-              <HistoryRow
-                entry={item.entry}
-                onPress={() => openManga(item.entry)}
-                onRemove={() => removeFromHistory(item.entry.sourceId, item.entry.mangaUrl)}
-              />
-            );
-          }}
-        />
-      )}
+      <SwipeTabs
+        index={tab === 'updates' ? 0 : 1}
+        count={2}
+        onIndexChange={i => setTab(i === 0 ? 'updates' : 'history')}
+      >
+        {tab === 'updates' ? (
+          <EmptyState
+            icon="updates"
+            title="No updates yet"
+            subtitle="New chapters from the manga in your library will land here. Pull down to check for updates."
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+          />
+        ) : history.length === 0 ? (
+          <EmptyState
+            icon="book"
+            title="No reading history"
+            subtitle="Chapters you open show up here so you can pick up right where you left off."
+          />
+        ) : (
+          <FlatList
+            data={rows}
+            keyExtractor={r => r.key}
+            style={{ flex: 1 }}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingTop: 14, paddingBottom: TAB_BAR_SPACE, paddingHorizontal: theme.spacing.lg }}
+            renderItem={({ item }) => {
+              if (item.kind === 'header') {
+                return <Text style={[styles.dayHeader, { color: theme.colors.textFaint }]}>{item.label.toUpperCase()}</Text>;
+              }
+              return (
+                <HistoryRow
+                  entry={item.entry}
+                  onPress={() => openManga(item.entry)}
+                  onRemove={() => removeFromHistory(item.entry.sourceId, item.entry.mangaUrl)}
+                />
+              );
+            }}
+          />
+        )}
+      </SwipeTabs>
+
+      <ConfirmDialog
+        visible={confirmClear}
+        title="Clear reading history?"
+        message="This removes every entry from your history. This can't be undone."
+        confirmLabel="Clear"
+        cancelLabel="Cancel"
+        destructive
+        onConfirm={() => {
+          clearHistory();
+          setConfirmClear(false);
+        }}
+        onCancel={() => setConfirmClear(false)}
+      />
     </View>
   );
 }
@@ -191,16 +231,49 @@ function HistoryRow({
   );
 }
 
-function EmptyState({ icon, title, subtitle }: { icon: 'updates' | 'book'; title: string; subtitle: string }) {
+function EmptyState({
+  icon,
+  title,
+  subtitle,
+  refreshing,
+  onRefresh,
+}: {
+  icon: 'updates' | 'book';
+  title: string;
+  subtitle: string;
+  refreshing?: boolean;
+  onRefresh?: () => void;
+}) {
   const theme = useTheme();
   return (
-    <View style={[styles.center, { paddingBottom: TAB_BAR_SPACE }]}>
-      <View style={[styles.card, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-        <Icon name={icon} size={26} color={theme.colors.accent} />
-        <Text style={[theme.typography.heading, { color: theme.colors.text, marginTop: 12 }]}>{title}</Text>
-        <Text style={[styles.sub, { color: theme.colors.textMuted }]}>{subtitle}</Text>
+    <ScrollView
+      style={{ flex: 1 }}
+      contentContainerStyle={[styles.center, { paddingBottom: TAB_BAR_SPACE }]}
+      showsVerticalScrollIndicator={false}
+      refreshControl={
+        onRefresh ? (
+          <RefreshControl
+            refreshing={!!refreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.colors.accent}
+            colors={[theme.colors.accent]}
+            progressBackgroundColor={theme.colors.surface}
+          />
+        ) : undefined
+      }
+    >
+      <View style={[styles.emptyIcon, { backgroundColor: theme.colors.elevated, borderColor: theme.colors.border }]}>
+        <Icon name={icon} size={30} color={theme.colors.accent} />
       </View>
-    </View>
+      <Text style={[theme.typography.heading, { color: theme.colors.text, marginTop: 18 }]}>{title}</Text>
+      <Text style={[styles.sub, { color: theme.colors.textMuted }]}>{subtitle}</Text>
+      {onRefresh ? (
+        <View style={styles.pullHint}>
+          <Icon name="refresh" size={13} color={theme.colors.textFaint} />
+          <Text style={{ color: theme.colors.textFaint, fontSize: 12.5, fontWeight: '600' }}>Pull to refresh</Text>
+        </View>
+      ) : null}
+    </ScrollView>
   );
 }
 
@@ -256,24 +329,30 @@ const styles = StyleSheet.create({
     borderRadius: 2,
   },
   center: {
-    flex: 1,
+    flexGrow: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 24,
+    paddingHorizontal: 32,
   },
-  card: {
-    width: '100%',
-    maxWidth: 420,
+  emptyIcon: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 20,
-    paddingVertical: 28,
-    paddingHorizontal: 22,
   },
   sub: {
     fontSize: 13.5,
-    lineHeight: 19,
+    lineHeight: 20,
     textAlign: 'center',
-    marginTop: 6,
+    marginTop: 8,
+    maxWidth: 300,
+  },
+  pullHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 20,
   },
 });
