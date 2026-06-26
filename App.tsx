@@ -36,11 +36,16 @@ function UpdateBootstrap() {
       void checkExtensionUpdates(getEngine());
     };
     const t = setTimeout(run, 2500);
+    // Re-check periodically during a long-running session too (both checks are
+    // throttled internally, so this won't spam the network). Together with the
+    // launch + foreground triggers this means updates surface on their own.
+    const interval = setInterval(run, 60 * 60 * 1000);
     const sub = AppState.addEventListener('change', s => {
       if (s === 'active') run();
     });
     return () => {
       clearTimeout(t);
+      clearInterval(interval);
       sub.remove();
     };
   }, []);

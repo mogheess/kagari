@@ -48,6 +48,8 @@ function createUnavailableEngine(): Engine {
     deleteDownloadedChapter: () => Promise.resolve(),
     pickMihonBackup: () => Promise.resolve(null),
     importMihonBackup: reject,
+    saveImageToGallery: reject,
+    shareImage: reject,
   };
 }
 

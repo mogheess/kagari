@@ -49,6 +49,8 @@ interface ManhwaEngineNative {
   deleteDownloadedChapter(sourceId: string, chapterUrl: string): Promise<void>;
   pickMihonBackup(): Promise<string | null>;
   importMihonBackup(uri: string): Promise<string>;
+  saveImageToGallery(uri: string): Promise<string>;
+  shareImage(uri: string): Promise<void>;
 }
 
 const Native = NativeModules.ManhwaEngine as ManhwaEngineNative | undefined;
@@ -167,6 +169,18 @@ export function createNativeEngine(): Engine | null {
     },
     async importMihonBackup(uri) {
       return parse<MihonBackupDto>(await Native.importMihonBackup(uri));
+    },
+    async saveImageToGallery(uri: string) {
+      if (typeof Native.saveImageToGallery !== 'function') {
+        throw new Error('Saving images is unavailable on this build.');
+      }
+      return Native.saveImageToGallery(uri);
+    },
+    async shareImage(uri: string) {
+      if (typeof Native.shareImage !== 'function') {
+        throw new Error('Sharing images is unavailable on this build.');
+      }
+      await Native.shareImage(uri);
     },
   };
 }

@@ -1,12 +1,19 @@
 package com.manhwa.engine
 
+import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.BitmapRegionDecoder
 import android.graphics.Rect
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.util.Log
+import androidx.annotation.RequiresApi
+import androidx.core.content.FileProvider
 import com.manhwa.engine.dto.ChapterDto
 import com.manhwa.engine.dto.ExtensionDto
 import com.manhwa.engine.dto.ImageFileDto
@@ -339,6 +346,103 @@ class EngineFacade(context: Context) {
     /** Removes all downloaded pages for a chapter. */
     fun deleteDownloadedChapter(sourceId: String, chapterUrl: String) {
         chapterDir(sourceId, chapterUrl).deleteRecursively()
+    }
+
+    // --- save / share -----------------------------------------------------
+
+    /**
+     * Copies a locally cached/downloaded page (a `file://` uri) into the device
+     * gallery under Pictures/Kagari. Returns the saved display name. Uses the
+     * MediaStore so no storage permission is needed (Android 10+).
+     */
+    fun saveImageToGallery(fileUri: String): String {
+        val source = localImageFile(fileUri)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            throw EngineException("parse", "Saving to the gallery requires Android 10 or newer")
+        }
+        return saveToMediaStore(source)
+    }
+
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun saveToMediaStore(source: File): String {
+        val mime = mimeFor(source)
+        val displayName = "kagari_${System.currentTimeMillis()}.${imageExtension(source, mime)}"
+        val resolver = appContext.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
+            put(MediaStore.Images.Media.MIME_TYPE, mime)
+            put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/Kagari")
+            put(MediaStore.Images.Media.IS_PENDING, 1)
+        }
+        val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val item = resolver.insert(collection, values)
+            ?: throw EngineException("unknown", "Could not create a gallery entry")
+        try {
+            resolver.openOutputStream(item)?.use { out ->
+                source.inputStream().use { input -> input.copyTo(out) }
+            } ?: throw EngineException("unknown", "Could not open the gallery entry")
+            values.clear()
+            values.put(MediaStore.Images.Media.IS_PENDING, 0)
+            resolver.update(item, values, null, null)
+        } catch (e: Throwable) {
+            resolver.delete(item, null, null)
+            throw if (e is EngineException) e else EngineException("unknown", e.message ?: "Save failed")
+        }
+        return displayName
+    }
+
+    /** Opens the system share sheet for a locally cached/downloaded page. */
+    fun shareImage(fileUri: String) {
+        val source = localImageFile(fileUri)
+        val shareDir = File(appContext.cacheDir, "shared").apply { mkdirs() }
+        // Keep the staging dir tidy; only the page being shared needs to exist.
+        shareDir.listFiles()?.forEach { it.delete() }
+        val mime = mimeFor(source)
+        val staged = File(shareDir, "kagari_page.${imageExtension(source, mime)}")
+        source.copyTo(staged, overwrite = true)
+        val contentUri = FileProvider.getUriForFile(
+            appContext,
+            "${appContext.packageName}.fileprovider",
+            staged,
+        )
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = mime
+            putExtra(Intent.EXTRA_STREAM, contentUri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        val chooser = Intent.createChooser(send, "Share page").apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        appContext.startActivity(chooser)
+    }
+
+    private fun localImageFile(fileUri: String): File {
+        val path = Uri.parse(fileUri).path
+            ?: throw EngineException("not_found", "Invalid image path")
+        val file = File(path)
+        if (!file.exists() || file.length() == 0L) {
+            throw EngineException("not_found", "Image is not available yet")
+        }
+        return file
+    }
+
+    private fun mimeFor(file: File): String = when (file.extension.lowercase()) {
+        "png" -> "image/png"
+        "webp" -> "image/webp"
+        "gif" -> "image/gif"
+        else -> "image/jpeg"
+    }
+
+    private fun imageExtension(file: File, mime: String): String {
+        val ext = file.extension.lowercase()
+        if (ext.isNotBlank()) return ext
+        return when {
+            mime.contains("png") -> "png"
+            mime.contains("webp") -> "webp"
+            mime.contains("gif") -> "gif"
+            else -> "jpg"
+        }
     }
 
     private fun source(sourceId: String): Source {

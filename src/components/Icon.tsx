@@ -30,7 +30,10 @@ export type IconName =
   | 'trash'
   | 'refresh'
   | 'edit'
-  | 'globe';
+  | 'globe'
+  | 'more'
+  | 'share'
+  | 'image';
 
 interface IconProps {
   name: IconName;
@@ -243,6 +246,32 @@ function renderPaths(
       return (
         <>
           <Path {...c} d="M4 4h7v16H4zM13 4h7v16h-7z" />
+        </>
+      );
+    case 'more':
+      return (
+        <>
+          <Circle {...f} cx={12} cy={5} r={1.6} />
+          <Circle {...f} cx={12} cy={12} r={1.6} />
+          <Circle {...f} cx={12} cy={19} r={1.6} />
+        </>
+      );
+    case 'share':
+      return (
+        <>
+          <Circle {...c} cx={18} cy={5} r={3} />
+          <Circle {...c} cx={6} cy={12} r={3} />
+          <Circle {...c} cx={18} cy={19} r={3} />
+          <Line {...c} x1={8.6} y1={10.6} x2={15.4} y2={6.4} />
+          <Line {...c} x1={8.6} y1={13.4} x2={15.4} y2={17.6} />
+        </>
+      );
+    case 'image':
+      return (
+        <>
+          <Path {...c} d="M4 5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z" />
+          <Circle {...c} cx={9} cy={10} r={1.6} />
+          <Polyline {...c} points="5,18 10,12 14,16 17,13 19,15" />
         </>
       );
     default:

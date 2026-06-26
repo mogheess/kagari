@@ -107,6 +107,8 @@ export function MangaDetailScreen() {
     navigation.navigate('Reader', {
       sourceId: params.sourceId,
       mangaUrl: params.mangaUrl,
+      mangaTitle: manga?.title,
+      mangaThumbnailUrl: manga?.thumbnailUrl,
       chapter,
       chapters: chapters ?? [chapter],
     });

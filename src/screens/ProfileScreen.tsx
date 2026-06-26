@@ -6,7 +6,8 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme, useThemePreference, type ThemePreference } from '../theme/ThemeProvider';
 import { Icon, type IconName } from '../components/Icon';
 import { useAppUpdate, checkForAppUpdate } from '../app/appUpdate';
-import { useExtensionUpdates } from '../sources/extensionUpdates';
+import { useExtensionUpdates, checkExtensionUpdates } from '../sources/extensionUpdates';
+import { getEngine } from '../engine';
 import { APP_VERSION } from '../app/version';
 import { getEngine } from '../engine';
 import { pickAndImportMihonBackup } from '../library/mihonImport';
@@ -121,7 +122,10 @@ export function ProfileScreen() {
           </View>
         ) : null}
         <Pressable
-          onPress={() => checkForAppUpdate({ force: true })}
+          onPress={() => {
+            void checkForAppUpdate({ force: true });
+            void checkExtensionUpdates(getEngine(), { force: true });
+          }}
           style={({ pressed }) => [
             styles.row,
             {

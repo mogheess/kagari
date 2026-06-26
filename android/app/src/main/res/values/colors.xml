@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#0E1413</color>
+    <!-- Window background used during launch and screen transitions. Matches the
+         app's dark canvas so native-stack pushes/pops don't flash white. -->
+    <color name="app_background">#161618</color>
 </resources>

@@ -256,4 +256,10 @@ export interface Engine {
   pickMihonBackup(): Promise<string | null>;
   /** Decodes a Mihon/Tachiyomi backup at the given content URI. */
   importMihonBackup(uri: string): Promise<MihonBackupDto>;
+
+  // save / share
+  /** Saves a local image (file:// uri) to the device gallery; resolves with the saved file name. */
+  saveImageToGallery(uri: string): Promise<string>;
+  /** Opens the system share sheet for a local image (file:// uri). */
+  shareImage(uri: string): Promise<void>;
 }
