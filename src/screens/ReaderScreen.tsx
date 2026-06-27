@@ -33,7 +33,7 @@ import { PageSlider } from '../components/PageSlider';
 import { useTheme } from '../theme/ThemeProvider';
 import {
   READER_MODES,
-  getReaderMode,
+  useReaderMode,
   setReaderMode,
   isHorizontal,
   isPaged,
@@ -72,11 +72,15 @@ export function ReaderScreen() {
   const theme = useTheme();
   const listRef = useRef<FlatList>(null);
 
-  const [chrome, setChrome] = useState(true);
+  // Open immersive: the page fills the screen and a single tap reveals the
+  // top/bottom chrome (tap again to hide).
+  const [chrome, setChrome] = useState(false);
   // Resume at the requested page (paged modes scroll there via initialScrollIndex;
   // webtoon starts at the top but the progress counter still reflects this).
   const [current, setCurrent] = useState(Math.max(0, params.initialPage ?? 0));
-  const [mode, setMode] = useState<ReaderMode>(getReaderMode());
+  // Per-series reading mode: a manhwa keeps Webtoon, a manga keeps its own
+  // paged layout, and brand-new titles inherit the most recent pick.
+  const mode = useReaderMode(params.sourceId, params.mangaUrl);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [zoomed, setZoomed] = useState(false);
@@ -589,8 +593,7 @@ export function ReaderScreen() {
         visible={settingsOpen}
         mode={mode}
         onSelect={m => {
-          setReaderMode(m);
-          setMode(m);
+          setReaderMode(m, params.sourceId, params.mangaUrl);
           setSettingsOpen(false);
         }}
         onClose={() => setSettingsOpen(false)}

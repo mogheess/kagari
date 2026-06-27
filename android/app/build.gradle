@@ -83,8 +83,8 @@ android {
         applicationId "app.kagari"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-            versionCode 3
-            versionName "0.3"
+            versionCode 4
+            versionName "0.4"
     }
     signingConfigs {
         debug {
@@ -126,6 +126,26 @@ android {
     }
 }
 
+// Keep the whole OkHttp/Okio family on a single version. React Native, Fresco
+// and the extension engine each drag in different OkHttp modules (okhttp,
+// okhttp-urlconnection, okhttp-android, ...) at different versions; if any one
+// stays on 4.x while another is 5.x, classes like `okhttp3.JavaNetCookieJar`
+// (4.x) end up referencing `okhttp3.internal.Util` (removed in 5.x) and the app
+// crashes at runtime with NoClassDefFoundError. Forcing the group guarantees a
+// coherent set of classes regardless of who requested what.
+configurations.all {
+    resolutionStrategy.eachDependency { details ->
+        if (details.requested.group == "com.squareup.okhttp3") {
+            details.useVersion("5.3.2")
+            details.because("Align all OkHttp modules to 5.x (extensions require it; mixed 4.x/5.x crashes)")
+        }
+        if (details.requested.group == "com.squareup.okio") {
+            details.useVersion("3.16.4")
+            details.because("Okio version compatible with OkHttp 5.3.2")
+        }
+    }
+}
+
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
@@ -150,8 +170,20 @@ dependencies {
     // throws NoClassDefFoundError at parse time.
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json-okio:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-protobuf:1.7.3")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("com.squareup.okio:okio:3.9.0")
+    // OkHttp/Okio must match keiyoushi/extensions-source's catalog: modern
+    // extensions are compiled against OkHttp 5.x and reference classes that only
+    // exist there (e.g. `okhttp3.internal._UtilCommonKt`). Shipping OkHttp 4.x on
+    // the host makes the extension's own dispatcher callback throw
+    // NoClassDefFoundError and crash the process when opening a manga.
+    implementation("com.squareup.okhttp3:okhttp:5.3.2")
+    // `okhttp3.JavaNetCookieJar` lives in this artifact, not in `okhttp`. React
+    // Native's networking/Fresco image stack (ReactCookieJarContainer) loads it,
+    // and the 4.x copy references `okhttp3.internal.Util`, which 5.x deleted.
+    // Pin it to the same 5.x line as okhttp so the cookie jar links against the
+    // 5.x internals that are actually present (otherwise loading uncached covers
+    // crashes with NoClassDefFoundError: okhttp3/internal/Util).
+    implementation("com.squareup.okhttp3:okhttp-urlconnection:5.3.2")
+    implementation("com.squareup.okio:okio:3.16.4")
     implementation("org.jsoup:jsoup:1.17.2")
     // RxJava 1 is required by extensions that implement the fetch* Observable
     // methods (Tachiyomi's primary source API).

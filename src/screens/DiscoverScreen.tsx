@@ -15,6 +15,9 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme } from '../theme/ThemeProvider';
 import { useAsync } from '../hooks/useAsync';
+import { usePagedCatalog } from '../hooks/usePagedCatalog';
+import { makePersistence } from '../store/persist';
+import { useFavoriteKeySet, favoriteKey } from '../library/favorites';
 import { getEngine } from '../engine';
 import { Cover } from '../components/Cover';
 import { CoverRail } from '../components/CoverRail';
@@ -28,11 +31,16 @@ import { useDiscoverIntent, type BrowseMode } from '../sources/discoverIntent';
 import { langLabel } from '../utils/lang';
 import { pickDefaultSource, sortSourcesForPicker } from '../utils/sourceSelect';
 import type { RootStackParamList } from '../navigation/types';
-import type { MangaDto, SourceDto } from '../engine/types';
+import type { MangaDto, MangasPageDto, SourceDto } from '../engine/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type DiscoverMode = 'source' | 'global';
 const TAB_BAR_SPACE = 110;
+
+/** Remembers the last source/browse the user chose so Discover reopens on it. */
+const sourceStore = makePersistence<{ sourceId: string; browse: BrowseMode }>(
+  '@kagari/discoverSource/v1',
+);
 
 /** Shared muted paragraph style for the empty/info cards. */
 function emptyText(theme: ReturnType<typeof useTheme>) {
@@ -59,6 +67,7 @@ export function DiscoverScreen() {
   const [debounced, setDebounced] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
   const [chooserOpen, setChooserOpen] = useState(false);
+  const [restored, setRestored] = useState(false);
 
   const pinned = usePinnedSources();
   const health = useSourceHealth();
@@ -71,16 +80,40 @@ export function DiscoverScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Restore the saved source/browse before the default-picker runs, so Discover
+  // reopens on the user's last choice instead of resetting to a smart default.
+  useEffect(() => {
+    let alive = true;
+    sourceStore.load().then(saved => {
+      if (!alive) return;
+      if (saved?.sourceId) {
+        userPicked.current = true;
+        setSourceId(saved.sourceId);
+        if (saved.browse) setBrowse(saved.browse);
+      }
+      setRestored(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   // Choose (and auto-correct) the default source until the user picks one. If the
   // current default is a source that recently errored, fall back to a working one.
   useEffect(() => {
-    if (sources.length === 0 || userPicked.current) return;
+    if (!restored || sources.length === 0 || userPicked.current) return;
     const unhealthy = unhealthyIds(health);
     const current = sources.find(s => s.id === sourceId);
     if (current && !unhealthy.has(current.id)) return;
     const def = pickDefaultSource(sources, { unhealthy });
     if (def && def.id !== sourceId) setSourceId(def.id);
-  }, [sources, health, sourceId]);
+  }, [restored, sources, health, sourceId]);
+
+  // Persist the user's explicit source/browse choice (not the auto-picked default).
+  useEffect(() => {
+    if (!userPicked.current || !sourceId) return;
+    sourceStore.save({ sourceId, browse });
+  }, [sourceId, browse]);
 
   const selectSource = (id: string) => {
     userPicked.current = true;
@@ -345,31 +378,33 @@ function SourceBrowse({
   const engine = getEngine();
   const { width } = useWindowDimensions();
 
+  const favKeys = useFavoriteKeySet();
   const wantsLatest = browse === 'latest' && !!source?.supportsLatest;
-  const { data, loading, error, reload } = useAsync<MangaDto[]>(async () => {
-    if (!sourceId) return [];
-    try {
-      const res = query.trim()
-        ? await engine.search(sourceId, query, 1)
-        : wantsLatest
-          ? await engine.getLatest(sourceId, 1)
-          : await engine.getPopular(sourceId, 1);
-      recordSourceResult(sourceId, true);
-      return res.manga;
-    } catch (e) {
-      recordSourceResult(sourceId, false);
-      throw e;
-    }
-  }, [sourceId, query, wantsLatest]);
+  const q = query.trim();
 
-  const [refreshing, setRefreshing] = useState(false);
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    reload();
-  }, [reload]);
-  useEffect(() => {
-    if (!loading) setRefreshing(false);
-  }, [loading]);
+  const fetchPage = useCallback(
+    async (page: number): Promise<MangasPageDto> => {
+      if (!sourceId) return { manga: [], hasNextPage: false };
+      try {
+        const res = q
+          ? await engine.search(sourceId, q, page)
+          : wantsLatest
+            ? await engine.getLatest(sourceId, page)
+            : await engine.getPopular(sourceId, page);
+        if (page === 1) recordSourceResult(sourceId, true);
+        return res;
+      } catch (e) {
+        if (page === 1) recordSourceResult(sourceId, false);
+        throw e;
+      }
+    },
+    [engine, sourceId, q, wantsLatest],
+  );
+
+  const { items, loading, loadingMore, refreshing, error, reload, loadMore } = usePagedCatalog(
+    fetchPage,
+    [sourceId, q, wantsLatest],
+  );
 
   const gap = 12;
   const cols = 3;
@@ -378,23 +413,39 @@ function SourceBrowse({
 
   return (
     <FlatList
-      data={loading && !refreshing ? [] : data ?? []}
+      data={items}
       numColumns={cols}
       style={{ flex: 1 }}
       keyExtractor={(m, i) => `${m.url}:${i}`}
       showsVerticalScrollIndicator={false}
       columnWrapperStyle={{ paddingHorizontal: sidePad, gap }}
       contentContainerStyle={{ paddingTop: 14, paddingBottom: TAB_BAR_SPACE, gap: 16 }}
+      onEndReached={loadMore}
+      onEndReachedThreshold={0.6}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
-          onRefresh={onRefresh}
+          onRefresh={reload}
           tintColor={theme.colors.accent}
           colors={[theme.colors.accent]}
           progressBackgroundColor={theme.colors.surface}
         />
       }
-      renderItem={({ item }) => <Cover manga={item} width={coverWidth} onPress={() => onOpenManga(item)} />}
+      renderItem={({ item }) => (
+        <Cover
+          manga={item}
+          width={coverWidth}
+          inLibrary={favKeys.has(favoriteKey(item.sourceId, item.url))}
+          onPress={() => onOpenManga(item)}
+        />
+      )}
+      ListFooterComponent={
+        loadingMore ? (
+          <View style={{ paddingVertical: 24, alignItems: 'center' }}>
+            <ActivityIndicator color={theme.colors.accent} />
+          </View>
+        ) : null
+      }
       ListEmptyComponent={
         loading ? (
           <View style={{ paddingTop: 64, alignItems: 'center' }}>
@@ -419,15 +470,15 @@ function SourceBrowse({
             <View style={[styles.emptyCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
               <Icon name={error ? 'globe' : 'search'} size={26} color={theme.colors.textMuted} />
               <Text style={[theme.typography.heading, { color: theme.colors.text, marginTop: 12 }]}>
-                {error ? "This source didn't respond" : query.trim() ? 'No results' : 'Nothing to show'}
+                {error ? "This source didn't respond" : q ? 'No results' : 'Nothing to show'}
               </Text>
               <Text style={emptyText(theme)}>
                 {error
                   ? `${source?.name ?? 'The source'} returned an error${
                       /\b(\d{3})\b/.test(error.message) ? ` (${error.message})` : ''
                     }. It may be blocked or temporarily down. Try another source.`
-                  : query.trim()
-                    ? `No manga matched "${query.trim()}" on ${source?.name ?? 'this source'}.`
+                  : q
+                    ? `No manga matched "${q}" on ${source?.name ?? 'this source'}.`
                     : 'Pick a source above to start browsing.'}
               </Text>
             </View>
@@ -542,6 +593,7 @@ function GlobalSearchRow({
 }) {
   const theme = useTheme();
   const engine = getEngine();
+  const favKeys = useFavoriteKeySet();
 
   const { data, loading, error } = useAsync<MangaDto[]>(async () => {
     try {
@@ -580,7 +632,13 @@ function GlobalSearchRow({
       ) : count === 0 ? (
         <Text style={[styles.railNote, { color: theme.colors.textFaint }]}>No results</Text>
       ) : (
-        <CoverRail data={data ?? []} loading={false} coverWidth={108} onPressItem={onOpenManga} />
+        <CoverRail
+          data={data ?? []}
+          loading={false}
+          coverWidth={108}
+          inLibraryOf={m => favKeys.has(favoriteKey(m.sourceId, m.url))}
+          onPressItem={onOpenManga}
+        />
       )}
     </View>
   );

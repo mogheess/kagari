@@ -15,6 +15,7 @@
 import { useSyncExternalStore } from 'react';
 import { makePersistence } from '../store/persist';
 import { getFavorites } from './favorites';
+import { takeRecentlyAdded } from './recentlyAdded';
 import type { ChapterDto, Engine, MangaDto, MangaStatus } from '../engine/types';
 
 export interface LibraryUpdate {
@@ -29,6 +30,12 @@ export interface LibraryUpdate {
   latestChapterUrl: string;
   /** Epoch millis the new chapter(s) were detected. */
   foundAt: number;
+  /**
+   * 'new' = freshly published chapters for a followed title (default when
+   * absent, for back-compat with already-stored feeds); 'added' = a title the
+   * user just added to the library, surfaced once so they know it's there.
+   */
+  kind?: 'new' | 'added';
 }
 
 interface UpdatesMeta {
@@ -134,7 +141,32 @@ export async function checkLibraryUpdates(engine: Engine, opts?: { force?: boole
       snapshots[key] = snapshotUrls(chapters);
       snapChanged = true;
 
-      // First time we see this manga: baseline silently, don't flood the feed.
+      // If the user just manually added this title, surface its latest chapter
+      // once so they can confirm it's in the library (works even for completed
+      // series). This is checked *regardless* of whether a baseline snapshot
+      // already exists: a non-forced launch/foreground scan can baseline a title
+      // before the recentlyAdded set finishes hydrating, so the flag must still
+      // win on a later scan instead of being swallowed forever by that snapshot.
+      if (takeRecentlyAdded(f.sourceId, f.url)) {
+        const newest = chapters.slice().sort(byNewest)[0];
+        if (newest) {
+          found.push({
+            sourceId: f.sourceId,
+            mangaUrl: f.url,
+            title: f.title,
+            thumbnailUrl: f.thumbnailUrl,
+            newCount: chapters.length,
+            latestChapterName: newest.name,
+            latestChapterUrl: newest.url,
+            foundAt: Date.now(),
+            kind: 'added',
+          });
+        }
+        continue;
+      }
+
+      // First time we've seen this manga and it wasn't a manual add: baseline
+      // silently so the backlog doesn't flood the feed.
       if (!prev) continue;
 
       const known = new Set(prev);

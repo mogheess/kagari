@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { useTheme } from '../theme/ThemeProvider';
 import { RemoteImage } from './RemoteImage';
+import { Icon } from './Icon';
 import type { MangaDto } from '../engine/types';
 
 interface CoverProps {
@@ -20,6 +21,8 @@ interface CoverProps {
   progress?: number;
   /** Unread count badge. */
   badge?: number;
+  /** Marks the cover as already saved in the library (corner check + dim). */
+  inLibrary?: boolean;
   onPress?: () => void;
   style?: StyleProp<ViewStyle>;
 }
@@ -27,7 +30,7 @@ interface CoverProps {
 const RATIO = 1.46; // standard manga cover aspect (h / w)
 
 /** A single cover card: artwork, optional title/subtitle, progress, badge. */
-export function Cover({ manga, width, subtitle, progress, badge, onPress, style }: CoverProps) {
+export function Cover({ manga, width, subtitle, progress, badge, inLibrary, onPress, style }: CoverProps) {
   const theme = useTheme();
   const [loaded, setLoaded] = useState(false);
   const height = Math.round(width * RATIO);
@@ -57,6 +60,15 @@ export function Cover({ manga, width, subtitle, progress, badge, onPress, style 
             onLoadEnd={() => setLoaded(true)}
             resizeMode="cover"
           />
+        ) : null}
+
+        {inLibrary ? (
+          <>
+            <View style={[styles.inLibScrim, { borderRadius: theme.radius.md }]} />
+            <View style={[styles.inLibBadge, { backgroundColor: theme.colors.accent }]}>
+              <Icon name="check" size={12} color={theme.colors.onAccent} strokeWidth={2.6} />
+            </View>
+          </>
         ) : null}
 
         {badge != null && badge > 0 ? (
@@ -124,6 +136,24 @@ const styles = StyleSheet.create({
     height: 20,
     paddingHorizontal: 5,
     borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inLibScrim: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.38)',
+  },
+  inLibBadge: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    width: 22,
+    height: 22,
+    borderRadius: 7,
     alignItems: 'center',
     justifyContent: 'center',
   },

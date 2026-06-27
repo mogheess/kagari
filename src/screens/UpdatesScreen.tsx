@@ -291,7 +291,12 @@ function UpdateRow({
 }) {
   const theme = useTheme();
   const tint = seededColor(update.thumbnailUrl ?? update.title, 0.5, 0.3);
-  const countLabel = update.newCount > 1 ? `${update.newCount} new chapters` : '1 new chapter';
+  const countLabel =
+    update.kind === 'added'
+      ? 'Added to library'
+      : update.newCount > 1
+        ? `${update.newCount} new chapters`
+        : '1 new chapter';
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.row, { opacity: pressed ? 0.7 : 1 }]}>
       <View style={[styles.thumb, { backgroundColor: tint }]}>
