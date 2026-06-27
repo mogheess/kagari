@@ -150,7 +150,12 @@ dependencies {
     // throws NoClassDefFoundError at parse time.
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json-okio:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-protobuf:1.7.3")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // OkHttp 5.x is REQUIRED: modern keiyoushi extensions (tachiyomix 1.6) are
+    // compiled against okhttp 5 and reference `okhttp3.internal._UtilCommonKt`,
+    // which does not exist in 4.x. Shipping 4.12.0 makes those extensions throw
+    // NoClassDefFoundError on the OkHttp dispatcher thread the moment they handle
+    // a response, hard-crashing the whole app when a manga is opened.
+    implementation("com.squareup.okhttp3:okhttp:5.4.0")
     implementation("com.squareup.okio:okio:3.9.0")
     implementation("org.jsoup:jsoup:1.17.2")
     // RxJava 1 is required by extensions that implement the fetch* Observable
