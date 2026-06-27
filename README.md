@@ -27,6 +27,9 @@ kind of community sources, just wrapped in a new, more polished interface.
   search across your favorite sources at once.
 - **Library & categories.** Follow titles, then organize them into categories you
   create, rename, and filter.
+- **Bring your library with you.** Import a Mihon/Tachiyomi `.tachibk` backup
+  (your follows, categories, and history), and **migrate** a title from one source
+  to another if a source stops working — your reading history comes along.
 - **A great reader.** Webtoon long-strip, vertical paged, and left-to-right or
   right-to-left modes, with pinch-to-zoom and tap-to-retry on any page that
   fails to load.

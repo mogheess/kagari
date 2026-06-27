@@ -9,6 +9,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useTheme } from '../theme/ThemeProvider';
 import { Icon, type IconName } from '../components/Icon';
+import { useUnseenUpdateCount } from '../library/libraryUpdates';
 import type { TabKey } from './types';
 
 const TABS: { key: TabKey; label: string; icon: IconName }[] = [
@@ -32,6 +33,7 @@ interface GlassTabBarProps {
 export function GlassTabBar({ active, onChange }: GlassTabBarProps) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const unseenUpdates = useUnseenUpdateCount();
 
   return (
     <View style={[styles.wrap, { paddingBottom: Math.max(insets.bottom, 10) }]} pointerEvents="box-none">
@@ -57,6 +59,7 @@ export function GlassTabBar({ active, onChange }: GlassTabBarProps) {
               key={tab.key}
               tab={tab}
               active={tab.key === active}
+              badge={tab.key === 'updates' && unseenUpdates > 0}
               onPress={() => onChange(tab.key)}
             />
           ))}
@@ -69,10 +72,12 @@ export function GlassTabBar({ active, onChange }: GlassTabBarProps) {
 function TabButton({
   tab,
   active,
+  badge,
   onPress,
 }: {
   tab: { key: TabKey; label: string; icon: IconName };
   active: boolean;
+  badge?: boolean;
   onPress: () => void;
 }) {
   const theme = useTheme();
@@ -86,7 +91,17 @@ function TabButton({
 
   return (
     <Pressable style={styles.tab} onPress={onPress} hitSlop={6}>
-      <Icon name={tab.icon} size={23} color={color} filled={active && tab.icon === 'home'} />
+      <View>
+        <Icon name={tab.icon} size={23} color={color} filled={active && tab.icon === 'home'} />
+        {badge ? (
+          <View
+            style={[
+              styles.badge,
+              { backgroundColor: theme.colors.accent, borderColor: theme.colors.glass },
+            ]}
+          />
+        ) : null}
+      </View>
       <Animated.View style={labelStyle}>
         <Text style={[styles.label, { color }]}>{tab.label}</Text>
       </Animated.View>
@@ -130,5 +145,14 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 10.5,
     fontWeight: '600',
+  },
+  badge: {
+    position: 'absolute',
+    top: -2,
+    right: -4,
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    borderWidth: 1.5,
   },
 });

@@ -14,6 +14,7 @@ import { RootNavigator } from './src/navigation/RootNavigator';
 import { getEngine } from './src/engine';
 import { checkForAppUpdate } from './src/app/appUpdate';
 import { checkExtensionUpdates } from './src/sources/extensionUpdates';
+import { checkLibraryUpdates } from './src/library/libraryUpdates';
 import { initWhatsNew } from './src/app/whatsNew';
 import { WhatsNewSheet } from './src/components/WhatsNewSheet';
 
@@ -34,6 +35,7 @@ function UpdateBootstrap() {
     const run = () => {
       void checkForAppUpdate();
       void checkExtensionUpdates(getEngine());
+      void checkLibraryUpdates(getEngine());
     };
     const t = setTimeout(run, 2500);
     // Re-check periodically during a long-running session too (both checks are

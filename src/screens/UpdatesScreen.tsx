@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, FlatList, RefreshControl, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -16,6 +16,16 @@ import {
   reloadHistory,
   type HistoryEntry,
 } from '../library/history';
+import {
+  useLibraryUpdates,
+  checkLibraryUpdates,
+  removeLibraryUpdate,
+  clearLibraryUpdates,
+  markUpdatesSeen,
+  updateToManga,
+  type LibraryUpdate,
+} from '../library/libraryUpdates';
+import { getEngine } from '../engine';
 import { seededColor } from '../utils/color';
 import type { RootStackParamList } from '../navigation/types';
 
@@ -46,21 +56,32 @@ function timeAgo(ms: number): string {
 }
 
 type Row = { kind: 'header'; key: string; label: string } | { kind: 'entry'; key: string; entry: HistoryEntry };
+type UpdateRowItem =
+  | { kind: 'header'; key: string; label: string }
+  | { kind: 'entry'; key: string; update: LibraryUpdate };
 
 export function UpdatesScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const history = useHistory();
-  const [tab, setTab] = useState<Tab>('history');
+  const updates = useLibraryUpdates();
+  const [tab, setTab] = useState<Tab>('updates');
   const [refreshing, setRefreshing] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [confirmClearUpdates, setConfirmClearUpdates] = useState(false);
+
+  // Viewing the Updates tab clears the unseen-badge watermark.
+  useEffect(() => {
+    if (tab === 'updates') markUpdatesSeen();
+  }, [tab, updates]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await reloadHistory();
+    if (tab === 'updates') await checkLibraryUpdates(getEngine(), { force: true });
+    else await reloadHistory();
     setRefreshing(false);
-  }, []);
+  }, [tab]);
 
   const rows = useMemo<Row[]>(() => {
     const out: Row[] = [];
@@ -76,11 +97,32 @@ export function UpdatesScreen() {
     return out;
   }, [history]);
 
+  const updateRows = useMemo<UpdateRowItem[]>(() => {
+    const out: UpdateRowItem[] = [];
+    let lastDay = '';
+    for (const u of updates) {
+      const label = dayLabel(u.foundAt);
+      if (label !== lastDay) {
+        out.push({ kind: 'header', key: `uh:${label}`, label });
+        lastDay = label;
+      }
+      out.push({ kind: 'entry', key: `${u.sourceId}:${u.mangaUrl}:${u.latestChapterUrl}`, update: u });
+    }
+    return out;
+  }, [updates]);
+
   const openManga = (e: HistoryEntry) =>
     navigation.navigate('MangaDetail', {
       sourceId: e.sourceId,
       mangaUrl: e.mangaUrl,
       preview: historyToManga(e),
+    });
+
+  const openUpdate = (u: LibraryUpdate) =>
+    navigation.navigate('MangaDetail', {
+      sourceId: u.sourceId,
+      mangaUrl: u.mangaUrl,
+      preview: updateToManga(u),
     });
 
   return (
@@ -90,6 +132,10 @@ export function UpdatesScreen() {
           <Text style={[theme.typography.title, { color: theme.colors.text }]}>Activity</Text>
           {tab === 'history' && history.length > 0 ? (
             <Pressable hitSlop={8} onPress={() => setConfirmClear(true)}>
+              <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 13 }}>Clear</Text>
+            </Pressable>
+          ) : tab === 'updates' && updates.length > 0 ? (
+            <Pressable hitSlop={8} onPress={() => setConfirmClearUpdates(true)}>
               <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 13 }}>Clear</Text>
             </Pressable>
           ) : null}
@@ -125,13 +171,46 @@ export function UpdatesScreen() {
         onIndexChange={i => setTab(i === 0 ? 'updates' : 'history')}
       >
         {tab === 'updates' ? (
-          <EmptyState
-            icon="updates"
-            title="No updates yet"
-            subtitle="New chapters from the manga in your library will land here. Pull down to check for updates."
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-          />
+          updates.length === 0 ? (
+            <EmptyState
+              icon="updates"
+              title="No updates yet"
+              subtitle="New chapters from the manga in your library will land here. Pull down to check for updates."
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+            />
+          ) : (
+            <FlatList
+              data={updateRows}
+              keyExtractor={r => r.key}
+              style={{ flex: 1 }}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingTop: 14, paddingBottom: TAB_BAR_SPACE, paddingHorizontal: theme.spacing.lg }}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={onRefresh}
+                  tintColor={theme.colors.accent}
+                  colors={[theme.colors.accent]}
+                  progressBackgroundColor={theme.colors.surface}
+                />
+              }
+              renderItem={({ item }) => {
+                if (item.kind === 'header') {
+                  return <Text style={[styles.dayHeader, { color: theme.colors.textFaint }]}>{item.label.toUpperCase()}</Text>;
+                }
+                return (
+                  <UpdateRow
+                    update={item.update}
+                    onPress={() => openUpdate(item.update)}
+                    onRemove={() =>
+                      removeLibraryUpdate(item.update.sourceId, item.update.mangaUrl, item.update.latestChapterUrl)
+                    }
+                  />
+                );
+              }}
+            />
+          )
         ) : history.length === 0 ? (
           <EmptyState
             icon="book"
@@ -145,6 +224,15 @@ export function UpdatesScreen() {
             style={{ flex: 1 }}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={{ paddingTop: 14, paddingBottom: TAB_BAR_SPACE, paddingHorizontal: theme.spacing.lg }}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                tintColor={theme.colors.accent}
+                colors={[theme.colors.accent]}
+                progressBackgroundColor={theme.colors.surface}
+              />
+            }
             renderItem={({ item }) => {
               if (item.kind === 'header') {
                 return <Text style={[styles.dayHeader, { color: theme.colors.textFaint }]}>{item.label.toUpperCase()}</Text>;
@@ -174,7 +262,66 @@ export function UpdatesScreen() {
         }}
         onCancel={() => setConfirmClear(false)}
       />
+
+      <ConfirmDialog
+        visible={confirmClearUpdates}
+        title="Clear updates?"
+        message="This removes every entry from your updates feed. New chapters found later will still appear."
+        confirmLabel="Clear"
+        cancelLabel="Cancel"
+        destructive
+        onConfirm={() => {
+          clearLibraryUpdates();
+          setConfirmClearUpdates(false);
+        }}
+        onCancel={() => setConfirmClearUpdates(false)}
+      />
     </View>
+  );
+}
+
+function UpdateRow({
+  update,
+  onPress,
+  onRemove,
+}: {
+  update: LibraryUpdate;
+  onPress: () => void;
+  onRemove: () => void;
+}) {
+  const theme = useTheme();
+  const tint = seededColor(update.thumbnailUrl ?? update.title, 0.5, 0.3);
+  const countLabel = update.newCount > 1 ? `${update.newCount} new chapters` : '1 new chapter';
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.row, { opacity: pressed ? 0.7 : 1 }]}>
+      <View style={[styles.thumb, { backgroundColor: tint }]}>
+        {update.thumbnailUrl ? (
+          <RemoteImage
+            uri={update.thumbnailUrl}
+            sourceId={update.sourceId}
+            style={StyleSheet.absoluteFill}
+            resizeMode="cover"
+          />
+        ) : null}
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]} numberOfLines={1}>
+          {update.title}
+        </Text>
+        <Text style={{ color: theme.colors.accent, fontSize: 12.5, fontWeight: '700', marginTop: 2 }} numberOfLines={1}>
+          {countLabel}
+        </Text>
+        <Text style={{ color: theme.colors.textMuted, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
+          {update.latestChapterName}
+        </Text>
+        <Text style={{ color: theme.colors.textFaint, fontSize: 11.5, marginTop: 3 }}>
+          {timeAgo(update.foundAt)}
+        </Text>
+      </View>
+      <Pressable hitSlop={10} onPress={onRemove} style={{ padding: 4 }}>
+        <Icon name="close" size={18} color={theme.colors.textFaint} />
+      </Pressable>
+    </Pressable>
   );
 }
 

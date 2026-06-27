@@ -79,6 +79,11 @@ export function getFavorite(sourceId: string, url: string): FavoriteManga | unde
   return favorites.find(f => f.sourceId === sourceId && f.url === url);
 }
 
+/** Non-reactive snapshot of the whole library (e.g. the library-updates scan). */
+export function getFavorites(): FavoriteManga[] {
+  return favorites;
+}
+
 /** Removes a manga from the library if present (idempotent). */
 export function removeFavorite(sourceId: string, url: string): void {
   if (!isFavorited(sourceId, url)) return;
