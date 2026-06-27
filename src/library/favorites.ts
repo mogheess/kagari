@@ -74,6 +74,20 @@ export function isFavorited(sourceId: string, url: string): boolean {
   return favorites.some(f => f.sourceId === sourceId && f.url === url);
 }
 
+/** Non-reactive lookup (for migration and other imperative flows). */
+export function getFavorite(sourceId: string, url: string): FavoriteManga | undefined {
+  return favorites.find(f => f.sourceId === sourceId && f.url === url);
+}
+
+/** Removes a manga from the library if present (idempotent). */
+export function removeFavorite(sourceId: string, url: string): void {
+  if (!isFavorited(sourceId, url)) return;
+  favorites = favorites.filter(f => !(f.sourceId === sourceId && f.url === url));
+  if (!hydrated) removedBeforeHydrate.add(keyOf(sourceId, url));
+  emit();
+  persist();
+}
+
 /** Adds or removes the manga from the library. Returns the new favorite state. */
 export function toggleFavorite(m: MangaDto, categoryIds: string[] = []): boolean {
   const exists = isFavorited(m.sourceId, m.url);

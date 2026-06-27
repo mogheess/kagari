@@ -115,4 +115,45 @@ export function useLibraryViewMode(): LibraryViewMode {
   );
 }
 
+// --- "All" collection visibility preference (persisted) --------------------
+// When off, the "All" folder/tab is hidden once the user has real categories to
+// fall back on (it stays visible while there are none, so the library is never
+// left empty).
+
+const showAllStore = makePersistence<boolean>('@kagari/showAll/v1');
+let showAll = true;
+const showAllListeners = new Set<() => void>();
+
+function emitShowAll(): void {
+  for (const l of showAllListeners) l();
+}
+
+export function setShowAllCollection(next: boolean): void {
+  if (next === showAll) return;
+  showAll = next;
+  emitShowAll();
+  showAllStore.save(next);
+}
+
+async function hydrateShowAll(): Promise<void> {
+  const stored = await showAllStore.load();
+  if (typeof stored === 'boolean') {
+    showAll = stored;
+    emitShowAll();
+  }
+}
+
+export function useShowAllCollection(): boolean {
+  return useSyncExternalStore(
+    cb => {
+      showAllListeners.add(cb);
+      return () => {
+        showAllListeners.delete(cb);
+      };
+    },
+    () => showAll,
+  );
+}
+
 void hydrateView();
+void hydrateShowAll();

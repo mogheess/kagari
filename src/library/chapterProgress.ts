@@ -129,6 +129,11 @@ export function importChapterProgress(entries: ChapterProgressImport[]): number 
   return changed;
 }
 
+/** Non-reactive snapshot of all chapter progress (for migration). */
+export function getChapterProgressSnapshot(): Record<string, ChapterProgress> {
+  return progress;
+}
+
 /** Explicitly sets the read flag for a chapter (e.g. a manual toggle). */
 export function setChapterRead(sourceId: string, chapterUrl: string, read: boolean): void {
   const key = chapterKey(sourceId, chapterUrl);

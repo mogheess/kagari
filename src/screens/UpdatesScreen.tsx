@@ -1,10 +1,11 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, Image, FlatList, RefreshControl, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, Pressable, FlatList, RefreshControl, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme } from '../theme/ThemeProvider';
 import { Icon } from '../components/Icon';
+import { RemoteImage } from '../components/RemoteImage';
 import { SwipeTabs } from '../components/SwipeTabs';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import {
@@ -195,7 +196,12 @@ function HistoryRow({
     >
       <View style={[styles.thumb, { backgroundColor: tint }]}>
         {entry.thumbnailUrl ? (
-          <Image source={{ uri: entry.thumbnailUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+          <RemoteImage
+            uri={entry.thumbnailUrl}
+            sourceId={entry.sourceId}
+            style={StyleSheet.absoluteFill}
+            resizeMode="cover"
+          />
         ) : null}
       </View>
       <View style={{ flex: 1 }}>

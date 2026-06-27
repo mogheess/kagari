@@ -2,7 +2,6 @@ import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
-  Image,
   FlatList,
   ScrollView,
   Pressable,
@@ -16,6 +15,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme } from '../theme/ThemeProvider';
 import { Cover } from '../components/Cover';
+import { RemoteImage } from '../components/RemoteImage';
 import { Icon } from '../components/Icon';
 import { CollectionCard } from '../components/CollectionCard';
 import { SwipeTabs } from '../components/SwipeTabs';
@@ -25,6 +25,7 @@ import {
   useLibraryCollections,
   useLibraryViewMode,
   setLibraryViewMode,
+  useShowAllCollection,
   type LibraryCollection,
   type LibraryCollections,
 } from '../library/collections';
@@ -53,6 +54,10 @@ export function LibraryScreen() {
   const viewMode = useLibraryViewMode();
   const collections = useLibraryCollections();
   const covers = useCollectionCovers();
+  const showAll = useShowAllCollection();
+  // Keep "All" visible while there are no categories so the library is never
+  // empty; otherwise honour the user's preference.
+  const includeAll = showAll || categories.length === 0;
 
   const [openId, setOpenId] = useState<string | null>(null);
   const [selected, setSelected] = useState<string>(ALL);
@@ -179,14 +184,16 @@ export function LibraryScreen() {
         >
           <SectionLabel text="COLLECTIONS" />
           <View style={[styles.wrap, { gap: cardGap }]}>
-            <CollectionCard
-              label="All"
-              items={collections.all.items}
-              width={cardWidth}
-              coverUri={covers.all}
-              onPress={() => setOpenId('all')}
-              onLongPress={() => setCoverPickerFor(collections.all)}
-            />
+            {includeAll ? (
+              <CollectionCard
+                label="All"
+                items={collections.all.items}
+                width={cardWidth}
+                coverUri={covers.all}
+                onPress={() => setOpenId('all')}
+                onLongPress={() => setCoverPickerFor(collections.all)}
+              />
+            ) : null}
             {collections.manual.map(c => (
               <CollectionCard
                 key={c.id}
@@ -207,17 +214,21 @@ export function LibraryScreen() {
 
   // --- Shelf view (flat grid with category chips) ---
   const hasUncategorized = favorites.some(f => f.categoryIds.length === 0);
-  const chips: { id: string; label: string }[] = [{ id: ALL, label: 'All' }];
+  const chips: { id: string; label: string }[] = [];
+  if (includeAll) chips.push({ id: ALL, label: 'All' });
   for (const c of categories) chips.push({ id: c.id, label: c.name });
   if (hasUncategorized && categories.length > 0) chips.push({ id: UNCATEGORIZED, label: 'Uncategorized' });
 
-  const selIdx = Math.max(0, chips.findIndex(c => c.id === selected));
+  // Fall back to the first chip when the current selection isn't available
+  // (e.g. "All" was just hidden).
+  const activeId = chips.some(c => c.id === selected) ? selected : chips[0]?.id ?? ALL;
+  const selIdx = Math.max(0, chips.findIndex(c => c.id === activeId));
   const shelfList =
-    selected === ALL
+    activeId === ALL
       ? favorites
-      : selected === UNCATEGORIZED
+      : activeId === UNCATEGORIZED
         ? favorites.filter(f => f.categoryIds.length === 0)
-        : favorites.filter(f => f.categoryIds.includes(selected));
+        : favorites.filter(f => f.categoryIds.includes(activeId));
   const visible = shelfList.map(favoriteToManga);
 
   return (
@@ -232,7 +243,7 @@ export function LibraryScreen() {
           style={{ flexGrow: 0, marginBottom: 12 }}
           contentContainerStyle={{ paddingHorizontal: sidePad, gap: 8 }}
           renderItem={({ item }) => {
-            const active = item.id === selected;
+            const active = item.id === activeId;
             return (
               <Pressable
                 onPress={() => setSelected(item.id)}
@@ -273,7 +284,7 @@ export function LibraryScreen() {
           columnWrapperStyle={{ paddingHorizontal: sidePad, gap: gridGap }}
           contentContainerStyle={{ paddingTop: 4, paddingBottom: TAB_BAR_SPACE, gap: 16 }}
           refreshControl={refreshControl}
-          ListEmptyComponent={<FolderEmpty categoryView={selected !== ALL} />}
+          ListEmptyComponent={<FolderEmpty categoryView={activeId !== ALL} />}
           renderItem={renderCover}
         />
       </SwipeTabs>
@@ -298,13 +309,14 @@ function CoverPicker({
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
 
-  const art = [
-    ...new Set(
-      (collection?.items ?? [])
-        .map(i => i.thumbnailUrl)
-        .filter((u): u is string => !!u),
-    ),
-  ];
+  const seenArt = new Set<string>();
+  const art: { uri: string; sourceId: string }[] = [];
+  for (const i of collection?.items ?? []) {
+    if (i.thumbnailUrl && !seenArt.has(i.thumbnailUrl)) {
+      seenArt.add(i.thumbnailUrl);
+      art.push({ uri: i.thumbnailUrl, sourceId: i.sourceId });
+    }
+  }
   const cols = 3;
   const gap = 12;
   const pad = theme.spacing.lg;
@@ -341,7 +353,7 @@ function CoverPicker({
         <FlatList
           data={art}
           numColumns={cols}
-          keyExtractor={(u, i) => `${u}:${i}`}
+          keyExtractor={(item, i) => `${item.uri}:${i}`}
           columnWrapperStyle={{ gap }}
           contentContainerStyle={{ gap }}
           style={{ maxHeight: Math.round(tile * 1.4) * 2 + gap + 4 }}
@@ -349,12 +361,13 @@ function CoverPicker({
           renderItem={({ item }) => (
             <Pressable
               onPress={() => {
-                if (collection) setCollectionCover(collection.id, item);
+                if (collection) setCollectionCover(collection.id, item.uri);
                 onClose();
               }}
             >
-              <Image
-                source={{ uri: item }}
+              <RemoteImage
+                uri={item.uri}
+                sourceId={item.sourceId}
                 style={{ width: tile, height: Math.round(tile * 1.4), borderRadius: 10 }}
                 resizeMode="cover"
               />

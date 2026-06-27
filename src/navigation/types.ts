@@ -13,6 +13,8 @@ export type RootStackParamList = {
     mangaThumbnailUrl?: string;
     chapter: ChapterDto;
     chapters: ChapterDto[];
+    /** 0-based page to open at (resume). Honored in paged modes. */
+    initialPage?: number;
   };
   CustomizeHome: undefined;
   Extensions: undefined;

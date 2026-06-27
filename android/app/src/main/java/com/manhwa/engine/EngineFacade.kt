@@ -28,6 +28,7 @@ import com.manhwa.engine.backup.MihonImportResult
 import com.manhwa.engine.loader.ExtensionLoader
 import com.manhwa.engine.loader.LoadedExtension
 import com.manhwa.engine.loader.SignatureTrust
+import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.model.FilterList
@@ -40,6 +41,7 @@ import java.security.MessageDigest
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
+import uy.kohesive.injekt.injectLazy
 
 /**
  * The single entry point the RN bridge talks to. Holds loaded sources and
@@ -57,6 +59,7 @@ class EngineFacade(context: Context) {
     private val appContext = context.applicationContext
     private val trust = SignatureTrust(appContext)
     private val loader = ExtensionLoader(appContext, trust)
+    private val network: NetworkHelper by injectLazy()
 
     private var extensions: List<LoadedExtension> = emptyList()
     private val sourcesById = HashMap<Long, Source>()
@@ -136,6 +139,26 @@ class EngineFacade(context: Context) {
         val result = source.fetchMangaDetails(stub).awaitSingle().apply { url = mangaUrl }
         return Mappers.mangaToDto(source.id, result)
     }
+
+    /**
+     * Absolute, browser-openable URL for a manga. Honors source overrides of
+     * `getMangaUrl` (e.g. Madara), falling back to `baseUrl + path`.
+     */
+    fun getMangaWebUrl(sourceId: String, mangaUrl: String): String {
+        val source = source(sourceId)
+        if (source !is HttpSource) return mangaUrl
+        val stub = SManga.create().apply { url = mangaUrl; title = "" }
+        return try {
+            source.getMangaUrl(stub)
+        } catch (_: Throwable) {
+            val base = source.baseUrl.trimEnd('/')
+            val path = if (mangaUrl.startsWith("/")) mangaUrl else "/$mangaUrl"
+            if (mangaUrl.startsWith("http")) mangaUrl else base + path
+        }
+    }
+
+    /** UA shared with the Cloudflare WebView solver so cleared cookies stay valid. */
+    fun userAgent(): String = network.defaultUserAgentProvider()
 
     suspend fun getChapters(sourceId: String, mangaUrl: String): List<ChapterDto> {
         val source = source(sourceId)
@@ -261,6 +284,57 @@ class EngineFacade(context: Context) {
             contentType = contentType,
             tiles = tiles,
         )
+    }
+
+    /**
+     * Fetches a manga cover through the source's HTTP client — so the source's
+     * headers (Referer/User-Agent) and the Cloudflare interceptor apply — and
+     * caches it to disk. Returns a `file://` uri on success, or the original
+     * `url` unchanged when it can't be fetched natively (no installed source,
+     * a non-http url, or a network/decoding failure) so the caller can still try
+     * loading it directly. This is what lets covers from Referer- or
+     * Cloudflare-gated CDNs load, the same way reader pages do.
+     */
+    suspend fun fetchCover(sourceId: String, url: String): String {
+        if (url.isBlank()) return url
+        if (url.startsWith("file://") || url.startsWith("content://") || url.startsWith("data:")) {
+            return url
+        }
+        if (!url.startsWith("http")) return url
+
+        // Only sources we actually have loaded can supply the right client/headers.
+        val source = sourceOrNull(sourceId) as? HttpSource ?: return url
+
+        val cacheDir = File(appContext.cacheDir, "covers").apply { mkdirs() }
+        val key = hashKey(url)
+        val existing = cacheDir.listFiles()?.firstOrNull {
+            it.name.startsWith("$key.") && !it.name.endsWith(".tmp") && it.length() > 0L
+        }
+        if (existing != null && imageSize(existing) != null) {
+            return Uri.fromFile(existing).toString()
+        }
+
+        return try {
+            val temp = File(cacheDir, "$key.tmp")
+            val contentType = directImageResponse(source, url).use { response ->
+                writeImageResponse(response, temp)
+            }
+            val finalFile = File(cacheDir, "$key.${extensionFor(url, contentType)}")
+            finalFile.delete()
+            if (!temp.renameTo(finalFile)) {
+                temp.copyTo(finalFile, overwrite = true)
+                temp.delete()
+            }
+            if (imageSize(finalFile) == null) {
+                finalFile.delete()
+                url
+            } else {
+                Uri.fromFile(finalFile).toString()
+            }
+        } catch (error: Throwable) {
+            Log.w(READER_IMAGE_TAG, "cover fetch failed for ${shortUrl(url)}: ${error.message}")
+            url
+        }
     }
 
     // --- offline downloads -------------------------------------------------
@@ -449,6 +523,13 @@ class EngineFacade(context: Context) {
         ensureLoaded()
         val id = sourceId.toLongOrNull() ?: throw EngineException("not_found", "Invalid source id")
         return sourcesById[id] ?: throw EngineException("not_found", "Source $sourceId not loaded")
+    }
+
+    /** Like [source] but returns null instead of throwing when not loaded. */
+    private fun sourceOrNull(sourceId: String): Source? {
+        ensureLoaded()
+        val id = sourceId.toLongOrNull() ?: return null
+        return sourcesById[id]
     }
 
     private fun catalogue(sourceId: String): CatalogueSource {

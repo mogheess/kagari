@@ -261,7 +261,10 @@ function MihonImportRow() {
     >
       <Icon name="download" size={20} color={theme.colors.textMuted} />
       <View style={{ flex: 1 }}>
-        <Text style={[theme.typography.body, { color: theme.colors.text }]}>Import from Mihon</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Text style={[theme.typography.body, { color: theme.colors.text }]}>Import from Mihon</Text>
+          <Text style={{ color: theme.colors.textFaint, fontSize: 11, fontWeight: '600' }}>(beta)</Text>
+        </View>
         <Text
           numberOfLines={2}
           style={{

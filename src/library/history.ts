@@ -141,6 +141,11 @@ export function importHistory(entries: HistoryEntry[]): number {
   return changed;
 }
 
+/** Non-reactive lookup of a manga's history entry (for migration). */
+export function getHistoryEntry(sourceId: string, mangaUrl: string): HistoryEntry | undefined {
+  return history.find(e => e.sourceId === sourceId && e.mangaUrl === mangaUrl);
+}
+
 /** Removes a single manga from history. */
 export function removeFromHistory(sourceId: string, mangaUrl: string): void {
   history = history.filter(e => !(e.sourceId === sourceId && e.mangaUrl === mangaUrl));

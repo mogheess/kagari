@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -20,7 +20,6 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
-  useAnimatedReaction,
   withTiming,
   runOnJS,
 } from 'react-native-reanimated';
@@ -46,6 +45,15 @@ function notify(message: string): void {
   ToastAndroid.show(message, ToastAndroid.SHORT);
 }
 
+// Zoom tuning: a sane max pinch scale and a fixed double-tap step.
+const MAX_SCALE = 4;
+const DOUBLE_TAP_SCALE = 2.5;
+
+function clamp(value: number, min: number, max: number): number {
+  'worklet';
+  return value < min ? min : value > max ? max : value;
+}
+
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type ReaderRoute = RouteProp<RootStackParamList, 'Reader'>;
 const MAX_IMAGE_FETCHES = 1;
@@ -62,7 +70,9 @@ export function ReaderScreen() {
   const engine = getEngine();
 
   const [chrome, setChrome] = useState(true);
-  const [current, setCurrent] = useState(0);
+  // Resume at the requested page (paged modes scroll there via initialScrollIndex;
+  // webtoon starts at the top but the progress counter still reflects this).
+  const [current, setCurrent] = useState(Math.max(0, params.initialPage ?? 0));
   const [mode, setMode] = useState<ReaderMode>(getReaderMode());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -81,6 +91,16 @@ export function ReaderScreen() {
   const ty = useSharedValue(0);
   const savedTx = useSharedValue(0);
   const savedTy = useSharedValue(0);
+  // Captured on pinch start so the point under the fingers stays anchored while
+  // the scale changes (origin-correct zoom).
+  const originX = useSharedValue(0);
+  const originY = useSharedValue(0);
+  const baseX = useSharedValue(0);
+  const baseY = useSharedValue(0);
+
+  // Furthest visible page mirrored into a ref so gesture callbacks can read it
+  // without forcing the memoised gesture to rebuild on every scroll.
+  const currentRef = useRef(0);
 
   const resetZoom = useCallback(() => {
     scale.value = withTiming(1);
@@ -89,15 +109,8 @@ export function ReaderScreen() {
     ty.value = withTiming(0);
     savedTx.value = 0;
     savedTy.value = 0;
+    setZoomed(false);
   }, [scale, savedScale, tx, ty, savedTx, savedTy]);
-
-  // Keep `zoomed` (drives scroll-lock) in sync with the live scale.
-  useAnimatedReaction(
-    () => scale.value > 1.01,
-    (z, prev) => {
-      if (z !== prev) runOnJS(setZoomed)(z);
-    },
-  );
 
   // If this chapter is downloaded, read its pages from local storage (offline)
   // instead of resolving page URLs over the network.
@@ -119,6 +132,21 @@ export function ReaderScreen() {
   const inverted = mode === 'rtl';
 
   const toggleChrome = useCallback(() => setChrome(c => !c), []);
+
+  // Manual Cloudflare clearance: open the manga page in the in-app WebView (it
+  // shares the engine's cookie jar) so the user can solve a challenge by hand.
+  const onOpenInWebView = useCallback(async () => {
+    try {
+      const url = await engine.getMangaWebUrl(params.sourceId, params.mangaUrl);
+      if (!url) {
+        notify('No web address for this source');
+        return;
+      }
+      await engine.openInWebView(url);
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Could not open the page');
+    }
+  }, [engine, params.sourceId, params.mangaUrl]);
 
   // Resolve the current page to a local file:// uri (cache-backed, so this is
   // cheap once the page has rendered) for the save/share actions.
@@ -181,11 +209,14 @@ export function ReaderScreen() {
 
   const onViewable = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
     const first = viewableItems[0];
-    if (first?.index != null) setCurrent(first.index);
+    if (first?.index != null) {
+      currentRef.current = first.index;
+      setCurrent(first.index);
+    }
   }).current;
 
-  // Persist reading progress (furthest page) like Mihon — debounced while
-  // reading, then flushed on exit. Works for any source, library or not.
+  // Persist reading progress (furthest page) — debounced while reading, then
+  // flushed on exit. Works for any source, library or not.
   const progressRef = useRef({ page: 0, total: 0 });
   useEffect(() => {
     if (total <= 0) return;
@@ -219,9 +250,20 @@ export function ReaderScreen() {
         layout={paged ? 'page' : 'strip'}
         reloadToken={reloadTokens[item.index] ?? 0}
         onRetry={() => retryPage(item.index)}
+        onOpenWebView={onOpenInWebView}
       />
     ),
-    [params.sourceId, params.chapter.url, offline, width, height, paged, reloadTokens, retryPage],
+    [
+      params.sourceId,
+      params.chapter.url,
+      offline,
+      width,
+      height,
+      paged,
+      reloadTokens,
+      retryPage,
+      onOpenInWebView,
+    ],
   );
 
   // Reset zoom when switching reading modes (the list remounts via key).
@@ -233,70 +275,108 @@ export function ReaderScreen() {
     transform: [{ translateX: tx.value }, { translateY: ty.value }, { scale: scale.value }],
   }));
 
-  const pinch = Gesture.Pinch()
-    .onUpdate(e => {
-      scale.value = Math.min(Math.max(savedScale.value * e.scale, 1), 4);
-    })
-    .onEnd(() => {
-      savedScale.value = scale.value;
-      if (scale.value <= 1.01) {
-        scale.value = withTiming(1);
-        tx.value = withTiming(0);
-        ty.value = withTiming(0);
-        savedScale.value = 1;
-        savedTx.value = 0;
-        savedTy.value = 0;
-      }
-    });
+  // Pinch anchors on the focal point, pan/scale stay clamped to the content
+  // bounds, and double-tap zooms toward the tapped point. The gesture is
+  // memoised and the `zoomed` flag only flips when a gesture *ends*, so the
+  // handlers never rebuild mid-pinch (the previous cause of the jank).
+  const cx = width / 2;
+  const cy = height / 2;
+  const gesture = useMemo(() => {
+    const pinch = Gesture.Pinch()
+      .onStart(e => {
+        originX.value = e.focalX;
+        originY.value = e.focalY;
+        baseX.value = (e.focalX - cx - savedTx.value) / savedScale.value;
+        baseY.value = (e.focalY - cy - savedTy.value) / savedScale.value;
+      })
+      .onUpdate(e => {
+        const s = clamp(savedScale.value * e.scale, 1, MAX_SCALE);
+        const mx = ((s - 1) * width) / 2;
+        const my = ((s - 1) * height) / 2;
+        scale.value = s;
+        tx.value = clamp(originX.value - cx - baseX.value * s, -mx, mx);
+        ty.value = clamp(originY.value - cy - baseY.value * s, -my, my);
+      })
+      .onEnd(() => {
+        if (scale.value <= 1.01) {
+          scale.value = withTiming(1);
+          tx.value = withTiming(0);
+          ty.value = withTiming(0);
+          savedScale.value = 1;
+          savedTx.value = 0;
+          savedTy.value = 0;
+          runOnJS(setZoomed)(false);
+        } else {
+          savedScale.value = scale.value;
+          savedTx.value = tx.value;
+          savedTy.value = ty.value;
+          runOnJS(setZoomed)(true);
+        }
+      });
 
-  const pan = Gesture.Pan()
-    .enabled(zoomed)
-    .onUpdate(e => {
-      tx.value = savedTx.value + e.translationX;
-      ty.value = savedTy.value + e.translationY;
-    })
-    .onEnd(() => {
-      savedTx.value = tx.value;
-      savedTy.value = ty.value;
-    });
+    const pan = Gesture.Pan()
+      .enabled(zoomed)
+      .onUpdate(e => {
+        const mx = ((scale.value - 1) * width) / 2;
+        const my = ((scale.value - 1) * height) / 2;
+        tx.value = clamp(savedTx.value + e.translationX, -mx, mx);
+        ty.value = clamp(savedTy.value + e.translationY, -my, my);
+      })
+      .onEnd(() => {
+        savedTx.value = tx.value;
+        savedTy.value = ty.value;
+      });
 
-  const doubleTap = Gesture.Tap()
-    .numberOfTaps(2)
-    .maxDuration(260)
-    .onEnd(() => {
-      if (scale.value > 1.01) {
-        scale.value = withTiming(1);
-        tx.value = withTiming(0);
-        ty.value = withTiming(0);
-        savedScale.value = 1;
-        savedTx.value = 0;
-        savedTy.value = 0;
-      } else {
-        scale.value = withTiming(2);
-        savedScale.value = 2;
-      }
-    });
+    const doubleTap = Gesture.Tap()
+      .numberOfTaps(2)
+      .maxDuration(260)
+      .onEnd(e => {
+        if (scale.value > 1.01) {
+          scale.value = withTiming(1);
+          tx.value = withTiming(0);
+          ty.value = withTiming(0);
+          savedScale.value = 1;
+          savedTx.value = 0;
+          savedTy.value = 0;
+          runOnJS(setZoomed)(false);
+        } else {
+          const s = DOUBLE_TAP_SCALE;
+          const mx = ((s - 1) * width) / 2;
+          const my = ((s - 1) * height) / 2;
+          const nx = clamp((e.x - cx) * (1 - s), -mx, mx);
+          const ny = clamp((e.y - cy) * (1 - s), -my, my);
+          scale.value = withTiming(s);
+          tx.value = withTiming(nx);
+          ty.value = withTiming(ny);
+          savedScale.value = s;
+          savedTx.value = nx;
+          savedTy.value = ny;
+          runOnJS(setZoomed)(true);
+        }
+      });
 
-  const singleTap = Gesture.Tap()
-    .maxDuration(260)
-    .onEnd(() => {
-      runOnJS(toggleChrome)();
-    });
+    const singleTap = Gesture.Tap()
+      .maxDuration(260)
+      .onEnd(() => {
+        runOnJS(toggleChrome)();
+      });
 
-  const longPress = Gesture.LongPress()
-    .minDuration(500)
-    .onStart(() => {
-      runOnJS(retryPage)(current);
-    });
+    const longPress = Gesture.LongPress()
+      .minDuration(500)
+      .onStart(() => {
+        runOnJS(retryPage)(currentRef.current);
+      });
 
-  // Pinch and pan zoom together; the tap family stays in its own Exclusive so
-  // the single/double-tap disambiguation survives. Wrapping everything in one
-  // Simultaneous (the previous shape) made single + double tap fire together,
-  // which swallowed the double-tap-to-zoom.
-  const gesture = Gesture.Race(
-    Gesture.Simultaneous(pinch, pan),
-    Gesture.Exclusive(doubleTap, singleTap, longPress),
-  );
+    // Pinch + pan run together; the tap family stays in its own Exclusive so the
+    // single/double-tap disambiguation survives.
+    return Gesture.Race(
+      Gesture.Simultaneous(pinch, pan),
+      Gesture.Exclusive(doubleTap, singleTap, longPress),
+    );
+  }, [
+    zoomed, cx, cy, width, height, toggleChrome, retryPage,
+    scale, savedScale, tx, ty, savedTx, savedTy, originX, originY, baseX, baseY,
+  ]);
 
   return (
     <View style={{ flex: 1, backgroundColor: '#000' }}>
@@ -307,17 +387,35 @@ export function ReaderScreen() {
           <ActivityIndicator color="#fff" />
         </View>
       ) : error || total === 0 ? (
-        <Pressable style={styles.center} onPress={() => navigation.goBack()}>
+        <View style={styles.center}>
           <Icon name="globe" size={28} color="rgba(255,255,255,0.5)" />
           <Text style={styles.errorText}>
             {error ? "Couldn't load this chapter" : 'No pages found'}
           </Text>
           <Text style={styles.errorSub}>
             {error
-              ? 'The source may be blocked or temporarily down. Tap to go back.'
-              : 'This chapter appears to be empty. Tap to go back.'}
+              ? 'The source may be blocked (e.g. Cloudflare) or temporarily down.'
+              : 'This chapter appears to be empty.'}
           </Text>
-        </Pressable>
+          {error ? (
+            <>
+              <Pressable
+                onPress={onOpenInWebView}
+                style={({ pressed }) => [styles.retryBtn, { opacity: pressed ? 0.8 : 1 }]}
+              >
+                <Icon name="globe" size={15} color="#000" />
+                <Text style={styles.retryBtnText}>Open in WebView</Text>
+              </Pressable>
+              <Text style={[styles.errorSub, { marginTop: 12, paddingHorizontal: 24 }]}>
+                Clear the check, then come back and retry. Still blocked? Go back and use
+                {' '}Source &rarr; Migrate to another source.
+              </Text>
+            </>
+          ) : null}
+          <Pressable hitSlop={8} onPress={() => navigation.goBack()} style={{ marginTop: 14 }}>
+            <Text style={styles.errorSub}>Go back</Text>
+          </Pressable>
+        </View>
       ) : (
         <GestureDetector gesture={gesture}>
           <Animated.View style={[styles.zoomLayer, zoomStyle]}>
@@ -344,6 +442,9 @@ export function ReaderScreen() {
                   : undefined
               }
               initialScrollIndex={paged && current > 0 ? current : undefined}
+              onScrollToIndexFailed={() => {
+                // getItemLayout makes this unlikely in paged mode, but never crash.
+              }}
               ListFooterComponent={paged ? null : <View style={{ height: 80 }} />}
             />
           </Animated.View>
@@ -479,6 +580,7 @@ function ReaderPage({
   layout,
   reloadToken,
   onRetry,
+  onOpenWebView,
 }: {
   sourceId: string;
   chapterUrl: string;
@@ -489,6 +591,7 @@ function ReaderPage({
   layout: 'strip' | 'page';
   reloadToken: number;
   onRetry: () => void;
+  onOpenWebView: () => void;
 }) {
   const [ratio, setRatio] = useState(1.5);
   const [uri, setUri] = useState<string | null>(null);
@@ -534,7 +637,7 @@ function ReaderPage({
             resizeMethod="scale"
           />
         ) : loadError ? (
-          <ReaderImageError message={loadError} onRetry={onRetry} />
+          <ReaderImageError message={loadError} onRetry={onRetry} onOpenWebView={onOpenWebView} />
         ) : (
           <ActivityIndicator color="#fff" />
         )}
@@ -577,7 +680,7 @@ function ReaderPage({
           }}
         />
       ) : loadError ? (
-        <ReaderImageError message={loadError} onRetry={onRetry} />
+        <ReaderImageError message={loadError} onRetry={onRetry} onOpenWebView={onOpenWebView} />
       ) : (
         <ActivityIndicator color="#fff" />
       )}
@@ -585,20 +688,48 @@ function ReaderPage({
   );
 }
 
-function ReaderImageError({ message, onRetry }: { message: string; onRetry: () => void }) {
+function ReaderImageError({
+  message,
+  onRetry,
+  onOpenWebView,
+}: {
+  message: string;
+  onRetry: () => void;
+  onOpenWebView: () => void;
+}) {
+  // Cloudflare blocks need a manual clearance, not a plain retry.
+  const cloudflare = /cloudflare/i.test(message);
   return (
     <View style={styles.imageError}>
       <Icon name="refresh" size={24} color="rgba(255,255,255,0.55)" />
       <Text style={styles.imageErrorTitle}>Image failed to load</Text>
       <Text style={styles.imageErrorText}>{message}</Text>
-      <Pressable
-        onPress={onRetry}
-        hitSlop={8}
-        style={({ pressed }) => [styles.retryBtn, { opacity: pressed ? 0.8 : 1 }]}
-      >
-        <Icon name="refresh" size={15} color="#000" />
-        <Text style={styles.retryBtnText}>Retry</Text>
-      </Pressable>
+      <View style={styles.imageErrorActions}>
+        <Pressable
+          onPress={onRetry}
+          hitSlop={8}
+          style={({ pressed }) => [styles.retryBtn, { opacity: pressed ? 0.8 : 1 }]}
+        >
+          <Icon name="refresh" size={15} color="#000" />
+          <Text style={styles.retryBtnText}>Retry</Text>
+        </Pressable>
+        {cloudflare ? (
+          <Pressable
+            onPress={onOpenWebView}
+            hitSlop={8}
+            style={({ pressed }) => [styles.webBtn, { opacity: pressed ? 0.8 : 1 }]}
+          >
+            <Icon name="globe" size={15} color="#fff" />
+            <Text style={styles.webBtnText}>Open in WebView</Text>
+          </Pressable>
+        ) : null}
+      </View>
+      {cloudflare ? (
+        <Text style={styles.imageErrorHint}>
+          Clear the check in the WebView, then Retry. If it stays blocked, go back and migrate
+          this title to another source.
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -813,6 +944,21 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: 'center',
   },
+  imageErrorActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    marginTop: 16,
+    flexWrap: 'wrap',
+  },
+  imageErrorHint: {
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 11.5,
+    lineHeight: 16,
+    marginTop: 14,
+    textAlign: 'center',
+  },
   retryBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -825,6 +971,22 @@ const styles = StyleSheet.create({
   },
   retryBtnText: {
     color: '#000',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  webBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    marginTop: 16,
+    paddingHorizontal: 18,
+    height: 40,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.4)',
+  },
+  webBtnText: {
+    color: '#fff',
     fontSize: 14,
     fontWeight: '700',
   },

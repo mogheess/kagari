@@ -12,6 +12,7 @@ import com.manhwa.engine.EngineFacade
 import com.manhwa.engine.dto.PageDto
 import com.manhwa.engine.repo.ApkInstaller
 import com.manhwa.engine.repo.RepoManager
+import com.manhwa.engine.web.SourceWebViewActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -137,6 +138,11 @@ class ManhwaEngineModule(
     }
 
     @ReactMethod
+    fun getMangaWebUrl(sourceId: String, mangaUrl: String, promise: Promise) = resolve(promise) {
+        facade.getMangaWebUrl(sourceId, mangaUrl)
+    }
+
+    @ReactMethod
     fun getChapters(sourceId: String, mangaUrl: String, promise: Promise) = resolve(promise) {
         json.encodeToString(facade.getChapters(sourceId, mangaUrl))
     }
@@ -158,6 +164,12 @@ class ManhwaEngineModule(
             val page = json.decodeFromString<PageDto>(pageJson)
             json.encodeToString(facade.fetchImage(sourceId, page, forceRefresh))
         }
+
+    /** Fetches a cover via the source's HTTP client; resolves to a local file uri. */
+    @ReactMethod
+    fun fetchCover(sourceId: String, url: String, promise: Promise) = resolve(promise) {
+        facade.fetchCover(sourceId, url)
+    }
 
     // --- offline downloads ---
 
@@ -241,6 +253,30 @@ class ManhwaEngineModule(
     fun shareImage(uri: String, promise: Promise) = resolve(promise) {
         facade.shareImage(uri)
         ""
+    }
+
+    // --- in-app web view (manual Cloudflare clearance) ---
+
+    @ReactMethod
+    fun openInWebView(url: String, promise: Promise) {
+        if (url.isBlank()) {
+            promise.reject("bad_url", "No URL to open")
+            return
+        }
+        try {
+            val ua = runCatching { facade.userAgent() }.getOrNull()
+            val activity = reactContext.currentActivity
+            val ctx = activity ?: reactContext.applicationContext
+            val intent = Intent(ctx, SourceWebViewActivity::class.java).apply {
+                putExtra(SourceWebViewActivity.EXTRA_URL, url)
+                if (ua != null) putExtra(SourceWebViewActivity.EXTRA_UA, ua)
+                if (activity == null) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            ctx.startActivity(intent)
+            promise.resolve(null)
+        } catch (e: Throwable) {
+            promise.reject("webview_failed", e.message ?: "Could not open the web view", e)
+        }
     }
 
     /** Runs [block] on the IO scope and bridges the result/error to the Promise. */

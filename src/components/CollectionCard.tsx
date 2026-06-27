@@ -1,8 +1,14 @@
 import React from 'react';
-import { View, Text, Image, Pressable, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { useTheme } from '../theme/ThemeProvider';
 import { Icon } from './Icon';
+import { RemoteImage } from './RemoteImage';
 import type { FavoriteManga } from '../library/favorites';
+
+interface CollageCover {
+  uri: string;
+  sourceId: string;
+}
 
 interface CollectionCardProps {
   label: string;
@@ -29,10 +35,10 @@ export function CollectionCard({
 }: CollectionCardProps) {
   const theme = useTheme();
   const art = Math.round(width * 0.66);
-  const covers = items
-    .map(i => i.thumbnailUrl)
-    .filter((u): u is string => !!u)
-    .slice(0, 4);
+  const covers: CollageCover[] = items
+    .filter(i => !!i.thumbnailUrl)
+    .slice(0, 4)
+    .map(i => ({ uri: i.thumbnailUrl as string, sourceId: i.sourceId }));
 
   return (
     <Pressable
@@ -54,7 +60,7 @@ export function CollectionCard({
         ]}
       >
         {coverUri ? (
-          <Image source={{ uri: coverUri }} style={styles.full} resizeMode="cover" />
+          <RemoteImage uri={coverUri} style={styles.full} resizeMode="cover" />
         ) : (
           <>
             <Collage covers={covers} muted={theme.colors.skeleton} />
@@ -79,22 +85,30 @@ export function CollectionCard({
   );
 }
 
-function Collage({ covers, muted }: { covers: string[]; muted: string }) {
+function Collage({ covers, muted }: { covers: CollageCover[]; muted: string }) {
   if (covers.length === 0) return null;
   if (covers.length === 1) {
-    return <Image source={{ uri: covers[0] }} style={styles.full} resizeMode="cover" />;
+    return (
+      <RemoteImage
+        uri={covers[0].uri}
+        sourceId={covers[0].sourceId}
+        style={styles.full}
+        resizeMode="cover"
+      />
+    );
   }
   // 2 covers -> two full-height columns; 3-4 -> 2x2 grid (4th cell muted when 3).
   const cellHeight = covers.length === 2 ? '100%' : '50%';
   const slots = covers.length === 2 ? 2 : 4;
   const cells = [];
   for (let i = 0; i < slots; i++) {
-    const uri = covers[i];
+    const cover = covers[i];
     cells.push(
-      uri ? (
-        <Image
+      cover ? (
+        <RemoteImage
           key={i}
-          source={{ uri }}
+          uri={cover.uri}
+          sourceId={cover.sourceId}
           style={{ width: '50%', height: cellHeight }}
           resizeMode="cover"
         />

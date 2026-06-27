@@ -1,8 +1,9 @@
 import React from 'react';
-import { View, Text, Image, Pressable, StyleSheet, useWindowDimensions } from 'react-native';
+import { View, Text, Pressable, StyleSheet, useWindowDimensions } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useTheme } from '../theme/ThemeProvider';
 import { Icon } from './Icon';
+import { RemoteImage } from './RemoteImage';
 import type { MangaDto } from '../engine/types';
 
 interface FeaturedHeroProps {
@@ -38,8 +39,9 @@ export function FeaturedHero({ manga, tagline, onPress }: FeaturedHeroProps) {
       ]}
     >
       {manga.thumbnailUrl ? (
-        <Image
-          source={{ uri: manga.thumbnailUrl }}
+        <RemoteImage
+          uri={manga.thumbnailUrl}
+          sourceId={manga.sourceId}
           style={StyleSheet.absoluteFill}
           resizeMode="cover"
         />

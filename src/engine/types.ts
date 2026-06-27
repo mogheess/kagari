@@ -233,10 +233,19 @@ export interface Engine {
 
   // detail / reading
   getMangaDetails(sourceId: string, mangaUrl: string): Promise<MangaDto>;
+  /** Absolute, browser-openable URL for a manga (source baseUrl + path). */
+  getMangaWebUrl(sourceId: string, mangaUrl: string): Promise<string>;
   getChapters(sourceId: string, mangaUrl: string): Promise<ChapterDto[]>;
   getPages(sourceId: string, chapterUrl: string): Promise<PageDto[]>;
   resolveImage(sourceId: string, page: PageDto): Promise<ImageRequestDto>;
   fetchImage(sourceId: string, page: PageDto, forceRefresh?: boolean): Promise<ImageFileDto>;
+  /**
+   * Fetches a manga cover through the source's HTTP client (so Referer/headers
+   * and Cloudflare clearance apply) and caches it to disk. Resolves to a local
+   * `file://` uri, or the original `url` unchanged when it can't be fetched
+   * natively (no installed source, non-http url, or failure).
+   */
+  fetchCover(sourceId: string, url: string): Promise<string>;
 
   // offline downloads
   /** Downloads one page to persistent storage; resolves with its file:// uri. */
@@ -262,4 +271,12 @@ export interface Engine {
   saveImageToGallery(uri: string): Promise<string>;
   /** Opens the system share sheet for a local image (file:// uri). */
   shareImage(uri: string): Promise<void>;
+
+  // web view
+  /**
+   * Opens a URL in an in-app WebView that shares the engine's cookie jar, so the
+   * user can clear a Cloudflare challenge manually (the resulting `cf_clearance`
+   * cookie is then reused by the source's HTTP client).
+   */
+  openInWebView(url: string): Promise<void>;
 }

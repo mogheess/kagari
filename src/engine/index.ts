@@ -39,10 +39,12 @@ function createUnavailableEngine(): Engine {
     search: () => Promise.resolve({ manga: [], hasNextPage: false }),
     getFilters: () => Promise.resolve([]),
     getMangaDetails: reject,
+    getMangaWebUrl: () => Promise.resolve(''),
     getChapters: () => Promise.resolve([]),
     getPages: () => Promise.resolve([]),
     resolveImage: reject,
     fetchImage: reject,
+    fetchCover: (_sourceId: string, url: string) => Promise.resolve(url),
     downloadPage: reject,
     fetchDownloadedImage: reject,
     deleteDownloadedChapter: () => Promise.resolve(),
@@ -50,6 +52,7 @@ function createUnavailableEngine(): Engine {
     importMihonBackup: reject,
     saveImageToGallery: reject,
     shareImage: reject,
+    openInWebView: reject,
   };
 }
 

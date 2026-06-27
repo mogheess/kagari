@@ -29,15 +29,28 @@ export interface MihonImportSummary {
 /** Maps a decoded backup into the local stores. Pure aside from store writes. */
 export function applyMihonBackup(backup: MihonBackupDto): MihonImportSummary {
   const nameToId = getOrCreateCategoriesByName(backup.categories);
+  // `getOrCreateCategoriesByName` matches categories case-insensitively and keys
+  // its result by the trimmed name, so look up each manga's category names the
+  // same way — otherwise stray whitespace or a case difference between the
+  // category list and a manga's membership would silently drop the category.
+  const normalize = (name: string) => name.trim().toLowerCase();
+  const lookup = new Map<string, string>();
+  for (const [name, id] of Object.entries(nameToId)) {
+    lookup.set(normalize(name), id);
+  }
 
   const favorites: FavoriteManga[] = [];
   const chapters: ChapterProgressImport[] = [];
   const history: HistoryEntry[] = [];
 
   for (const m of backup.manga) {
-    const categoryIds = m.categories
-      .map(name => nameToId[name])
-      .filter((id): id is string => Boolean(id));
+    const categoryIds = [
+      ...new Set(
+        m.categories
+          .map(name => lookup.get(normalize(name)))
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
 
     favorites.push({
       sourceId: m.sourceId,

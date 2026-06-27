@@ -1,14 +1,15 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
-  Image,
   ScrollView,
   Pressable,
   StyleSheet,
   ActivityIndicator,
   Alert,
+  Modal,
   RefreshControl,
+  ToastAndroid,
   useWindowDimensions,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
@@ -17,14 +18,18 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme } from '../theme/ThemeProvider';
 import { useAsync } from '../hooks/useAsync';
+import { getEngine } from '../engine';
 import { peekManga, loadMangaDetails, loadChapters, invalidateManga } from '../engine/mangaCache';
 import { Icon } from '../components/Icon';
 import { Skeleton } from '../components/Skeleton';
+import { RemoteImage } from '../components/RemoteImage';
 import { CategoryAssignSheet } from '../components/CategoryAssignSheet';
+import { SourcePickerSheet } from '../components/SourcePickerSheet';
 import { seededColor, withAlpha } from '../utils/color';
 import { toggleFavorite, useFavorite, setMangaCategories } from '../library/favorites';
 import { useCategories } from '../library/categories';
 import { recordRead } from '../library/history';
+import { planMigration, migrateManga, type MigrationPlan } from '../library/migrate';
 import { useChapterProgress, chapterKey, type ChapterProgress } from '../library/chapterProgress';
 import {
   useDownloadEntry,
@@ -33,7 +38,37 @@ import {
   retryDownload,
 } from '../library/downloads';
 import type { RootStackParamList } from '../navigation/types';
-import type { MangaDto, ChapterDto } from '../engine/types';
+import type { MangaDto, ChapterDto, SourceDto } from '../engine/types';
+
+function notify(message: string): void {
+  ToastAndroid.show(message, ToastAndroid.SHORT);
+}
+
+/**
+ * Picks the chapter to open for "Resume": the earliest chapter that hasn't been
+ * read to the end, resuming mid-chapter when there's saved page progress. Falls
+ * back to the first chapter (nothing read) or the newest (everything read).
+ * `chaptersNewestFirst` is the source order (newest first), as rendered.
+ */
+function pickResume(
+  chaptersNewestFirst: ChapterDto[],
+  progress: Record<string, ChapterProgress>,
+  sourceId: string,
+): { chapter: ChapterDto; page: number; resuming: boolean } | null {
+  if (chaptersNewestFirst.length === 0) return null;
+  const oldestFirst = [...chaptersNewestFirst].reverse();
+  let anyProgress = false;
+  let firstUnread: { chapter: ChapterDto; prog?: ChapterProgress } | null = null;
+  for (const chapter of oldestFirst) {
+    const prog = progress[chapterKey(sourceId, chapter.url)];
+    if (prog && (prog.read || prog.lastPage > 0)) anyProgress = true;
+    if (!firstUnread && (!prog || !prog.read)) firstUnread = { chapter, prog };
+  }
+  const target = firstUnread ?? { chapter: oldestFirst[oldestFirst.length - 1], prog: undefined };
+  const page =
+    target.prog && !target.prog.read && target.prog.lastPage > 1 ? target.prog.lastPage - 1 : 0;
+  return { chapter: target.chapter, page, resuming: anyProgress };
+}
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type DetailRoute = RouteProp<RootStackParamList, 'MangaDetail'>;
@@ -61,6 +96,16 @@ export function MangaDetailScreen() {
   const [expanded, setExpanded] = useState(false);
   const [catSheet, setCatSheet] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [sortAsc, setSortAsc] = useState(false);
+  const [sourceSheet, setSourceSheet] = useState(false);
+  const [migratePick, setMigratePick] = useState(false);
+  const [migrating, setMigrating] = useState(false);
+  const [migrateTarget, setMigrateTarget] = useState<{
+    to: MangaDto;
+    toChapters: ChapterDto[];
+    toSourceName?: string;
+    plan: MigrationPlan;
+  } | null>(null);
 
   const cached = peekManga(params.sourceId, params.mangaUrl);
   const { data: details, reload: reloadDetails } = useAsync<MangaDto>(
@@ -68,7 +113,12 @@ export function MangaDetailScreen() {
     [params.sourceId, params.mangaUrl],
     cached.details,
   );
-  const { data: chapters, loading: chaptersLoading, reload: reloadChapters } = useAsync<ChapterDto[]>(
+  const {
+    data: chapters,
+    loading: chaptersLoading,
+    error: chaptersError,
+    reload: reloadChapters,
+  } = useAsync<ChapterDto[]>(
     () => loadChapters(params.sourceId, params.mangaUrl),
     [params.sourceId, params.mangaUrl],
     cached.chapters,
@@ -83,7 +133,19 @@ export function MangaDetailScreen() {
     setTimeout(() => setRefreshing(false), 700);
   }, [params.sourceId, params.mangaUrl, reloadDetails, reloadChapters]);
 
-  const manga = details ?? params.preview;
+  // Prefer freshly fetched details, but never let a live fetch that omits the
+  // cover/author (common) wipe what we already had from the library/import
+  // preview. Identity fields still come from details.
+  const manga = useMemo<MangaDto | undefined>(() => {
+    if (!details) return params.preview;
+    if (!params.preview) return details;
+    return {
+      ...details,
+      title: details.title || params.preview.title,
+      thumbnailUrl: details.thumbnailUrl ?? params.preview.thumbnailUrl,
+      author: details.author ?? params.preview.author,
+    };
+  }, [details, params.preview]);
   const tint = seededColor(manga?.thumbnailUrl ?? manga?.title ?? 'x', 0.5, 0.32);
   const backdropHeight = Math.round(width * 0.78);
   const progressMap = useChapterProgress();
@@ -94,6 +156,25 @@ export function MangaDetailScreen() {
     .filter(c => favorite?.categoryIds.includes(c.id))
     .map(c => c.name);
 
+  const { data: sources } = useAsync<SourceDto[]>(() => getEngine().listSources(), []);
+  const sourceName = sources?.find(s => s.id === params.sourceId)?.name;
+  // Once the source list has loaded, a missing id means the extension that owns
+  // this title isn't installed — the usual reason an imported manga shows a cover
+  // but no chapters. Surface that instead of a silent empty list.
+  const sourceMissing = sources != null && !sources.some(s => s.id === params.sourceId);
+  const otherSourceCount = (sources ?? []).filter(s => s.id !== params.sourceId).length;
+
+  // Chapters come from the source newest-first; sort toggle flips the display
+  // only — resume always walks true reading order.
+  const displayedChapters = useMemo(
+    () => (sortAsc ? [...(chapters ?? [])].reverse() : chapters ?? []),
+    [chapters, sortAsc],
+  );
+  const resume = useMemo(
+    () => pickResume(chapters ?? [], progressMap, params.sourceId),
+    [chapters, progressMap, params.sourceId],
+  );
+
   const onToggleCategory = (categoryId: string) => {
     if (!favorite) return;
     const next = favorite.categoryIds.includes(categoryId)
@@ -102,7 +183,7 @@ export function MangaDetailScreen() {
     setMangaCategories(params.sourceId, params.mangaUrl, next);
   };
 
-  const openReader = (chapter: ChapterDto) => {
+  const openReader = (chapter: ChapterDto, initialPage?: number) => {
     if (manga) recordRead(manga, chapter);
     navigation.navigate('Reader', {
       sourceId: params.sourceId,
@@ -111,8 +192,98 @@ export function MangaDetailScreen() {
       mangaThumbnailUrl: manga?.thumbnailUrl,
       chapter,
       chapters: chapters ?? [chapter],
+      initialPage,
     });
   };
+
+  const onOpenInBrowser = useCallback(async () => {
+    setSourceSheet(false);
+    try {
+      const url = await getEngine().getMangaWebUrl(params.sourceId, params.mangaUrl);
+      if (!url) {
+        notify('No web address for this source');
+        return;
+      }
+      await getEngine().openInWebView(url);
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Could not open the page');
+    }
+  }, [params.sourceId, params.mangaUrl]);
+
+  const onMigrateTo = useCallback(
+    async (targetSourceId: string) => {
+      setMigratePick(false);
+      const fromManga = manga;
+      if (!fromManga?.title) {
+        notify('Title not loaded yet');
+        return;
+      }
+      if (targetSourceId === params.sourceId) return;
+      setMigrating(true);
+      try {
+        const result = await getEngine().search(targetSourceId, fromManga.title, 1);
+        const match = result.manga[0];
+        if (!match) {
+          notify('No match found on that source');
+          return;
+        }
+        // Pull the target's chapters so reading progress can be matched by number.
+        let toChapters: ChapterDto[] = [];
+        try {
+          toChapters = await loadChapters(targetSourceId, match.url);
+        } catch {
+          toChapters = [];
+        }
+        const plan = planMigration(fromManga, chapters ?? [], match);
+        if (!plan.hasData) {
+          // No library/progress to carry — just open the match.
+          navigation.push('MangaDetail', {
+            sourceId: targetSourceId,
+            mangaUrl: match.url,
+            preview: match,
+          });
+          return;
+        }
+        setMigrateTarget({
+          to: match,
+          toChapters,
+          toSourceName: sources?.find(s => s.id === targetSourceId)?.name,
+          plan,
+        });
+      } catch (e) {
+        notify(e instanceof Error ? e.message : 'Migration search failed');
+      } finally {
+        setMigrating(false);
+      }
+    },
+    [manga, chapters, params.sourceId, navigation, sources],
+  );
+
+  const confirmMigrate = useCallback(
+    (replace: boolean) => {
+      const target = migrateTarget;
+      if (!target || !manga) return;
+      const summary = migrateManga({
+        from: manga,
+        to: target.to,
+        fromChapters: chapters ?? [],
+        toChapters: target.toChapters,
+        replace,
+      });
+      setMigrateTarget(null);
+      const bits: string[] = [];
+      if (summary.chaptersMatched > 0) bits.push(`${summary.chaptersMatched} chapters`);
+      if (summary.favoriteMoved) bits.push('library');
+      if (summary.historyMoved && bits.length === 0) bits.push('history');
+      notify(bits.length ? `Migrated ${bits.join(' + ')}` : 'Migrated');
+      navigation.push('MangaDetail', {
+        sourceId: target.to.sourceId,
+        mangaUrl: target.to.url,
+        preview: target.to,
+      });
+    },
+    [migrateTarget, manga, chapters, navigation],
+  );
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
@@ -133,8 +304,9 @@ export function MangaDetailScreen() {
         {/* Backdrop */}
         <View style={{ height: backdropHeight }}>
           {manga?.thumbnailUrl ? (
-            <Image
-              source={{ uri: manga.thumbnailUrl }}
+            <RemoteImage
+              uri={manga.thumbnailUrl}
+              sourceId={params.sourceId}
               blurRadius={28}
               style={StyleSheet.absoluteFill}
               resizeMode="cover"
@@ -157,9 +329,11 @@ export function MangaDetailScreen() {
         {/* Header block */}
         <View style={[styles.headerRow, { marginTop: -backdropHeight * 0.42 }]}>
           {manga?.thumbnailUrl ? (
-            <Image
-              source={{ uri: manga.thumbnailUrl }}
+            <RemoteImage
+              uri={manga.thumbnailUrl}
+              sourceId={params.sourceId}
               style={[styles.cover, { borderColor: theme.colors.border }]}
+              fallback={<Skeleton width={108} height={158} radius={12} />}
             />
           ) : (
             <Skeleton width={108} height={158} radius={12} />
@@ -200,12 +374,12 @@ export function MangaDetailScreen() {
         {/* Actions */}
         <View style={styles.actions}>
           <Pressable
-            onPress={() => chapters?.length && openReader(chapters[chapters.length - 1])}
+            onPress={() => resume && openReader(resume.chapter, resume.page)}
             style={({ pressed }) => [styles.primaryBtn, { backgroundColor: theme.colors.accent, opacity: pressed ? 0.9 : 1 }]}
           >
             <Icon name="book" size={18} color={theme.colors.onAccent} />
             <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 15 }}>
-              Start Reading
+              {resume?.resuming ? 'Resume' : 'Start reading'}
             </Text>
           </Pressable>
           <Pressable
@@ -242,6 +416,15 @@ export function MangaDetailScreen() {
           </Pressable>
         ) : null}
 
+        {/* Source attribution + actions (open in browser / migrate) */}
+        <Pressable onPress={() => setSourceSheet(true)} style={styles.catRow}>
+          <Icon name="globe" size={14} color={theme.colors.textMuted} />
+          <Text style={{ color: theme.colors.textMuted, fontSize: 13, flex: 1 }} numberOfLines={1}>
+            {sourceName ? `Source: ${sourceName}` : 'Source options'}
+          </Text>
+          <Icon name="chevronRight" size={15} color={theme.colors.textFaint} />
+        </Pressable>
+
         {/* Description */}
         {manga?.description ? (
           <Pressable onPress={() => setExpanded(e => !e)} style={styles.descWrap}>
@@ -260,16 +443,37 @@ export function MangaDetailScreen() {
           <Text style={[theme.typography.heading, { color: theme.colors.text }]}>
             Chapters{chapters ? ` (${chapters.length})` : ''}
           </Text>
-          <Icon name="filter" size={18} color={theme.colors.textMuted} />
+          <Pressable
+            onPress={() => setSortAsc(a => !a)}
+            hitSlop={8}
+            disabled={!chapters?.length}
+            style={styles.sortBtn}
+          >
+            <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, fontWeight: '700' }}>
+              {sortAsc ? 'Oldest first' : 'Newest first'}
+            </Text>
+            <Icon name="filter" size={16} color={theme.colors.textMuted} />
+          </Pressable>
         </View>
 
-        {!chapters && chaptersLoading
-          ? Array.from({ length: 6 }).map((_, i) => (
-              <View key={i} style={{ paddingHorizontal: theme.spacing.lg, paddingVertical: 12 }}>
-                <Skeleton width="60%" height={14} />
-              </View>
-            ))
-          : (chapters ?? []).map((ch, i) => {
+        {!chapters && chaptersLoading ? (
+          Array.from({ length: 6 }).map((_, i) => (
+            <View key={i} style={{ paddingHorizontal: theme.spacing.lg, paddingVertical: 12 }}>
+              <Skeleton width="60%" height={14} />
+            </View>
+          ))
+        ) : displayedChapters.length === 0 ? (
+          <ChaptersNotice
+            sourceMissing={sourceMissing}
+            error={chaptersError}
+            canBrowse={!sourceMissing}
+            canMigrate={otherSourceCount > 0}
+            onRetry={onRefresh}
+            onBrowse={() => setSourceSheet(true)}
+            onMigrate={() => setMigratePick(true)}
+          />
+        ) : (
+          displayedChapters.map((ch, i) => {
               const prog = progressMap[chapterKey(params.sourceId, ch.url)];
               const inProgress = !!prog && !prog.read && prog.lastPage > 0;
               return (
@@ -306,7 +510,8 @@ export function MangaDetailScreen() {
                   <ChapterDownloadButton manga={manga} chapter={ch} />
                 </Pressable>
               );
-            })}
+            })
+        )}
       </ScrollView>
 
       <CategoryAssignSheet
@@ -319,12 +524,282 @@ export function MangaDetailScreen() {
         }}
         onClose={() => setCatSheet(false)}
       />
+
+      <SourceActionsSheet
+        visible={sourceSheet}
+        sourceName={sourceName}
+        onOpenBrowser={onOpenInBrowser}
+        onMigrate={() => {
+          setSourceSheet(false);
+          setMigratePick(true);
+        }}
+        onClose={() => setSourceSheet(false)}
+      />
+
+      <SourcePickerSheet
+        visible={migratePick}
+        sources={(sources ?? []).filter(s => s.id !== params.sourceId)}
+        selectedId={params.sourceId}
+        onSelect={onMigrateTo}
+        onClose={() => setMigratePick(false)}
+      />
+
+      <MigrateConfirmSheet
+        target={migrateTarget}
+        fromSourceName={sourceName}
+        onReplace={() => confirmMigrate(true)}
+        onKeepBoth={() => confirmMigrate(false)}
+        onClose={() => setMigrateTarget(null)}
+      />
+
+      {migrating ? (
+        <View style={styles.migrateOverlay}>
+          <ActivityIndicator color="#fff" />
+          <Text style={styles.migrateText}>{'Searching\u2026'}</Text>
+        </View>
+      ) : null}
     </View>
+  );
+}
+
+/** Bottom sheet of actions for the source a manga belongs to. */
+function SourceActionsSheet({
+  visible,
+  sourceName,
+  onOpenBrowser,
+  onMigrate,
+  onClose,
+}: {
+  visible: boolean;
+  sourceName?: string;
+  onOpenBrowser: () => void;
+  onMigrate: () => void;
+  onClose: () => void;
+}) {
+  const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  const items: { key: string; icon: 'globe' | 'arrowRight'; label: string; hint: string; onPress: () => void }[] = [
+    {
+      key: 'browser',
+      icon: 'globe',
+      label: 'Open in browser',
+      hint: 'View the page or clear a Cloudflare check',
+      onPress: onOpenBrowser,
+    },
+    {
+      key: 'migrate',
+      icon: 'arrowRight',
+      label: 'Migrate to another source',
+      hint: 'Find this title on a different source',
+      onPress: onMigrate,
+    },
+  ];
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={styles.sheetBackdrop} onPress={onClose} />
+      <View
+        style={[
+          styles.sheet,
+          { backgroundColor: theme.colors.bg, paddingBottom: insets.bottom + 10, borderColor: theme.colors.border },
+        ]}
+      >
+        <View style={styles.grabber} />
+        <Text style={[theme.typography.heading, { color: theme.colors.text, marginBottom: 2 }]}>
+          {sourceName ?? 'Source'}
+        </Text>
+        <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginBottom: 8 }}>
+          If a source stops loading, open it in the browser to clear a block, or migrate the title.
+        </Text>
+        {items.map(item => (
+          <Pressable
+            key={item.key}
+            onPress={item.onPress}
+            style={({ pressed }) => [
+              styles.actionRow,
+              { backgroundColor: pressed ? theme.colors.surface : 'transparent' },
+            ]}
+          >
+            <Icon name={item.icon} size={20} color={theme.colors.text} />
+            <View style={{ flex: 1 }}>
+              <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
+                {item.label}
+              </Text>
+              <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginTop: 2 }}>
+                {item.hint}
+              </Text>
+            </View>
+          </Pressable>
+        ))}
+      </View>
+    </Modal>
+  );
+}
+
+/**
+ * Confirms a migration once a match is found. Lets the user replace the original
+ * (move + remove) or keep both, and explains that progress/categories/history
+ * are copied. Surfaced only when there's local state worth carrying over.
+ */
+function MigrateConfirmSheet({
+  target,
+  fromSourceName,
+  onReplace,
+  onKeepBoth,
+  onClose,
+}: {
+  target: { to: MangaDto; toSourceName?: string; plan: MigrationPlan } | null;
+  fromSourceName?: string;
+  onReplace: () => void;
+  onKeepBoth: () => void;
+  onClose: () => void;
+}) {
+  const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  const toName = target?.toSourceName ?? 'the new source';
+  const fromName = fromSourceName ?? 'the current source';
+  const duplicate = target?.plan.targetDuplicate ?? false;
+  return (
+    <Modal visible={target != null} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={styles.sheetBackdrop} onPress={onClose} />
+      <View
+        style={[
+          styles.sheet,
+          { backgroundColor: theme.colors.bg, paddingBottom: insets.bottom + 12, borderColor: theme.colors.border },
+        ]}
+      >
+        <View style={styles.grabber} />
+        <Text style={[theme.typography.heading, { color: theme.colors.text, marginBottom: 2 }]}>
+          Migrate to {toName}?
+        </Text>
+        <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginBottom: 14, lineHeight: 18 }}>
+          {duplicate
+            ? `"${target?.to.title}" is already in your library on ${toName}. Your reading progress, history and categories from ${fromName} will be copied onto it.`
+            : `Your reading progress, history and categories will be copied to ${toName}.`}
+        </Text>
+
+        <Pressable
+          onPress={onReplace}
+          style={({ pressed }) => [
+            styles.migrateChoice,
+            { backgroundColor: theme.colors.accent, opacity: pressed ? 0.9 : 1 },
+          ]}
+        >
+          <Icon name="arrowRight" size={18} color={theme.colors.onAccent} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 14 }}>Replace</Text>
+            <Text style={{ color: theme.colors.onAccent, opacity: 0.8, fontSize: 11.5, marginTop: 1 }}>
+              Move here and remove the original from {fromName}
+            </Text>
+          </View>
+        </Pressable>
+
+        <Pressable
+          onPress={onKeepBoth}
+          style={({ pressed }) => [
+            styles.migrateChoice,
+            { borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border, opacity: pressed ? 0.7 : 1 },
+          ]}
+        >
+          <Icon name="bookmark" size={18} color={theme.colors.text} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>Keep both</Text>
+            <Text style={{ color: theme.colors.textMuted, fontSize: 11.5, marginTop: 1 }}>
+              Copy progress, keep the original too
+            </Text>
+          </View>
+        </Pressable>
+
+        <Pressable onPress={onClose} hitSlop={8} style={styles.migrateCancel}>
+          <Text style={{ color: theme.colors.textMuted, fontSize: 13.5, fontWeight: '600' }}>Cancel</Text>
+        </Pressable>
+      </View>
+    </Modal>
   );
 }
 
 function cap(s: string): string {
   return s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+/**
+ * Shown in place of the chapter list when it's empty — most often because the
+ * title's extension isn't installed (common after a Mihon import) or the source
+ * is blocked/down. Explains why and offers the recovery paths the app already
+ * has: retry, open in the browser (to clear a Cloudflare check), or migrate.
+ */
+function ChaptersNotice({
+  sourceMissing,
+  error,
+  canBrowse,
+  canMigrate,
+  onRetry,
+  onBrowse,
+  onMigrate,
+}: {
+  sourceMissing: boolean;
+  error: Error | null;
+  canBrowse: boolean;
+  canMigrate: boolean;
+  onRetry: () => void;
+  onBrowse: () => void;
+  onMigrate: () => void;
+}) {
+  const theme = useTheme();
+  const title = sourceMissing
+    ? 'Source not installed'
+    : error
+      ? "Couldn't load chapters"
+      : 'No chapters found';
+  const message = sourceMissing
+    ? "The extension this title came from isn't installed, so its chapters can't load. Install that extension, or migrate the title to a source you already have."
+    : error
+      ? 'The source blocked or failed the request. If it shows a Cloudflare check, open it in the browser to clear it, then retry — or migrate to another source.'
+      : 'This source returned no chapters. Try again, open it in the browser, or migrate the title to another source.';
+
+  const buttons: { key: string; label: string; icon: 'refresh' | 'globe' | 'arrowRight'; onPress: () => void; show: boolean }[] = [
+    { key: 'retry', label: 'Retry', icon: 'refresh', onPress: onRetry, show: true },
+    { key: 'browse', label: 'Open in browser', icon: 'globe', onPress: onBrowse, show: canBrowse },
+    { key: 'migrate', label: 'Migrate', icon: 'arrowRight', onPress: onMigrate, show: canMigrate },
+  ];
+
+  return (
+    <View style={styles.notice}>
+      <Icon name={sourceMissing ? 'globe' : 'refresh'} size={22} color={theme.colors.textMuted} />
+      <Text style={[theme.typography.bodyStrong, { color: theme.colors.text, marginTop: 8 }]}>
+        {title}
+      </Text>
+      <Text
+        style={{
+          color: theme.colors.textMuted,
+          fontSize: 12.5,
+          lineHeight: 18,
+          textAlign: 'center',
+          marginTop: 4,
+        }}
+      >
+        {message}
+      </Text>
+      <View style={styles.noticeBtnRow}>
+        {buttons
+          .filter(b => b.show)
+          .map(b => (
+            <Pressable
+              key={b.key}
+              onPress={b.onPress}
+              style={({ pressed }) => [
+                styles.noticeBtn,
+                { borderColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surface : 'transparent' },
+              ]}
+            >
+              <Icon name={b.icon} size={15} color={theme.colors.text} />
+              <Text style={{ color: theme.colors.text, fontSize: 12.5, fontWeight: '700' }}>
+                {b.label}
+              </Text>
+            </Pressable>
+          ))}
+      </View>
+    </View>
+  );
 }
 
 /** Per-chapter download control: download / progress / done / retry. */
@@ -487,6 +962,11 @@ const styles = StyleSheet.create({
     paddingTop: 26,
     paddingBottom: 10,
   },
+  sortBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   chapterRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -502,6 +982,27 @@ const styles = StyleSheet.create({
     marginTop: 2,
     flexWrap: 'wrap',
   },
+  notice: {
+    alignItems: 'center',
+    paddingHorizontal: 28,
+    paddingVertical: 22,
+  },
+  noticeBtnRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 16,
+  },
+  noticeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
   dlBtn: {
     width: 40,
     height: 40,
@@ -515,5 +1016,72 @@ const styles = StyleSheet.create({
     borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  sheetBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  sheet: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 18,
+    paddingTop: 4,
+  },
+  grabber: {
+    alignSelf: 'center',
+    width: 38,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(128,128,128,0.4)',
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+  },
+  migrateChoice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    marginBottom: 10,
+  },
+  migrateCancel: {
+    alignSelf: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    marginTop: 2,
+  },
+  migrateOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  migrateText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

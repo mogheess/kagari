@@ -2,13 +2,13 @@ import React, { useState } from 'react';
 import {
   View,
   Text,
-  Image,
   Pressable,
   StyleSheet,
   StyleProp,
   ViewStyle,
 } from 'react-native';
 import { useTheme } from '../theme/ThemeProvider';
+import { RemoteImage } from './RemoteImage';
 import type { MangaDto } from '../engine/types';
 
 interface CoverProps {
@@ -50,8 +50,9 @@ export function Cover({ manga, width, subtitle, progress, badge, onPress, style 
         ]}
       >
         {manga.thumbnailUrl ? (
-          <Image
-            source={{ uri: manga.thumbnailUrl }}
+          <RemoteImage
+            uri={manga.thumbnailUrl}
+            sourceId={manga.sourceId}
             style={[styles.image, { borderRadius: theme.radius.md }]}
             onLoadEnd={() => setLoaded(true)}
             resizeMode="cover"
