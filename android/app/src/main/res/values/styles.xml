@@ -4,9 +4,14 @@
     <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
         <!-- Customize your theme here. -->
         <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
-        <!-- Opaque dark window background so launch + native-stack transitions
-             don't flash the system's default (white) background. -->
+        <!-- Opaque dark backgrounds so launch + native-stack transitions never
+             flash white. windowBackground covers the pre-React launch window;
+             colorBackground is what react-native-screens paints behind a screen
+             while its JS content mounts. Without the latter, a freshly pushed
+             screen showed the DayNight *light* default (white) for a few frames
+             on devices in light mode (the app itself defaults to dark). -->
         <item name="android:windowBackground">@color/app_background</item>
+        <item name="android:colorBackground">@color/app_background</item>
     </style>
 
 </resources>

@@ -30,6 +30,22 @@ const DEFAULT_BLOCKS: HomeBlock[] = [
 
 const store = makePersistence<HomeBlock[]>('@kagari/home-blocks/v1');
 
+/**
+ * Guarantees every built-in section is present. Sections used to be permanently
+ * removable, which dropped them from the persisted list for good. Now that the
+ * only way to hide a section is to disable it, we merge any missing built-ins
+ * back in (as disabled, so a previously-removed section reappears in Customize
+ * Home for re-enabling without suddenly changing the home screen).
+ */
+function mergeWithDefaults(stored: HomeBlock[]): HomeBlock[] {
+  const seen = new Set(stored.map(b => b.id));
+  const missing = DEFAULT_BLOCKS.filter(b => !seen.has(b.id)).map(b => ({
+    ...b,
+    enabled: false,
+  }));
+  return missing.length > 0 ? [...stored, ...missing] : stored;
+}
+
 /** The default source every browse section uses unless it has its own override. */
 interface UniversalSource {
   id?: string;
@@ -42,7 +58,6 @@ interface HomeConfigValue {
   setBlocks: (b: HomeBlock[]) => void;
   toggle: (id: string) => void;
   move: (from: number, to: number) => void;
-  remove: (id: string) => void;
   /** Assigns the source a browse block pulls from (a per-section override). */
   setSource: (id: string, sourceId: string, sourceName: string) => void;
   /** Clears a section's override so it falls back to the universal source. */
@@ -66,7 +81,7 @@ export function HomeConfigProvider({ children }: { children: React.ReactNode }) 
     let cancelled = false;
     store.load().then(stored => {
       if (!cancelled && stored && Array.isArray(stored) && stored.length > 0) {
-        setBlocksState(stored);
+        setBlocksState(mergeWithDefaults(stored));
       }
     });
     universalStore.load().then(stored => {
@@ -112,8 +127,6 @@ export function HomeConfigProvider({ children }: { children: React.ReactNode }) 
     [update],
   );
 
-  const remove = useCallback((id: string) => update(prev => prev.filter(b => b.id !== id)), [update]);
-
   const setSource = useCallback(
     (id: string, sourceId: string, sourceName: string) =>
       update(prev => prev.map(b => (b.id === id ? { ...b, sourceId, sourceName } : b))),
@@ -147,7 +160,6 @@ export function HomeConfigProvider({ children }: { children: React.ReactNode }) 
       setBlocks,
       toggle,
       move,
-      remove,
       setSource,
       clearSource,
       clearAllSources,
@@ -160,7 +172,6 @@ export function HomeConfigProvider({ children }: { children: React.ReactNode }) 
       setBlocks,
       toggle,
       move,
-      remove,
       setSource,
       clearSource,
       clearAllSources,

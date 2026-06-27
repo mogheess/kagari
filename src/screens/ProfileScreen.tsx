@@ -9,7 +9,6 @@ import { useAppUpdate, checkForAppUpdate } from '../app/appUpdate';
 import { useExtensionUpdates, checkExtensionUpdates } from '../sources/extensionUpdates';
 import { getEngine } from '../engine';
 import { APP_VERSION } from '../app/version';
-import { getEngine } from '../engine';
 import { pickAndImportMihonBackup } from '../library/mihonImport';
 import type { RootStackParamList } from '../navigation/types';
 

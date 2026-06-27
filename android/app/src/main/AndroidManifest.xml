@@ -12,7 +12,14 @@
       visibility permission to let the engine discover installed extensions.
     -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
-    <uses-permission android:name="android.permission.DELETE_PACKAGES" />
+    <!--
+      Lets the app ask the system package installer to uninstall an extension
+      (it shows the standard confirmation dialog). DELETE_PACKAGES is a
+      privileged/system-only permission that a sideloaded app can never be
+      granted, so the uninstall request was being rejected with
+      "does not have REQUEST_DELETE_PACKAGES or DELETE_PACKAGES".
+    -->
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
 
     <application
       android:name=".MainApplication"

@@ -2,10 +2,12 @@ import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
+  Image,
   FlatList,
   ScrollView,
   Pressable,
   StyleSheet,
+  Modal,
   RefreshControl,
   useWindowDimensions,
 } from 'react-native';
@@ -17,8 +19,6 @@ import { Cover } from '../components/Cover';
 import { Icon } from '../components/Icon';
 import { CollectionCard } from '../components/CollectionCard';
 import { SwipeTabs } from '../components/SwipeTabs';
-import { useAsync } from '../hooks/useAsync';
-import { getEngine } from '../engine';
 import { useFavorites, favoriteToManga, reloadFavorites } from '../library/favorites';
 import { useCategories } from '../library/categories';
 import {
@@ -28,8 +28,13 @@ import {
   type LibraryCollection,
   type LibraryCollections,
 } from '../library/collections';
+import {
+  useCollectionCovers,
+  setCollectionCover,
+  clearCollectionCover,
+} from '../library/collectionCovers';
 import type { RootStackParamList } from '../navigation/types';
-import type { MangaDto, SourceDto } from '../engine/types';
+import type { MangaDto } from '../engine/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -46,13 +51,13 @@ export function LibraryScreen() {
   const favorites = useFavorites();
   const categories = useCategories();
   const viewMode = useLibraryViewMode();
-  const engine = getEngine();
-  const { data: sources } = useAsync<SourceDto[]>(() => engine.listSources(), []);
-  const collections = useLibraryCollections(sources ?? []);
+  const collections = useLibraryCollections();
+  const covers = useCollectionCovers();
 
   const [openId, setOpenId] = useState<string | null>(null);
   const [selected, setSelected] = useState<string>(ALL);
   const [refreshing, setRefreshing] = useState(false);
+  const [coverPickerFor, setCoverPickerFor] = useState<LibraryCollection | null>(null);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -178,7 +183,9 @@ export function LibraryScreen() {
               label="All"
               items={collections.all.items}
               width={cardWidth}
+              coverUri={covers.all}
               onPress={() => setOpenId('all')}
+              onLongPress={() => setCoverPickerFor(collections.all)}
             />
             {collections.manual.map(c => (
               <CollectionCard
@@ -186,28 +193,14 @@ export function LibraryScreen() {
                 label={c.label}
                 items={c.items}
                 width={cardWidth}
+                coverUri={covers[c.id]}
                 onPress={() => setOpenId(c.id)}
+                onLongPress={() => setCoverPickerFor(c)}
               />
             ))}
           </View>
-
-          {collections.smart.length > 0 ? (
-            <>
-              <SectionLabel text="SMART" style={{ marginTop: 22 }} />
-              <View style={[styles.wrap, { gap: cardGap }]}>
-                {collections.smart.map(c => (
-                  <CollectionCard
-                    key={c.id}
-                    label={c.label}
-                    items={c.items}
-                    width={cardWidth}
-                    onPress={() => setOpenId(c.id)}
-                  />
-                ))}
-              </View>
-            </>
-          ) : null}
         </ScrollView>
+        <CoverPicker collection={coverPickerFor} onClose={() => setCoverPickerFor(null)} />
       </View>
     );
   }
@@ -290,7 +283,101 @@ export function LibraryScreen() {
 
 function findCollection(c: LibraryCollections, id: string): LibraryCollection | undefined {
   if (id === 'all') return c.all;
-  return c.manual.find(x => x.id === id) ?? c.smart.find(x => x.id === id);
+  return c.manual.find(x => x.id === id);
+}
+
+/** Bottom sheet to pick a folder's cover from the artwork of its titles. */
+function CoverPicker({
+  collection,
+  onClose,
+}: {
+  collection: LibraryCollection | null;
+  onClose: () => void;
+}) {
+  const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+
+  const art = [
+    ...new Set(
+      (collection?.items ?? [])
+        .map(i => i.thumbnailUrl)
+        .filter((u): u is string => !!u),
+    ),
+  ];
+  const cols = 3;
+  const gap = 12;
+  const pad = theme.spacing.lg;
+  const tile = Math.floor((width - pad * 2 - gap * (cols - 1)) / cols);
+
+  return (
+    <Modal
+      visible={collection != null}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <Pressable style={styles.coverBackdrop} onPress={onClose} />
+      <View
+        style={[
+          styles.coverSheet,
+          { backgroundColor: theme.colors.surface, paddingBottom: insets.bottom + 16 },
+        ]}
+      >
+        <View style={styles.coverHeader}>
+          <Text
+            style={[theme.typography.heading, { color: theme.colors.text, flex: 1 }]}
+            numberOfLines={1}
+          >
+            Cover for {collection?.label}
+          </Text>
+          <Pressable hitSlop={10} onPress={onClose}>
+            <Icon name="close" size={22} color={theme.colors.textMuted} />
+          </Pressable>
+        </View>
+        <Text style={{ color: theme.colors.textMuted, fontSize: 13, marginBottom: 14 }}>
+          Pick a title's artwork to represent this folder.
+        </Text>
+        <FlatList
+          data={art}
+          numColumns={cols}
+          keyExtractor={(u, i) => `${u}:${i}`}
+          columnWrapperStyle={{ gap }}
+          contentContainerStyle={{ gap }}
+          style={{ maxHeight: Math.round(tile * 1.4) * 2 + gap + 4 }}
+          showsVerticalScrollIndicator={false}
+          renderItem={({ item }) => (
+            <Pressable
+              onPress={() => {
+                if (collection) setCollectionCover(collection.id, item);
+                onClose();
+              }}
+            >
+              <Image
+                source={{ uri: item }}
+                style={{ width: tile, height: Math.round(tile * 1.4), borderRadius: 10 }}
+                resizeMode="cover"
+              />
+            </Pressable>
+          )}
+          ListEmptyComponent={
+            <Text style={{ color: theme.colors.textFaint, fontSize: 13 }}>
+              No artwork available in this folder yet.
+            </Text>
+          }
+        />
+        <Pressable
+          onPress={() => {
+            if (collection) clearCollectionCover(collection.id);
+            onClose();
+          }}
+          style={[styles.coverReset, { borderColor: theme.colors.border }]}
+        >
+          <Text style={{ color: theme.colors.text, fontWeight: '600' }}>Reset to default</Text>
+        </Pressable>
+      </View>
+    </Modal>
+  );
 }
 
 function ViewToggle({ active, icon, onPress }: { active: boolean; icon: 'grid' | 'library'; onPress: () => void }) {
@@ -427,5 +514,37 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
+  },
+  coverBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  coverSheet: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    paddingHorizontal: 20,
+    paddingTop: 18,
+  },
+  coverHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  coverReset: {
+    marginTop: 16,
+    height: 46,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

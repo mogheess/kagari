@@ -21,7 +21,6 @@ export function CustomizeHomeScreen() {
     blocks,
     toggle,
     move,
-    remove,
     setSource,
     clearSource,
     clearAllSources,
@@ -149,9 +148,6 @@ export function CustomizeHomeScreen() {
                   trackColor={{ true: theme.colors.accent, false: theme.colors.border }}
                   thumbColor="#fff"
                 />
-                <Pressable hitSlop={8} onPress={() => remove(block.id)} style={{ marginLeft: 10 }}>
-                  <Icon name="minus" size={20} color={theme.colors.textFaint} />
-                </Pressable>
               </View>
 
               {browse ? (

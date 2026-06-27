@@ -9,6 +9,9 @@ interface CollectionCardProps {
   items: FavoriteManga[];
   width: number;
   onPress?: () => void;
+  onLongPress?: () => void;
+  /** Custom cover override; falls back to an auto collage of the titles. */
+  coverUri?: string;
 }
 
 /**
@@ -16,7 +19,14 @@ interface CollectionCardProps {
  * count. The collage adapts to how many covers are available so even a one-title
  * folder still looks intentional.
  */
-export function CollectionCard({ label, items, width, onPress }: CollectionCardProps) {
+export function CollectionCard({
+  label,
+  items,
+  width,
+  onPress,
+  onLongPress,
+  coverUri,
+}: CollectionCardProps) {
   const theme = useTheme();
   const art = Math.round(width * 0.66);
   const covers = items
@@ -25,7 +35,12 @@ export function CollectionCard({ label, items, width, onPress }: CollectionCardP
     .slice(0, 4);
 
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [{ width, opacity: pressed ? 0.85 : 1 }]}>
+    <Pressable
+      onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={300}
+      style={({ pressed }) => [{ width, opacity: pressed ? 0.85 : 1 }]}
+    >
       <View
         style={[
           styles.art,
@@ -38,12 +53,18 @@ export function CollectionCard({ label, items, width, onPress }: CollectionCardP
           },
         ]}
       >
-        <Collage covers={covers} muted={theme.colors.skeleton} />
-        {covers.length === 0 ? (
-          <View style={styles.emptyArt}>
-            <Icon name="bookmark" size={24} color={theme.colors.textFaint} />
-          </View>
-        ) : null}
+        {coverUri ? (
+          <Image source={{ uri: coverUri }} style={styles.full} resizeMode="cover" />
+        ) : (
+          <>
+            <Collage covers={covers} muted={theme.colors.skeleton} />
+            {covers.length === 0 ? (
+              <View style={styles.emptyArt}>
+                <Icon name="bookmark" size={24} color={theme.colors.textFaint} />
+              </View>
+            ) : null}
+          </>
+        )}
       </View>
       <Text
         numberOfLines={1}
