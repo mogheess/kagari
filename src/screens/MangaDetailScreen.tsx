@@ -30,7 +30,7 @@ import {
   toggleFavorite,
   useFavorite,
   setMangaCategories,
-  findFavoriteByTitle,
+  findFavoritesByTitle,
   favoriteToManga,
   type FavoriteManga,
 } from '../library/favorites';
@@ -113,7 +113,17 @@ export function MangaDetailScreen() {
     toSourceName?: string;
     plan: MigrationPlan;
   } | null>(null);
-  const [dupPrompt, setDupPrompt] = useState<FavoriteManga | null>(null);
+  // Search results for "migrate to another source" — the user picks the right
+  // match instead of the app silently taking the first hit.
+  const [migrateResults, setMigrateResults] = useState<{
+    sourceId: string;
+    sourceName?: string;
+    query: string;
+    results: MangaDto[];
+  } | null>(null);
+  // Candidate library copies for the duplicate-add prompt (same title, other
+  // sources). The user picks which copy to migrate from.
+  const [dupPrompt, setDupPrompt] = useState<FavoriteManga[] | null>(null);
 
   const cached = peekManga(params.sourceId, params.mangaUrl);
   const { data: details, reload: reloadDetails } = useAsync<MangaDto>(
@@ -218,6 +228,9 @@ export function MangaDetailScreen() {
     }
   }, [params.sourceId, params.mangaUrl]);
 
+  // Step 1 of migrate-to-source: search the chosen source and show the matches
+  // so the user can pick the correct title (sources often return near-matches,
+  // sequels or the wrong language as the first hit).
   const onMigrateTo = useCallback(
     async (targetSourceId: string) => {
       setMigratePick(false);
@@ -230,33 +243,16 @@ export function MangaDetailScreen() {
       setMigrating(true);
       try {
         const result = await getEngine().search(targetSourceId, fromManga.title, 1);
-        const match = result.manga[0];
-        if (!match) {
-          notify('No match found on that source');
+        const results = result.manga.slice(0, 30);
+        if (results.length === 0) {
+          notify('No matches found on that source');
           return;
         }
-        // Pull the target's chapters so reading progress can be matched by number.
-        let toChapters: ChapterDto[] = [];
-        try {
-          toChapters = await loadChapters(targetSourceId, match.url);
-        } catch {
-          toChapters = [];
-        }
-        const plan = planMigration(fromManga, chapters ?? [], match);
-        if (!plan.hasData) {
-          // No library/progress to carry — just open the match.
-          navigation.push('MangaDetail', {
-            sourceId: targetSourceId,
-            mangaUrl: match.url,
-            preview: match,
-          });
-          return;
-        }
-        setMigrateTarget({
-          to: match,
-          toChapters,
-          toSourceName: sources?.find(s => s.id === targetSourceId)?.name,
-          plan,
+        setMigrateResults({
+          sourceId: targetSourceId,
+          sourceName: sources?.find(s => s.id === targetSourceId)?.name,
+          query: fromManga.title,
+          results,
         });
       } catch (e) {
         notify(e instanceof Error ? e.message : 'Migration search failed');
@@ -264,7 +260,42 @@ export function MangaDetailScreen() {
         setMigrating(false);
       }
     },
-    [manga, chapters, params.sourceId, navigation, sources],
+    [manga, params.sourceId, sources],
+  );
+
+  // Step 2 of migrate-to-source: the user picked a match — load its chapters and
+  // either open it (nothing to carry) or confirm the migration.
+  const onPickMigrateResult = useCallback(
+    async (match: MangaDto) => {
+      const picked = migrateResults;
+      setMigrateResults(null);
+      const fromManga = manga;
+      if (!picked || !fromManga) return;
+      setMigrating(true);
+      try {
+        let toChapters: ChapterDto[] = [];
+        try {
+          toChapters = await loadChapters(picked.sourceId, match.url);
+        } catch {
+          toChapters = [];
+        }
+        const plan = planMigration(fromManga, chapters ?? [], match);
+        if (!plan.hasData) {
+          navigation.push('MangaDetail', {
+            sourceId: picked.sourceId,
+            mangaUrl: match.url,
+            preview: match,
+          });
+          return;
+        }
+        setMigrateTarget({ to: match, toChapters, toSourceName: picked.sourceName, plan });
+      } catch (e) {
+        notify(e instanceof Error ? e.message : 'Could not load that title');
+      } finally {
+        setMigrating(false);
+      }
+    },
+    [migrateResults, manga, chapters, navigation],
   );
 
   const confirmMigrate = useCallback(
@@ -298,9 +329,9 @@ export function MangaDetailScreen() {
   // the user can migrate their progress here instead of silently duplicating.
   const addToLibrary = useCallback(() => {
     if (!manga) return;
-    const dup = findFavoriteByTitle(manga.title, { sourceId: manga.sourceId, url: manga.url });
-    if (dup) {
-      setDupPrompt(dup);
+    const dups = findFavoritesByTitle(manga.title, { sourceId: manga.sourceId, url: manga.url });
+    if (dups.length > 0) {
+      setDupPrompt(dups);
       return;
     }
     const nowFav = toggleFavorite(manga);
@@ -314,35 +345,39 @@ export function MangaDetailScreen() {
     if (nowFav && categories.length > 0) setCatSheet(true);
   }, [manga, categories.length]);
 
-  const onDupMigrate = useCallback(async () => {
-    const existing = dupPrompt;
-    setDupPrompt(null);
-    if (!existing || !manga) return;
-    setMigrating(true);
-    try {
-      let fromChapters: ChapterDto[] = [];
+  // Migrate from the library copy the user picked in the duplicate prompt onto
+  // this source, removing the old copy.
+  const onDupMigrate = useCallback(
+    async (existing: FavoriteManga) => {
+      setDupPrompt(null);
+      if (!manga) return;
+      setMigrating(true);
       try {
-        fromChapters = await loadChapters(existing.sourceId, existing.url);
-      } catch {
-        fromChapters = [];
+        let fromChapters: ChapterDto[] = [];
+        try {
+          fromChapters = await loadChapters(existing.sourceId, existing.url);
+        } catch {
+          fromChapters = [];
+        }
+        const summary = migrateManga({
+          from: favoriteToManga(existing),
+          to: manga,
+          fromChapters,
+          toChapters: chapters ?? [],
+          replace: true,
+        });
+        const bits: string[] = [];
+        if (summary.chaptersMatched > 0) bits.push(`${summary.chaptersMatched} chapters`);
+        if (summary.historyMoved && bits.length === 0) bits.push('history');
+        notify(bits.length ? `Migrated here \u00B7 ${bits.join(' + ')}` : 'Migrated to this source');
+      } catch (e) {
+        notify(e instanceof Error ? e.message : 'Migration failed');
+      } finally {
+        setMigrating(false);
       }
-      const summary = migrateManga({
-        from: favoriteToManga(existing),
-        to: manga,
-        fromChapters,
-        toChapters: chapters ?? [],
-        replace: true,
-      });
-      const bits: string[] = [];
-      if (summary.chaptersMatched > 0) bits.push(`${summary.chaptersMatched} chapters`);
-      if (summary.historyMoved && bits.length === 0) bits.push('history');
-      notify(bits.length ? `Migrated here \u00B7 ${bits.join(' + ')}` : 'Migrated to this source');
-    } catch (e) {
-      notify(e instanceof Error ? e.message : 'Migration failed');
-    } finally {
-      setMigrating(false);
-    }
-  }, [dupPrompt, manga, chapters]);
+    },
+    [manga, chapters],
+  );
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
@@ -615,11 +650,18 @@ export function MangaDetailScreen() {
       />
 
       <DuplicateAddSheet
-        existing={dupPrompt}
-        existingSourceName={sources?.find(s => s.id === dupPrompt?.sourceId)?.name}
+        title={manga?.title}
+        candidates={dupPrompt}
+        sourceNameById={id => sources?.find(s => s.id === id)?.name}
         onMigrate={onDupMigrate}
         onAddBoth={onDupAddBoth}
         onClose={() => setDupPrompt(null)}
+      />
+
+      <MigrateResultPickSheet
+        data={migrateResults}
+        onPick={onPickMigrateResult}
+        onClose={() => setMigrateResults(null)}
       />
 
       {migrating ? (
@@ -788,28 +830,33 @@ function MigrateConfirmSheet({
 }
 
 /**
- * Shown when the user adds a title they already follow on another source.
- * Offers to migrate their reading state onto this source (removing the old
- * copy) or to keep both copies in the library.
+ * Shown when the user adds a title they already follow on another source. Lists
+ * every matching library copy so the user picks which one to migrate their
+ * reading state *from* (its old copy is removed) — instead of the app guessing —
+ * or keeps both copies.
  */
 function DuplicateAddSheet({
-  existing,
-  existingSourceName,
+  title,
+  candidates,
+  sourceNameById,
   onMigrate,
   onAddBoth,
   onClose,
 }: {
-  existing: FavoriteManga | null;
-  existingSourceName?: string;
-  onMigrate: () => void;
+  title?: string;
+  candidates: FavoriteManga[] | null;
+  sourceNameById: (sourceId: string) => string | undefined;
+  onMigrate: (existing: FavoriteManga) => void;
   onAddBoth: () => void;
   onClose: () => void;
 }) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const fromName = existingSourceName ?? 'another source';
+  const list = candidates ?? [];
+  const visible = list.length > 0;
+  const multiple = list.length > 1;
   return (
-    <Modal visible={existing != null} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.sheetBackdrop} onPress={onClose} />
       <View
         style={[
@@ -821,43 +868,132 @@ function DuplicateAddSheet({
         <Text style={[theme.typography.heading, { color: theme.colors.text, marginBottom: 2 }]}>
           Already in your library
         </Text>
-        <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginBottom: 14, lineHeight: 18 }}>
-          {`"${existing?.title ?? 'This title'}" is already in your library from ${fromName}. Migrate your reading progress, history and categories onto this source, or keep both copies?`}
+        <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginBottom: 12, lineHeight: 18 }}>
+          {multiple
+            ? `"${title ?? 'This title'}" matches more than one title in your library. Pick the copy to migrate your progress, history and categories from onto this source — or keep them all.`
+            : `"${title ?? 'This title'}" is already in your library. Migrate your progress, history and categories onto this source, or keep both copies.`}
         </Text>
 
-        <Pressable
-          onPress={onMigrate}
-          style={({ pressed }) => [
-            styles.migrateChoice,
-            { backgroundColor: theme.colors.accent, opacity: pressed ? 0.9 : 1 },
-          ]}
-        >
-          <Icon name="arrowRight" size={18} color={theme.colors.onAccent} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 14 }}>Migrate here</Text>
-            <Text style={{ color: theme.colors.onAccent, opacity: 0.8, fontSize: 11.5, marginTop: 1 }}>
-              Move progress here and remove the copy from {fromName}
-            </Text>
-          </View>
-        </Pressable>
+        <Text style={{ color: theme.colors.textFaint, fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 6 }}>
+          MIGRATE FROM
+        </Text>
+        <ScrollView style={styles.pickList} keyboardShouldPersistTaps="handled">
+          {list.map(c => {
+            const tint = seededColor(c.thumbnailUrl ?? c.title, 0.5, 0.3);
+            return (
+              <Pressable
+                key={`${c.sourceId}\u0000${c.url}`}
+                onPress={() => onMigrate(c)}
+                style={({ pressed }) => [styles.pickRow, { backgroundColor: pressed ? theme.colors.surface : 'transparent' }]}
+              >
+                <View style={[styles.pickThumb, { backgroundColor: tint }]}>
+                  {c.thumbnailUrl ? (
+                    <RemoteImage uri={c.thumbnailUrl} sourceId={c.sourceId} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                  ) : null}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]} numberOfLines={1}>
+                    {c.title}
+                  </Text>
+                  <Text style={{ color: theme.colors.textMuted, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
+                    {sourceNameById(c.sourceId) ?? 'Unknown source'}
+                  </Text>
+                </View>
+                <Icon name="arrowRight" size={18} color={theme.colors.accent} />
+              </Pressable>
+            );
+          })}
+        </ScrollView>
 
         <Pressable
           onPress={onAddBoth}
           style={({ pressed }) => [
             styles.migrateChoice,
-            { borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border, opacity: pressed ? 0.7 : 1 },
+            { borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border, opacity: pressed ? 0.7 : 1, marginTop: 12 },
           ]}
         >
           <Icon name="bookmark" size={18} color={theme.colors.text} />
           <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>Add both</Text>
+            <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>Add anyway</Text>
             <Text style={{ color: theme.colors.textMuted, fontSize: 11.5, marginTop: 1 }}>
-              Keep both copies in your library
+              {multiple ? 'Keep this copy and all the existing ones' : 'Keep both copies in your library'}
             </Text>
           </View>
         </Pressable>
 
         <Pressable onPress={onClose} hitSlop={8} style={styles.migrateCancel}>
+          <Text style={{ color: theme.colors.textMuted, fontSize: 13.5, fontWeight: '600' }}>Cancel</Text>
+        </Pressable>
+      </View>
+    </Modal>
+  );
+}
+
+/**
+ * Step between "migrate to another source" and the confirm sheet: shows the
+ * search results from the chosen source so the user picks the right match rather
+ * than the app taking the first hit (often a sequel, spin-off or wrong language).
+ */
+function MigrateResultPickSheet({
+  data,
+  onPick,
+  onClose,
+}: {
+  data: { sourceId: string; sourceName?: string; query: string; results: MangaDto[] } | null;
+  onPick: (match: MangaDto) => void;
+  onClose: () => void;
+}) {
+  const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  const results = data?.results ?? [];
+  return (
+    <Modal visible={data != null} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={styles.sheetBackdrop} onPress={onClose} />
+      <View
+        style={[
+          styles.sheet,
+          { backgroundColor: theme.colors.bg, paddingBottom: insets.bottom + 12, borderColor: theme.colors.border },
+        ]}
+      >
+        <View style={styles.grabber} />
+        <Text style={[theme.typography.heading, { color: theme.colors.text, marginBottom: 2 }]}>
+          Pick the match
+        </Text>
+        <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginBottom: 12, lineHeight: 18 }}>
+          {`Results on ${data?.sourceName ?? 'the source'} for "${data?.query ?? ''}". Choose the title to migrate your reading state onto.`}
+        </Text>
+
+        <ScrollView style={styles.pickList} keyboardShouldPersistTaps="handled">
+          {results.map(m => {
+            const tint = seededColor(m.thumbnailUrl ?? m.title, 0.5, 0.3);
+            return (
+              <Pressable
+                key={m.url}
+                onPress={() => onPick(m)}
+                style={({ pressed }) => [styles.pickRow, { backgroundColor: pressed ? theme.colors.surface : 'transparent' }]}
+              >
+                <View style={[styles.pickThumb, { backgroundColor: tint }]}>
+                  {m.thumbnailUrl ? (
+                    <RemoteImage uri={m.thumbnailUrl} sourceId={m.sourceId} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                  ) : null}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]} numberOfLines={2}>
+                    {m.title}
+                  </Text>
+                  {m.author ? (
+                    <Text style={{ color: theme.colors.textMuted, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
+                      {m.author}
+                    </Text>
+                  ) : null}
+                </View>
+                <Icon name="arrowRight" size={18} color={theme.colors.accent} />
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+
+        <Pressable onPress={onClose} hitSlop={8} style={[styles.migrateCancel, { marginTop: 10 }]}>
           <Text style={{ color: theme.colors.textMuted, fontSize: 13.5, fontWeight: '600' }}>Cancel</Text>
         </Pressable>
       </View>
@@ -1231,5 +1367,22 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',
+  },
+  pickList: {
+    maxHeight: 340,
+  },
+  pickRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+    borderRadius: 12,
+  },
+  pickThumb: {
+    width: 44,
+    height: 60,
+    borderRadius: 8,
+    overflow: 'hidden',
   },
 });
