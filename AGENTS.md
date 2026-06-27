@@ -192,6 +192,13 @@ When you add a new persisted store, follow the favorites pattern (in-memory stat
   truncated download can't keep rendering black. Opening a chapter records history.
   Supports **pinch / double-tap zoom** and a per-page **actions menu** (e.g. save
   the image to a separate phone-gallery album, distinct from chapter downloads).
+  The bottom chrome carries a themed **page slider** (`src/components/PageSlider.tsx`):
+  a draggable thumb over a filled track flanked by the current/total page numbers
+  and previous/next **chapter** controls. Drag or tap to scrub to any page — paged
+  modes jump live per page via `FlatList.scrollToIndex`; the webtoon strip (no
+  `getItemLayout`) commits on release and relies on `onScrollToIndexFailed` to land
+  the exact index. The slider mirrors itself in **rtl** mode, and the chapter
+  buttons walk true reading order (chapters sorted ascending by number).
 - **Mihon import** (`src/library/mihonImport.ts` ⇄ native `backup/MihonBackup.kt`):
   restores a `.tachibk` (gzipped protobuf) backup — favorites, categories, and
   read history — merged non-destructively into the local stores. Surfaced as

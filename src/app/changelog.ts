@@ -15,6 +15,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     version: '0.3',
     date: '2026-06-27',
     highlights: [
+      'New reader page slider: drag (or tap) to jump to any page, with previous/next chapter controls.',
       'Library updates: the Updates tab now tracks new chapters for the manga you follow.',
       'Cloudflare-protected sources now load inside the app, not just in the WebView.',
       'Fixed broken cover art: covers are fetched through the source and cached, so gated CDNs work.',

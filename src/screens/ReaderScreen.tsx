@@ -25,10 +25,11 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useAsync } from '../hooks/useAsync';
 import { getEngine } from '../engine';
-import { recordProgress } from '../library/history';
+import { recordProgress, recordRead } from '../library/history';
 import { recordChapterProgress } from '../library/chapterProgress';
 import { useDownloadEntry, enqueueDownload, type DownloadStatus } from '../library/downloads';
 import { Icon, type IconName } from '../components/Icon';
+import { PageSlider } from '../components/PageSlider';
 import { useTheme } from '../theme/ThemeProvider';
 import {
   READER_MODES,
@@ -39,7 +40,7 @@ import {
   type ReaderMode,
 } from '../reader/readerSettings';
 import type { RootStackParamList } from '../navigation/types';
-import type { ImageFileDto, ImageTileDto, MangaDto, PageDto } from '../engine/types';
+import type { ChapterDto, ImageFileDto, ImageTileDto, MangaDto, PageDto } from '../engine/types';
 
 function notify(message: string): void {
   ToastAndroid.show(message, ToastAndroid.SHORT);
@@ -68,6 +69,8 @@ export function ReaderScreen() {
   const { params } = useRoute<ReaderRoute>();
   const { width, height } = useWindowDimensions();
   const engine = getEngine();
+  const theme = useTheme();
+  const listRef = useRef<FlatList>(null);
 
   const [chrome, setChrome] = useState(true);
   // Resume at the requested page (paged modes scroll there via initialScrollIndex;
@@ -237,6 +240,80 @@ export function ReaderScreen() {
       }
     };
   }, [params.sourceId, params.mangaUrl, params.chapter.url]);
+
+  // Jump the list to a page (used by the slider). Paged modes have getItemLayout
+  // so this is exact; the webtoon strip relies on onScrollToIndexFailed below.
+  const goToPage = useCallback(
+    (index: number) => {
+      const clamped = Math.max(0, Math.min(index, total - 1));
+      currentRef.current = clamped;
+      setCurrent(clamped);
+      try {
+        listRef.current?.scrollToIndex({ index: clamped, animated: false });
+      } catch {
+        // onScrollToIndexFailed handles the rare miss.
+      }
+    },
+    [total],
+  );
+
+  // Live scrub: paged modes jump per page (snappy); the webtoon strip commits on
+  // release to avoid thrashing the variable-height list mid-drag.
+  const onSliderSeek = useCallback(
+    (index: number) => {
+      if (paged) goToPage(index);
+    },
+    [paged, goToPage],
+  );
+  const onSliderSeekEnd = useCallback((index: number) => goToPage(index), [goToPage]);
+
+  // Reading-order chapter list (ascending by number, falling back to the given
+  // order when a source doesn't number its chapters) for the prev/next buttons.
+  const orderedChapters = useMemo(() => {
+    const list = params.chapters ?? [];
+    if (!list.some(c => c.chapterNumber >= 0)) return list.slice();
+    return list
+      .map((c, i) => ({ c, i }))
+      .sort((a, b) => a.c.chapterNumber - b.c.chapterNumber || a.i - b.i)
+      .map(x => x.c);
+  }, [params.chapters]);
+  const orderIdx = useMemo(
+    () => orderedChapters.findIndex(c => c.url === params.chapter.url),
+    [orderedChapters, params.chapter.url],
+  );
+  const prevChapter = orderIdx > 0 ? orderedChapters[orderIdx - 1] : undefined;
+  const nextChapter =
+    orderIdx >= 0 && orderIdx < orderedChapters.length - 1
+      ? orderedChapters[orderIdx + 1]
+      : undefined;
+
+  const openChapter = useCallback(
+    (chapter?: ChapterDto) => {
+      if (!chapter) return;
+      recordRead(
+        {
+          sourceId: params.sourceId,
+          url: params.mangaUrl,
+          title: params.mangaTitle ?? chapter.name,
+          thumbnailUrl: params.mangaThumbnailUrl,
+          genres: [],
+          status: 'unknown',
+          initialized: false,
+        },
+        chapter,
+      );
+      navigation.replace('Reader', {
+        sourceId: params.sourceId,
+        mangaUrl: params.mangaUrl,
+        mangaTitle: params.mangaTitle,
+        mangaThumbnailUrl: params.mangaThumbnailUrl,
+        chapter,
+        chapters: params.chapters,
+        initialPage: 0,
+      });
+    },
+    [navigation, params],
+  );
 
   const renderPage = useCallback(
     ({ item }: { item: PageDto }) => (
@@ -420,6 +497,7 @@ export function ReaderScreen() {
         <GestureDetector gesture={gesture}>
           <Animated.View style={[styles.zoomLayer, zoomStyle]}>
             <FlatList
+              ref={listRef}
               key={mode}
               data={pages ?? []}
               keyExtractor={p => String(p.index)}
@@ -442,8 +520,22 @@ export function ReaderScreen() {
                   : undefined
               }
               initialScrollIndex={paged && current > 0 ? current : undefined}
-              onScrollToIndexFailed={() => {
-                // getItemLayout makes this unlikely in paged mode, but never crash.
+              onScrollToIndexFailed={info => {
+                // Webtoon has no getItemLayout, so a far jump can miss: approximate
+                // by average height, then settle on the exact index once measured.
+                const list = listRef.current;
+                if (!list) return;
+                list.scrollToOffset({
+                  offset: info.averageItemLength * info.index,
+                  animated: false,
+                });
+                setTimeout(() => {
+                  try {
+                    list.scrollToIndex({ index: info.index, animated: false });
+                  } catch {
+                    // Give up quietly; the user can keep scrolling manually.
+                  }
+                }, 80);
               }}
               ListFooterComponent={paged ? null : <View style={{ height: 80 }} />}
             />
@@ -472,19 +564,23 @@ export function ReaderScreen() {
 
       {chrome && total > 0 ? (
         <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 12 }]}>
-          <View style={styles.progressTrack}>
-            <View
-              style={[styles.progressFill, { width: `${((current + 1) / total) * 100}%` }]}
-            />
-          </View>
+          <PageSlider
+            page={current}
+            total={total}
+            accent={theme.colors.accent}
+            inverted={inverted}
+            onSeek={onSliderSeek}
+            onSeekEnd={onSliderSeekEnd}
+            onPrevChapter={() => openChapter(prevChapter)}
+            onNextChapter={() => openChapter(nextChapter)}
+            hasPrev={!!prevChapter}
+            hasNext={!!nextChapter}
+          />
           <View style={styles.bottomRow}>
             <Pressable hitSlop={10} onPress={() => setSettingsOpen(true)} style={styles.modePill}>
               <Icon name={horizontal ? 'columns' : 'list'} size={16} color="#fff" />
               <Text style={styles.modePillText}>{labelFor(mode)}</Text>
             </Pressable>
-            <Text style={styles.counter}>
-              {current + 1} / {total}
-            </Text>
           </View>
         </View>
       ) : null}
@@ -1024,22 +1120,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     backgroundColor: 'rgba(8,8,10,0.92)',
   },
-  progressTrack: {
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.18)',
-    justifyContent: 'center',
-  },
-  progressFill: {
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#2FD3B6',
-  },
   bottomRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: 16,
+    paddingTop: 14,
   },
   modePill: {
     flexDirection: 'row',
@@ -1050,11 +1135,6 @@ const styles = StyleSheet.create({
   modePillText: {
     color: '#fff',
     fontSize: 13,
-    fontWeight: '600',
-  },
-  counter: {
-    color: '#fff',
-    fontSize: 14,
     fontWeight: '600',
   },
   sheetBackdrop: {

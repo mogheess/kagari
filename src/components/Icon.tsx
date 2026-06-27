@@ -33,7 +33,9 @@ export type IconName =
   | 'globe'
   | 'more'
   | 'share'
-  | 'image';
+  | 'image'
+  | 'skipBack'
+  | 'skipForward';
 
 interface IconProps {
   name: IconName;
@@ -272,6 +274,20 @@ function renderPaths(
           <Path {...c} d="M4 5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z" />
           <Circle {...c} cx={9} cy={10} r={1.6} />
           <Polyline {...c} points="5,18 10,12 14,16 17,13 19,15" />
+        </>
+      );
+    case 'skipBack':
+      return (
+        <>
+          <Polyline {...c} points="18,6 10,12 18,18 18,6" />
+          <Line {...c} x1={6} y1={5.5} x2={6} y2={18.5} />
+        </>
+      );
+    case 'skipForward':
+      return (
+        <>
+          <Polyline {...c} points="6,6 14,12 6,18 6,6" />
+          <Line {...c} x1={18} y1={5.5} x2={18} y2={18.5} />
         </>
       );
     default:
