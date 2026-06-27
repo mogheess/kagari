@@ -12,6 +12,20 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.3',
+    date: '2026-06-27',
+    highlights: [
+      'Library updates: the Updates tab now tracks new chapters for the manga you follow.',
+      'Cloudflare-protected sources now load inside the app, not just in the WebView.',
+      'Fixed broken cover art: covers are fetched through the source and cached, so gated CDNs work.',
+      'Manga page shows which source a title came from, with Resume and chapter sort (newest/oldest).',
+      "Clear guidance when a source isn't installed or a load fails: Retry, open in WebView, or Migrate.",
+      'Migrate a title to another source and carry over your reading history.',
+      'Import from Mihon (beta): restore a .tachibk backup — library, categories, and history.',
+      'Smoother pinch and double-tap zoom in the reader; save a page to a separate gallery album.',
+    ],
+  },
+  {
     version: '0.2',
     date: '2026-06-26',
     highlights: [

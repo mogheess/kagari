@@ -130,6 +130,28 @@ export interface AvailableExtensionDto {
   installed: boolean;
 }
 
+/** A Mihon/Tachiyomi backup decoded into the bits Kagari can import. */
+export interface MihonBackupDto {
+  /** Category names, in their original order. */
+  categories: string[];
+  manga: MihonBackupMangaDto[];
+}
+
+export interface MihonBackupMangaDto {
+  sourceId: string;
+  url: string;
+  title: string;
+  thumbnailUrl?: string;
+  author?: string;
+  dateAdded: number;
+  /** Category names this manga belongs to. */
+  categories: string[];
+  /** Chapters with read state worth importing (read or partially read). */
+  chapters: { url: string; name: string; read: boolean; lastPageRead: number }[];
+  /** Most recent read, for the history/continue feed. */
+  lastChapter?: { url: string; name: string; readAt: number };
+}
+
 /**
  * Dynamic filter schema a source exposes (Tachiyomi FilterList) serialized to
  * JSON so the UI can render it generically and pass selections back.
@@ -211,10 +233,19 @@ export interface Engine {
 
   // detail / reading
   getMangaDetails(sourceId: string, mangaUrl: string): Promise<MangaDto>;
+  /** Absolute, browser-openable URL for a manga (source baseUrl + path). */
+  getMangaWebUrl(sourceId: string, mangaUrl: string): Promise<string>;
   getChapters(sourceId: string, mangaUrl: string): Promise<ChapterDto[]>;
   getPages(sourceId: string, chapterUrl: string): Promise<PageDto[]>;
   resolveImage(sourceId: string, page: PageDto): Promise<ImageRequestDto>;
   fetchImage(sourceId: string, page: PageDto, forceRefresh?: boolean): Promise<ImageFileDto>;
+  /**
+   * Fetches a manga cover through the source's HTTP client (so Referer/headers
+   * and Cloudflare clearance apply) and caches it to disk. Resolves to a local
+   * `file://` uri, or the original `url` unchanged when it can't be fetched
+   * natively (no installed source, non-http url, or failure).
+   */
+  fetchCover(sourceId: string, url: string): Promise<string>;
 
   // offline downloads
   /** Downloads one page to persistent storage; resolves with its file:// uri. */
@@ -227,4 +258,25 @@ export interface Engine {
   ): Promise<ImageFileDto>;
   /** Deletes all downloaded pages for a chapter. */
   deleteDownloadedChapter(sourceId: string, chapterUrl: string): Promise<void>;
+  /**
+   * Opens the system file picker for a Mihon/Tachiyomi backup. Resolves with a
+   * content URI, or null if the user cancelled.
+   */
+  pickMihonBackup(): Promise<string | null>;
+  /** Decodes a Mihon/Tachiyomi backup at the given content URI. */
+  importMihonBackup(uri: string): Promise<MihonBackupDto>;
+
+  // save / share
+  /** Saves a local image (file:// uri) to the device gallery; resolves with the saved file name. */
+  saveImageToGallery(uri: string): Promise<string>;
+  /** Opens the system share sheet for a local image (file:// uri). */
+  shareImage(uri: string): Promise<void>;
+
+  // web view
+  /**
+   * Opens a URL in an in-app WebView that shares the engine's cookie jar, so the
+   * user can clear a Cloudflare challenge manually (the resulting `cf_clearance`
+   * cookie is then reused by the source's HTTP client).
+   */
+  openInWebView(url: string): Promise<void>;
 }

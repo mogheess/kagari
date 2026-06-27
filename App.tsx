@@ -14,6 +14,7 @@ import { RootNavigator } from './src/navigation/RootNavigator';
 import { getEngine } from './src/engine';
 import { checkForAppUpdate } from './src/app/appUpdate';
 import { checkExtensionUpdates } from './src/sources/extensionUpdates';
+import { checkLibraryUpdates } from './src/library/libraryUpdates';
 import { initWhatsNew } from './src/app/whatsNew';
 import { WhatsNewSheet } from './src/components/WhatsNewSheet';
 
@@ -34,13 +35,19 @@ function UpdateBootstrap() {
     const run = () => {
       void checkForAppUpdate();
       void checkExtensionUpdates(getEngine());
+      void checkLibraryUpdates(getEngine());
     };
     const t = setTimeout(run, 2500);
+    // Re-check periodically during a long-running session too (both checks are
+    // throttled internally, so this won't spam the network). Together with the
+    // launch + foreground triggers this means updates surface on their own.
+    const interval = setInterval(run, 60 * 60 * 1000);
     const sub = AppState.addEventListener('change', s => {
       if (s === 'active') run();
     });
     return () => {
       clearTimeout(t);
+      clearInterval(interval);
       sub.remove();
     };
   }, []);

@@ -20,6 +20,7 @@ import type {
   FilterDto,
   RepoDto,
   AvailableExtensionDto,
+  MihonBackupDto,
 } from './types';
 import { fetchAllRepos } from './repoClient';
 
@@ -39,13 +40,20 @@ interface ManhwaEngineNative {
   search(sourceId: string, query: string, page: number, filtersJson: string): Promise<string>;
   getFilters(sourceId: string): Promise<string>;
   getMangaDetails(sourceId: string, mangaUrl: string): Promise<string>;
+  getMangaWebUrl(sourceId: string, mangaUrl: string): Promise<string>;
   getChapters(sourceId: string, mangaUrl: string): Promise<string>;
   getPages(sourceId: string, chapterUrl: string): Promise<string>;
   resolveImage(sourceId: string, pageJson: string): Promise<string>;
   fetchImage(sourceId: string, pageJson: string, forceRefresh: boolean): Promise<string>;
+  fetchCover(sourceId: string, url: string): Promise<string>;
   downloadPage(sourceId: string, chapterUrl: string, pageJson: string): Promise<string>;
   fetchDownloadedImage(sourceId: string, chapterUrl: string, pageIndex: number): Promise<string>;
   deleteDownloadedChapter(sourceId: string, chapterUrl: string): Promise<void>;
+  pickMihonBackup(): Promise<string | null>;
+  importMihonBackup(uri: string): Promise<string>;
+  saveImageToGallery(uri: string): Promise<string>;
+  shareImage(uri: string): Promise<void>;
+  openInWebView(url: string): Promise<void>;
 }
 
 const Native = NativeModules.ManhwaEngine as ManhwaEngineNative | undefined;
@@ -121,6 +129,10 @@ export function createNativeEngine(): Engine | null {
     async getMangaDetails(sourceId, mangaUrl) {
       return parse<MangaDto>(await Native.getMangaDetails(sourceId, mangaUrl));
     },
+    async getMangaWebUrl(sourceId, mangaUrl) {
+      if (typeof Native.getMangaWebUrl !== 'function') return '';
+      return await Native.getMangaWebUrl(sourceId, mangaUrl);
+    },
     async getChapters(sourceId, mangaUrl) {
       return parse<ChapterDto[]>(await Native.getChapters(sourceId, mangaUrl));
     },
@@ -140,6 +152,11 @@ export function createNativeEngine(): Engine | null {
         await Native.fetchImage(sourceId, JSON.stringify(page), forceRefresh),
       );
     },
+    async fetchCover(sourceId, url: string) {
+      // Fall back to the raw url on older builds without the native method.
+      if (typeof Native.fetchCover !== 'function') return url;
+      return await Native.fetchCover(sourceId, url);
+    },
     async downloadPage(sourceId, chapterUrl, page: PageDto) {
       if (typeof Native.downloadPage !== 'function') {
         throw new Error('Downloads are unavailable on this build.');
@@ -157,6 +174,31 @@ export function createNativeEngine(): Engine | null {
     async deleteDownloadedChapter(sourceId, chapterUrl) {
       if (typeof Native.deleteDownloadedChapter !== 'function') return;
       await Native.deleteDownloadedChapter(sourceId, chapterUrl);
+    },
+    async pickMihonBackup() {
+      if (typeof Native.pickMihonBackup !== 'function') return null;
+      return await Native.pickMihonBackup();
+    },
+    async importMihonBackup(uri) {
+      return parse<MihonBackupDto>(await Native.importMihonBackup(uri));
+    },
+    async saveImageToGallery(uri: string) {
+      if (typeof Native.saveImageToGallery !== 'function') {
+        throw new Error('Saving images is unavailable on this build.');
+      }
+      return Native.saveImageToGallery(uri);
+    },
+    async shareImage(uri: string) {
+      if (typeof Native.shareImage !== 'function') {
+        throw new Error('Sharing images is unavailable on this build.');
+      }
+      await Native.shareImage(uri);
+    },
+    async openInWebView(url: string) {
+      if (typeof Native.openInWebView !== 'function') {
+        throw new Error('In-app WebView is unavailable on this build.');
+      }
+      await Native.openInWebView(url);
     },
   };
 }

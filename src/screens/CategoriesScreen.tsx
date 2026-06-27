@@ -6,6 +6,7 @@ import {
   Pressable,
   StyleSheet,
   FlatList,
+  Switch,
   Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,6 +22,7 @@ import {
   moveCategory,
   type Category,
 } from '../library/categories';
+import { useShowAllCollection, setShowAllCollection } from '../library/collections';
 
 export function CategoriesScreen() {
   const theme = useTheme();
@@ -28,6 +30,7 @@ export function CategoriesScreen() {
   const navigation = useNavigation();
   const categories = useCategories();
   const favorites = useFavorites();
+  const showAll = useShowAllCollection();
   const [name, setName] = useState('');
 
   const countFor = (id: string) => favorites.filter(f => f.categoryIds.includes(id)).length;
@@ -88,6 +91,35 @@ export function CategoriesScreen() {
             Add
           </Text>
         </Pressable>
+      </View>
+
+      <View
+        style={[
+          styles.toggleRow,
+          {
+            marginHorizontal: theme.spacing.lg,
+            backgroundColor: theme.colors.surface,
+            borderColor: theme.colors.border,
+          },
+        ]}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={[theme.typography.body, { color: theme.colors.text }]}>
+            Show "All" category
+          </Text>
+          <Text style={{ color: theme.colors.textFaint, fontSize: 12, marginTop: 2 }}>
+            {categories.length === 0
+              ? 'Stays on until you add a category'
+              : 'Hide the All tab and show only your categories'}
+          </Text>
+        </View>
+        <Switch
+          value={showAll}
+          onValueChange={setShowAllCollection}
+          disabled={categories.length === 0}
+          trackColor={{ true: theme.colors.accent, false: theme.colors.border }}
+          thumbColor="#fff"
+        />
       </View>
 
       <FlatList
@@ -215,6 +247,17 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingTop: 16,
     paddingBottom: 8,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginTop: 4,
+    marginBottom: 8,
   },
   input: {
     flex: 1,

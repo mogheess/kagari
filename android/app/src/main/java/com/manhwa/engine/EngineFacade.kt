@@ -1,12 +1,19 @@
 package com.manhwa.engine
 
+import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.BitmapRegionDecoder
 import android.graphics.Rect
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.util.Log
+import androidx.annotation.RequiresApi
+import androidx.core.content.FileProvider
 import com.manhwa.engine.dto.ChapterDto
 import com.manhwa.engine.dto.ExtensionDto
 import com.manhwa.engine.dto.ImageFileDto
@@ -16,9 +23,12 @@ import com.manhwa.engine.dto.MangaDto
 import com.manhwa.engine.dto.MangasPageDto
 import com.manhwa.engine.dto.PageDto
 import com.manhwa.engine.dto.SourceDto
+import com.manhwa.engine.backup.MihonBackupImporter
+import com.manhwa.engine.backup.MihonImportResult
 import com.manhwa.engine.loader.ExtensionLoader
 import com.manhwa.engine.loader.LoadedExtension
 import com.manhwa.engine.loader.SignatureTrust
+import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.model.FilterList
@@ -31,6 +41,7 @@ import java.security.MessageDigest
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
+import uy.kohesive.injekt.injectLazy
 
 /**
  * The single entry point the RN bridge talks to. Holds loaded sources and
@@ -48,6 +59,7 @@ class EngineFacade(context: Context) {
     private val appContext = context.applicationContext
     private val trust = SignatureTrust(appContext)
     private val loader = ExtensionLoader(appContext, trust)
+    private val network: NetworkHelper by injectLazy()
 
     private var extensions: List<LoadedExtension> = emptyList()
     private val sourcesById = HashMap<Long, Source>()
@@ -89,6 +101,11 @@ class EngineFacade(context: Context) {
         }
     }
 
+    /** Decodes a Mihon/Tachiyomi `.tachibk` backup into an importable summary. */
+    fun importMihonBackup(uriString: String): MihonImportResult {
+        return MihonBackupImporter.parse(appContext, uriString)
+    }
+
     fun trustSignature(pkg: String, certSha256: String) {
         trust.trust(pkg, certSha256)
         reload()
@@ -122,6 +139,26 @@ class EngineFacade(context: Context) {
         val result = source.fetchMangaDetails(stub).awaitSingle().apply { url = mangaUrl }
         return Mappers.mangaToDto(source.id, result)
     }
+
+    /**
+     * Absolute, browser-openable URL for a manga. Honors source overrides of
+     * `getMangaUrl` (e.g. Madara), falling back to `baseUrl + path`.
+     */
+    fun getMangaWebUrl(sourceId: String, mangaUrl: String): String {
+        val source = source(sourceId)
+        if (source !is HttpSource) return mangaUrl
+        val stub = SManga.create().apply { url = mangaUrl; title = "" }
+        return try {
+            source.getMangaUrl(stub)
+        } catch (_: Throwable) {
+            val base = source.baseUrl.trimEnd('/')
+            val path = if (mangaUrl.startsWith("/")) mangaUrl else "/$mangaUrl"
+            if (mangaUrl.startsWith("http")) mangaUrl else base + path
+        }
+    }
+
+    /** UA shared with the Cloudflare WebView solver so cleared cookies stay valid. */
+    fun userAgent(): String = network.defaultUserAgentProvider()
 
     suspend fun getChapters(sourceId: String, mangaUrl: String): List<ChapterDto> {
         val source = source(sourceId)
@@ -249,6 +286,57 @@ class EngineFacade(context: Context) {
         )
     }
 
+    /**
+     * Fetches a manga cover through the source's HTTP client — so the source's
+     * headers (Referer/User-Agent) and the Cloudflare interceptor apply — and
+     * caches it to disk. Returns a `file://` uri on success, or the original
+     * `url` unchanged when it can't be fetched natively (no installed source,
+     * a non-http url, or a network/decoding failure) so the caller can still try
+     * loading it directly. This is what lets covers from Referer- or
+     * Cloudflare-gated CDNs load, the same way reader pages do.
+     */
+    suspend fun fetchCover(sourceId: String, url: String): String {
+        if (url.isBlank()) return url
+        if (url.startsWith("file://") || url.startsWith("content://") || url.startsWith("data:")) {
+            return url
+        }
+        if (!url.startsWith("http")) return url
+
+        // Only sources we actually have loaded can supply the right client/headers.
+        val source = sourceOrNull(sourceId) as? HttpSource ?: return url
+
+        val cacheDir = File(appContext.cacheDir, "covers").apply { mkdirs() }
+        val key = hashKey(url)
+        val existing = cacheDir.listFiles()?.firstOrNull {
+            it.name.startsWith("$key.") && !it.name.endsWith(".tmp") && it.length() > 0L
+        }
+        if (existing != null && imageSize(existing) != null) {
+            return Uri.fromFile(existing).toString()
+        }
+
+        return try {
+            val temp = File(cacheDir, "$key.tmp")
+            val contentType = directImageResponse(source, url).use { response ->
+                writeImageResponse(response, temp)
+            }
+            val finalFile = File(cacheDir, "$key.${extensionFor(url, contentType)}")
+            finalFile.delete()
+            if (!temp.renameTo(finalFile)) {
+                temp.copyTo(finalFile, overwrite = true)
+                temp.delete()
+            }
+            if (imageSize(finalFile) == null) {
+                finalFile.delete()
+                url
+            } else {
+                Uri.fromFile(finalFile).toString()
+            }
+        } catch (error: Throwable) {
+            Log.w(READER_IMAGE_TAG, "cover fetch failed for ${shortUrl(url)}: ${error.message}")
+            url
+        }
+    }
+
     // --- offline downloads -------------------------------------------------
     // Downloaded pages live in filesDir (persistent, not evicted like the reader
     // cache). They're keyed by chapter + page index so the reader can find them
@@ -334,10 +422,114 @@ class EngineFacade(context: Context) {
         chapterDir(sourceId, chapterUrl).deleteRecursively()
     }
 
+    // --- save / share -----------------------------------------------------
+
+    /**
+     * Copies a locally cached/downloaded page (a `file://` uri) into the device
+     * gallery under Pictures/Kagari. Returns the saved display name. Uses the
+     * MediaStore so no storage permission is needed (Android 10+).
+     */
+    fun saveImageToGallery(fileUri: String): String {
+        val source = localImageFile(fileUri)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            throw EngineException("parse", "Saving to the gallery requires Android 10 or newer")
+        }
+        return saveToMediaStore(source)
+    }
+
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun saveToMediaStore(source: File): String {
+        val mime = mimeFor(source)
+        val displayName = "kagari_${System.currentTimeMillis()}.${imageExtension(source, mime)}"
+        val resolver = appContext.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
+            put(MediaStore.Images.Media.MIME_TYPE, mime)
+            put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/Kagari")
+            put(MediaStore.Images.Media.IS_PENDING, 1)
+        }
+        val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val item = resolver.insert(collection, values)
+            ?: throw EngineException("unknown", "Could not create a gallery entry")
+        try {
+            resolver.openOutputStream(item)?.use { out ->
+                source.inputStream().use { input -> input.copyTo(out) }
+            } ?: throw EngineException("unknown", "Could not open the gallery entry")
+            values.clear()
+            values.put(MediaStore.Images.Media.IS_PENDING, 0)
+            resolver.update(item, values, null, null)
+        } catch (e: Throwable) {
+            resolver.delete(item, null, null)
+            throw if (e is EngineException) e else EngineException("unknown", e.message ?: "Save failed")
+        }
+        return displayName
+    }
+
+    /** Opens the system share sheet for a locally cached/downloaded page. */
+    fun shareImage(fileUri: String) {
+        val source = localImageFile(fileUri)
+        val shareDir = File(appContext.cacheDir, "shared").apply { mkdirs() }
+        // Keep the staging dir tidy; only the page being shared needs to exist.
+        shareDir.listFiles()?.forEach { it.delete() }
+        val mime = mimeFor(source)
+        val staged = File(shareDir, "kagari_page.${imageExtension(source, mime)}")
+        source.copyTo(staged, overwrite = true)
+        val contentUri = FileProvider.getUriForFile(
+            appContext,
+            "${appContext.packageName}.fileprovider",
+            staged,
+        )
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = mime
+            putExtra(Intent.EXTRA_STREAM, contentUri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        val chooser = Intent.createChooser(send, "Share page").apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        appContext.startActivity(chooser)
+    }
+
+    private fun localImageFile(fileUri: String): File {
+        val path = Uri.parse(fileUri).path
+            ?: throw EngineException("not_found", "Invalid image path")
+        val file = File(path)
+        if (!file.exists() || file.length() == 0L) {
+            throw EngineException("not_found", "Image is not available yet")
+        }
+        return file
+    }
+
+    private fun mimeFor(file: File): String = when (file.extension.lowercase()) {
+        "png" -> "image/png"
+        "webp" -> "image/webp"
+        "gif" -> "image/gif"
+        else -> "image/jpeg"
+    }
+
+    private fun imageExtension(file: File, mime: String): String {
+        val ext = file.extension.lowercase()
+        if (ext.isNotBlank()) return ext
+        return when {
+            mime.contains("png") -> "png"
+            mime.contains("webp") -> "webp"
+            mime.contains("gif") -> "gif"
+            else -> "jpg"
+        }
+    }
+
     private fun source(sourceId: String): Source {
         ensureLoaded()
         val id = sourceId.toLongOrNull() ?: throw EngineException("not_found", "Invalid source id")
         return sourcesById[id] ?: throw EngineException("not_found", "Source $sourceId not loaded")
+    }
+
+    /** Like [source] but returns null instead of throwing when not loaded. */
+    private fun sourceOrNull(sourceId: String): Source? {
+        ensureLoaded()
+        val id = sourceId.toLongOrNull() ?: return null
+        return sourcesById[id]
     }
 
     private fun catalogue(sourceId: String): CatalogueSource {

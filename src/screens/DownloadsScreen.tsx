@@ -1,10 +1,11 @@
 import React from 'react';
-import { View, Text, Image, Pressable, StyleSheet, FlatList, Alert } from 'react-native';
+import { View, Text, Pressable, StyleSheet, FlatList, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme } from '../theme/ThemeProvider';
 import { Icon } from '../components/Icon';
+import { RemoteImage } from '../components/RemoteImage';
 import { useDownloads, removeDownload, type DownloadEntry } from '../library/downloads';
 import type { RootStackParamList } from '../navigation/types';
 import type { MangaDto, MangaStatus } from '../engine/types';
@@ -161,7 +162,12 @@ function MangaGroupRow({ group, onOpen }: { group: MangaGroup; onOpen: () => voi
     >
       <View style={[styles.thumb, { backgroundColor: theme.colors.elevated }]}>
         {group.thumbnailUrl ? (
-          <Image source={{ uri: group.thumbnailUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+          <RemoteImage
+            uri={group.thumbnailUrl}
+            sourceId={group.sourceId}
+            style={StyleSheet.absoluteFill}
+            resizeMode="cover"
+          />
         ) : null}
       </View>
       <View style={{ flex: 1 }}>

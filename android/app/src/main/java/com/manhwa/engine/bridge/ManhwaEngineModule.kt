@@ -1,5 +1,8 @@
 package com.manhwa.engine.bridge
 
+import android.app.Activity
+import android.content.Intent
+import com.facebook.react.bridge.ActivityEventListener
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
@@ -9,6 +12,7 @@ import com.manhwa.engine.EngineFacade
 import com.manhwa.engine.dto.PageDto
 import com.manhwa.engine.repo.ApkInstaller
 import com.manhwa.engine.repo.RepoManager
+import com.manhwa.engine.web.SourceWebViewActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -25,13 +29,20 @@ import kotlinx.serialization.json.Json
  */
 class ManhwaEngineModule(
     private val reactContext: ReactApplicationContext,
-) : ReactContextBaseJavaModule(reactContext) {
+) : ReactContextBaseJavaModule(reactContext), ActivityEventListener {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
     private val facade by lazy { EngineFacade(reactContext) }
     private val repos by lazy { RepoManager(reactContext) }
     private val installer by lazy { ApkInstaller(reactContext) }
+
+    /** Resolved by [onActivityResult] when the backup-file picker returns. */
+    private var pickPromise: Promise? = null
+
+    init {
+        reactContext.addActivityEventListener(this)
+    }
 
     override fun getName(): String = NAME
 
@@ -127,6 +138,11 @@ class ManhwaEngineModule(
     }
 
     @ReactMethod
+    fun getMangaWebUrl(sourceId: String, mangaUrl: String, promise: Promise) = resolve(promise) {
+        facade.getMangaWebUrl(sourceId, mangaUrl)
+    }
+
+    @ReactMethod
     fun getChapters(sourceId: String, mangaUrl: String, promise: Promise) = resolve(promise) {
         json.encodeToString(facade.getChapters(sourceId, mangaUrl))
     }
@@ -148,6 +164,12 @@ class ManhwaEngineModule(
             val page = json.decodeFromString<PageDto>(pageJson)
             json.encodeToString(facade.fetchImage(sourceId, page, forceRefresh))
         }
+
+    /** Fetches a cover via the source's HTTP client; resolves to a local file uri. */
+    @ReactMethod
+    fun fetchCover(sourceId: String, url: String, promise: Promise) = resolve(promise) {
+        facade.fetchCover(sourceId, url)
+    }
 
     // --- offline downloads ---
 
@@ -175,6 +197,88 @@ class ManhwaEngineModule(
             ""
         }
 
+    // --- data import (Mihon/Tachiyomi backups) ---
+
+    /** Opens the system file picker; resolves with a content:// URI or null if cancelled. */
+    @ReactMethod
+    fun pickMihonBackup(promise: Promise) {
+        val activity = reactContext.currentActivity
+        if (activity == null) {
+            promise.reject("no_activity", "The app must be in the foreground to pick a file")
+            return
+        }
+        if (pickPromise != null) {
+            promise.reject("busy", "A file picker is already open")
+            return
+        }
+        pickPromise = promise
+        try {
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                // .tachibk has no registered mime type, so accept anything.
+                type = "*/*"
+            }
+            activity.startActivityForResult(intent, PICK_BACKUP_REQUEST)
+        } catch (e: Exception) {
+            pickPromise = null
+            promise.reject("pick_failed", e.message ?: "Could not open the file picker", e)
+        }
+    }
+
+    @ReactMethod
+    fun importMihonBackup(uri: String, promise: Promise) = resolve(promise) {
+        json.encodeToString(facade.importMihonBackup(uri))
+    }
+
+    override fun onActivityResult(activity: Activity, requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode != PICK_BACKUP_REQUEST) return
+        val promise = pickPromise ?: return
+        pickPromise = null
+        val uri = if (resultCode == Activity.RESULT_OK) data?.data else null
+        promise.resolve(uri?.toString())
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        // No deep links to handle.
+    }
+
+    // --- save / share ---
+
+    @ReactMethod
+    fun saveImageToGallery(uri: String, promise: Promise) = resolve(promise) {
+        facade.saveImageToGallery(uri)
+    }
+
+    @ReactMethod
+    fun shareImage(uri: String, promise: Promise) = resolve(promise) {
+        facade.shareImage(uri)
+        ""
+    }
+
+    // --- in-app web view (manual Cloudflare clearance) ---
+
+    @ReactMethod
+    fun openInWebView(url: String, promise: Promise) {
+        if (url.isBlank()) {
+            promise.reject("bad_url", "No URL to open")
+            return
+        }
+        try {
+            val ua = runCatching { facade.userAgent() }.getOrNull()
+            val activity = reactContext.currentActivity
+            val ctx = activity ?: reactContext.applicationContext
+            val intent = Intent(ctx, SourceWebViewActivity::class.java).apply {
+                putExtra(SourceWebViewActivity.EXTRA_URL, url)
+                if (ua != null) putExtra(SourceWebViewActivity.EXTRA_UA, ua)
+                if (activity == null) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            ctx.startActivity(intent)
+            promise.resolve(null)
+        } catch (e: Throwable) {
+            promise.reject("webview_failed", e.message ?: "Could not open the web view", e)
+        }
+    }
+
     /** Runs [block] on the IO scope and bridges the result/error to the Promise. */
     private fun resolve(promise: Promise, block: suspend () -> String) {
         scope.launch {
@@ -192,5 +296,6 @@ class ManhwaEngineModule(
 
     companion object {
         const val NAME = "ManhwaEngine"
+        private const val PICK_BACKUP_REQUEST = 0xBAC0
     }
 }

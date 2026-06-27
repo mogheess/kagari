@@ -56,6 +56,16 @@ React Native UI (TypeScript)
   **tiles** so the GPU texture limit isn't blown). The reader renders that local
   URI with `<Image>`. `resolveImage` (URL + headers only) still exists as a
   lighter seam.
+- **Covers go through the same native client when needed.** Plain `<Image>`
+  sends no `Referer`/UA and doesn't share the engine cookie jar, so covers on
+  Referer- or Cloudflare-gated CDNs fail to load even when chapters work. Always
+  render covers with **`RemoteImage`** (`src/components/RemoteImage.tsx`), passing
+  `uri` + `sourceId`. It loads the url directly first (fast path) and only on
+  error re-fetches via `fetchCover(sourceId, url)` — which downloads with the
+  source's OkHttp client (headers + Cloudflare clearance) and caches a local
+  `file://`. Resolved covers are remembered by `src/engine/coverCache.ts`
+  (persisted url→file map, concurrency-gated). Don't use bare `<Image>` for
+  remote covers.
 
 ---
 
@@ -84,7 +94,11 @@ classloader). So the host must *provide* that runtime. We vendor it under
   `Observable`-based `fetch*` methods (matching real extensions).
 - `network/`: `NetworkHelper` (base OkHttp client), `AndroidCookieJar` (shares
   cookies with the system WebView), `interceptor/UserAgentInterceptor`,
-  `interceptor/CloudflareInterceptor` (WebView-based challenge solver),
+  `interceptor/CloudflareInterceptor` (solves challenges in a headless/in-app
+  WebView — `com/manhwa/engine/web/SourceWebViewActivity` via
+  `interceptor/WebViewActivityHolder` — then reuses the resulting `cf_clearance`
+  cookie **and the matching WebView User-Agent** on the OkHttp client, so
+  protected sources load in-app, not only when you manually open the WebView),
   `Requests.kt`, `OkHttpExtensions.kt` (RxJava bridge with crash-guarding).
 - `util/JsoupExtensions`, `AppInfo`, etc.
 
@@ -154,9 +168,19 @@ When you add a new persisted store, follow the favorites pattern (in-memory stat
     search is curated (pinned) rather than literally all installed sources to
     avoid hammering every source.
 - **Library**: grid of favorites with **category filter chips** (All / each
-  category / Uncategorized).
+  category / Uncategorized). Defaults to the tag/category view; the layout toggle
+  sits on the right. The **All** chip can be hidden when you have categories
+  (option in Library), and home sections can be **disabled rather than deleted**.
+  Custom collection covers are supported (`src/library/collectionCovers.ts`).
 - **MangaDetail**: bookmark toggles favorite; long-press (or the "Add to category"
-  row) opens `CategoryAssignSheet` to assign categories.
+  row) opens `CategoryAssignSheet` to assign categories. Shows the **source the
+  title came from** with a **Migrate** action (`src/library/migrate.ts` — moves a
+  title to another source and carries over history; prompts on a duplicate).
+  **Resume** jumps to where you left off (`src/library/chapterProgress.ts`), and
+  chapters can be sorted **newest/oldest first**. When the source isn't installed
+  or a live fetch fails, a notice offers **Retry / Open in WebView / Migrate**
+  instead of a silent empty list (covers + chapters are live-fetched, never stored
+  in a backup, so a missing extension means no chapters).
 - **Reader** (`ReaderScreen` + `src/reader/readerSettings.ts`): four modes,
   **webtoon** (continuous long strip), **vertical** (one page/swipe), **ltr**,
   **rtl** (paged). Mode is selectable from the reader's settings sheet. Pages
@@ -166,11 +190,42 @@ When you add a new persisted store, follow the favorites pattern (in-memory stat
   `EngineFacade.fetchImage`, which busts the disk cache and re-downloads.
   Freshly-downloaded files that don't decode are rejected (not cached) so a
   truncated download can't keep rendering black. Opening a chapter records history.
+  Supports **pinch / double-tap zoom** and a per-page **actions menu** (e.g. save
+  the image to a separate phone-gallery album, distinct from chapter downloads).
+- **Mihon import** (`src/library/mihonImport.ts` ⇄ native `backup/MihonBackup.kt`):
+  restores a `.tachibk` (gzipped protobuf) backup — favorites, categories, and
+  read history — merged non-destructively into the local stores. Surfaced as
+  **Import from Mihon (beta)** in Profile. Category names are matched
+  trim+case-insensitively so they aren't silently dropped, and an imported cover
+  is kept when live details omit one. Chapters are **not** in the backup; they're
+  live-fetched, so a title from a not-installed source shows the MangaDetail
+  notice above until you install/migrate the source.
 - **Updates tab** (`UpdatesScreen`): a **Updates | History** segmented screen.
   **History** is a real feed: opening a chapter records a last-read entry
   (`src/library/history.ts`, persisted), grouped by day with resume + per-item
-  remove + clear-all. **Updates** stays an honest empty state until per-manga
-  chapter snapshots exist. Per-chapter read state on MangaDetail is still TODO.
+  remove + clear-all. **Updates** is a real new-chapters feed driven by
+  `src/library/libraryUpdates.ts` (see *Update checks*): each favorite's chapter
+  list is snapshotted per source, diffed on scan, and new chapters land here
+  (grouped by day, per-row dismiss, clear-all, pull-to-refresh to force a scan).
+  A first-seen manga is baselined silently so the backlog doesn't flood. The
+  Updates tab shows an unseen badge on the bottom nav. Per-chapter read state on
+  MangaDetail is still TODO.
+- **Update checks** (`App.tsx` `UpdateBootstrap`): two checkers run on launch
+  (+2.5s), on return to foreground (`AppState`), and hourly — both internally
+  throttled, plus a manual **Check** in Profile (`force: true`):
+  - **App version** (`src/app/appUpdate.ts`): polls the latest GitHub Release and
+    compares its tag to `APP_VERSION` (`src/app/version.ts`); 6h TTL. Surfaces an
+    "update available" banner reactively.
+  - **Extensions** (`src/sources/extensionUpdates.ts`): diffs installed vs repo
+    `versionCode`; 30m TTL. Drives per-row Update buttons and badges.
+  - **What's new** (`src/app/whatsNew.ts` + `changelog.ts`): shows release notes
+    once after an upgrade. Bump `version.ts` **and** `build.gradle` together and
+    add a `CHANGELOG` entry when shipping user-facing changes.
+  - **Library new chapters** (`src/library/libraryUpdates.ts`): scans each
+    favorite via `engine.getChapters`, diffs against a persisted per-manga url
+    snapshot, and records new chapters into the Updates feed; 6h TTL, concurrency
+    3, best-effort (a not-installed/offline source is skipped). In-app only — runs
+    while the app is open; a true background job would need Android WorkManager.
 
 ---
 
@@ -179,23 +234,31 @@ When you add a new persisted store, follow the favorites pattern (in-memory stat
 ```
 src/
   engine/        Engine contract (types.ts), nativeEngine, repoClient
-                 (fetch/parse real index.min.json), index (selector)
+                 (fetch/parse real index.min.json), index (selector),
+                 coverCache (url->file cover cache for RemoteImage)
   store/         persist.ts (AsyncStorage wrapper)
-  library/       favorites.ts, categories.ts, history.ts (persisted, reactive)
-  sources/       pinned.ts (pinned sources for global search; persisted, reactive)
+  library/       favorites.ts, categories.ts, history.ts, chapterProgress.ts
+                 (resume), libraryUpdates.ts (new-chapters scan/feed),
+                 collectionCovers.ts, migrate.ts (cross-source + history
+                 transfer), mihonImport.ts (.tachibk restore)
+  sources/       pinned.ts (global search), extensionUpdates.ts (repo version diff)
+  app/           version.ts, appUpdate.ts (GitHub release check), changelog.ts +
+                 whatsNew.ts (one-time release-notes sheet)
   reader/        readerSettings.ts (reading modes)
   theme/         Design tokens (tokens.ts) + ThemeProvider (dark/light/system)
   home/          Configurable, persisted home-block model (HomeConfig + universal source)
   utils/         lang.ts (lang labels), sourceSelect.ts (default/sort), color.ts
-  components/    Cover, FeaturedHero, CoverRail, SectionHeader, Icon, Skeleton,
-                 HomeBlockView, SourcePickerSheet, GlobalSourcesSheet,
-                 CategoryAssignSheet, ...
+  components/    Cover, RemoteImage (cover loader w/ native fallback), FeaturedHero,
+                 CoverRail, SectionHeader, Icon, Skeleton, HomeBlockView,
+                 SourcePickerSheet, GlobalSourcesSheet, CategoryAssignSheet, ...
   navigation/    RootNavigator, TabsScreen (local-state tabs), GlassTabBar, types
   screens/       Home, Library, Discover, Updates, Profile, MangaDetail, Reader,
                  CustomizeHome, Extensions, Categories
 android/app/src/main/java/
-  eu/kanade/tachiyomi/   Vendored runtime: source/, network/, util/ (Apache 2.0)
-  com/manhwa/engine/     loader/, repo/, bridge/, dto/, facade, mappers, injekt
+  eu/kanade/tachiyomi/   Vendored runtime: source/, network/ (Cloudflare WebView
+                         solver), util/ (Apache 2.0)
+  com/manhwa/engine/     loader/, repo/, bridge/, dto/, facade, mappers, injekt,
+                         web/ (SourceWebViewActivity), backup/ (MihonBackup)
 ```
 
 ---
@@ -272,18 +335,17 @@ With no extensions installed you'll see empty states. Install a repo + extension
   but native `getFilters` returns `[]` and `search(...)` ignores `filtersJson`
   (`ManhwaEngineModule.kt`). Wire `FilterList` ⇄ `FilterDto` (de)serialization so
   sources with genre/sort/status filters work.
-- **Read history exists; per-chapter read-state + real updates feed do not.**
-  Reading history is now persisted (`src/library/history.ts`) and shown in the
-  **History** tab. Still missing: per-chapter read/unread state on MangaDetail
-  and a real **Updates** feed (needs per-manga chapter snapshots, following the
-  `favorites`/`categories` store pattern). *Don't reintroduce faked read/update
-  data*; the Updates tab stays an empty state until snapshots exist.
+- **Background library updates + per-chapter read-state.** The in-app
+  new-chapters scan exists (`libraryUpdates.ts`, wired into `UpdateBootstrap` and
+  pull-to-refresh). Still missing: running it **while the app is closed** (Android
+  **WorkManager**) with **new-chapter notifications**, and **per-chapter
+  read/unread state** on MangaDetail (which would also let read chapters drop off
+  the Updates feed, Mihon-style). *Don't reintroduce faked update data.*
 - **Per-source descramble interceptors.** `fetchImage` routes through the source
   OkHttp client, but a few sources (e.g. MangaFire/MangaPlus) need custom
   image-descramble interceptors; verify those render correctly.
 - Untrusted-extension trust-prompt UI (we currently **auto-trust** explicitly
   installed extensions; `trustSignature` exists if you want Mihon's boundary).
-- Pull-to-refresh on Updates/Library; theme/accent refresh.
 
 ---
 
@@ -304,9 +366,23 @@ With no extensions installed you'll see empty states. Install a repo + extension
 - [x] Reader modes (webtoon / vertical / ltr / rtl); white-screen overlay fixed
 - [x] OkHttp-backed native reader image (`fetchImage` → cached `file://`, with
       webtoon tiling) routed through the source's client
+- [x] In-app Cloudflare solver: WebView clearance cookie + UA reused on OkHttp,
+      so protected sources load in-app (not only via manual WebView)
+- [x] Robust covers: `RemoteImage`/`coverCache` + native `fetchCover` for
+      Referer/Cloudflare-gated cover CDNs
+- [x] MangaDetail: source attribution, Resume (`chapterProgress`), chapter sort,
+      source-missing/error notices (Retry / WebView / Migrate)
+- [x] Source migration (cross-source + history transfer) with duplicate prompt
+- [x] Mihon `.tachibk` import (favorites + categories + history) — beta
+- [x] Reader pinch/double-tap zoom + per-page actions (save to gallery album)
+- [x] App + extension update checks (launch/foreground/hourly, throttled) +
+      "What's new" release notes
+- [x] In-app **library updates** feed: per-favorite chapter snapshot + diff scan,
+      grouped feed with unseen tab badge (`libraryUpdates.ts`)
 - [ ] Suspend (extension-lib 1.6) source API mirrored + called preferentially
 - [ ] Search filters wired (`FilterList` ⇄ `FilterDto`)
-- [ ] Per-chapter read-state on MangaDetail + real Updates feed (chapter snapshots)
+- [ ] Background library updates (WorkManager + notifications) + per-chapter
+      read-state on MangaDetail
 - [ ] Untrusted-extension trust prompt UI (auto-trust today)
 
 ---

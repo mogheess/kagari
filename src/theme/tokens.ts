@@ -27,6 +27,8 @@ export interface Palette {
   accent: string;
   /** Accent used on top of accent-tinted fills. */
   onAccent: string;
+  /** Error / destructive state (sparingly used). */
+  danger: string;
   /** Translucent fill for frosted-glass surfaces (nav, headers). */
   glass: string;
   /** Bright top edge highlight for glass surfaces. */
@@ -47,6 +49,7 @@ const dark: Palette = {
   textFaint: '#6E6E77',
   accent: '#F5A623',
   onAccent: '#2A1705',
+  danger: '#FF6B6B',
   glass: 'rgba(28,28,32,0.62)',
   glassHighlight: 'rgba(255,255,255,0.10)',
   scrim: 'rgba(0,0,0,0.35)',
@@ -63,6 +66,7 @@ const light: Palette = {
   textFaint: '#9B9BA2',
   accent: '#C26A0A',
   onAccent: '#FFFFFF',
+  danger: '#D92D20',
   glass: 'rgba(250,249,247,0.66)',
   glassHighlight: 'rgba(255,255,255,0.70)',
   scrim: 'rgba(255,255,255,0.30)',

@@ -117,6 +117,35 @@ export function recordProgress(
   persist();
 }
 
+/**
+ * Bulk-merges history entries (used by the Mihon importer). One entry per manga;
+ * the most recently read wins. Returns the number of entries added or updated.
+ */
+export function importHistory(entries: HistoryEntry[]): number {
+  const map = new Map<string, HistoryEntry>();
+  for (const e of history) map.set(keyOf(e.sourceId, e.mangaUrl), e);
+  let changed = 0;
+  for (const incoming of entries) {
+    const k = keyOf(incoming.sourceId, incoming.mangaUrl);
+    const existing = map.get(k);
+    if (!existing || incoming.readAt > existing.readAt) {
+      map.set(k, existing ? { ...existing, ...incoming } : incoming);
+      changed += 1;
+    }
+  }
+  if (changed > 0) {
+    history = [...map.values()].sort((a, b) => b.readAt - a.readAt).slice(0, MAX_ENTRIES);
+    emit();
+    persist();
+  }
+  return changed;
+}
+
+/** Non-reactive lookup of a manga's history entry (for migration). */
+export function getHistoryEntry(sourceId: string, mangaUrl: string): HistoryEntry | undefined {
+  return history.find(e => e.sourceId === sourceId && e.mangaUrl === mangaUrl);
+}
+
 /** Removes a single manga from history. */
 export function removeFromHistory(sourceId: string, mangaUrl: string): void {
   history = history.filter(e => !(e.sourceId === sourceId && e.mangaUrl === mangaUrl));

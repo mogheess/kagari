@@ -16,7 +16,6 @@ export interface Category {
 const store = makePersistence<Category[]>('@kagari/categories/v1');
 
 let categories: Category[] = [];
-let hydrated = false;
 const listeners = new Set<() => void>();
 
 function emit(): void {
@@ -36,7 +35,6 @@ async function hydrate(): Promise<void> {
   if (stored && Array.isArray(stored) && categories.length === 0) {
     categories = sortByOrder(stored);
   }
-  hydrated = true;
   emit();
   persist();
 }
@@ -58,6 +56,34 @@ export function addCategory(name: string): Category | null {
   emit();
   persist();
   return cat;
+}
+
+/**
+ * Returns a name → id map for the given category names, creating any that don't
+ * already exist (case-insensitive match). Used by the Mihon importer.
+ */
+export function getOrCreateCategoriesByName(names: string[]): Record<string, string> {
+  const result: Record<string, string> = {};
+  let changed = false;
+  for (const raw of names) {
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    const existing = categories.find(c => c.name.toLowerCase() === trimmed.toLowerCase());
+    if (existing) {
+      result[trimmed] = existing.id;
+      continue;
+    }
+    const cat: Category = { id: genId(), name: trimmed, order: categories.length };
+    categories = [...categories, cat];
+    result[trimmed] = cat.id;
+    changed = true;
+  }
+  if (changed) {
+    categories = sortByOrder(categories);
+    emit();
+    persist();
+  }
+  return result;
 }
 
 export function renameCategory(id: string, name: string): void {
