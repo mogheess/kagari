@@ -11,6 +11,7 @@ interface CoverRailProps {
   coverWidth?: number;
   subtitleOf?: (m: MangaDto) => string | undefined;
   progressOf?: (m: MangaDto) => number | undefined;
+  inLibraryOf?: (m: MangaDto) => boolean;
   onPressItem?: (m: MangaDto) => void;
 }
 
@@ -21,6 +22,7 @@ export function CoverRail({
   coverWidth = 112,
   subtitleOf,
   progressOf,
+  inLibraryOf,
   onPressItem,
 }: CoverRailProps) {
   const theme = useTheme();
@@ -51,6 +53,7 @@ export function CoverRail({
           width={coverWidth}
           subtitle={subtitleOf?.(item)}
           progress={progressOf?.(item)}
+          inLibrary={inLibraryOf?.(item)}
           onPress={() => onPressItem?.(item)}
         />
       )}

@@ -26,7 +26,14 @@ import { RemoteImage } from '../components/RemoteImage';
 import { CategoryAssignSheet } from '../components/CategoryAssignSheet';
 import { SourcePickerSheet } from '../components/SourcePickerSheet';
 import { seededColor, withAlpha } from '../utils/color';
-import { toggleFavorite, useFavorite, setMangaCategories } from '../library/favorites';
+import {
+  toggleFavorite,
+  useFavorite,
+  setMangaCategories,
+  findFavoriteByTitle,
+  favoriteToManga,
+  type FavoriteManga,
+} from '../library/favorites';
 import { useCategories } from '../library/categories';
 import { recordRead } from '../library/history';
 import { planMigration, migrateManga, type MigrationPlan } from '../library/migrate';
@@ -106,6 +113,7 @@ export function MangaDetailScreen() {
     toSourceName?: string;
     plan: MigrationPlan;
   } | null>(null);
+  const [dupPrompt, setDupPrompt] = useState<FavoriteManga | null>(null);
 
   const cached = peekManga(params.sourceId, params.mangaUrl);
   const { data: details, reload: reloadDetails } = useAsync<MangaDto>(
@@ -285,6 +293,57 @@ export function MangaDetailScreen() {
     [migrateTarget, manga, chapters, navigation],
   );
 
+  // Adds the current title to the library, but first checks whether the same
+  // title is already followed on another source — if so, defer to a prompt so
+  // the user can migrate their progress here instead of silently duplicating.
+  const addToLibrary = useCallback(() => {
+    if (!manga) return;
+    const dup = findFavoriteByTitle(manga.title, { sourceId: manga.sourceId, url: manga.url });
+    if (dup) {
+      setDupPrompt(dup);
+      return;
+    }
+    const nowFav = toggleFavorite(manga);
+    if (nowFav && categories.length > 0) setCatSheet(true);
+  }, [manga, categories.length]);
+
+  const onDupAddBoth = useCallback(() => {
+    setDupPrompt(null);
+    if (!manga) return;
+    const nowFav = toggleFavorite(manga);
+    if (nowFav && categories.length > 0) setCatSheet(true);
+  }, [manga, categories.length]);
+
+  const onDupMigrate = useCallback(async () => {
+    const existing = dupPrompt;
+    setDupPrompt(null);
+    if (!existing || !manga) return;
+    setMigrating(true);
+    try {
+      let fromChapters: ChapterDto[] = [];
+      try {
+        fromChapters = await loadChapters(existing.sourceId, existing.url);
+      } catch {
+        fromChapters = [];
+      }
+      const summary = migrateManga({
+        from: favoriteToManga(existing),
+        to: manga,
+        fromChapters,
+        toChapters: chapters ?? [],
+        replace: true,
+      });
+      const bits: string[] = [];
+      if (summary.chaptersMatched > 0) bits.push(`${summary.chaptersMatched} chapters`);
+      if (summary.historyMoved && bits.length === 0) bits.push('history');
+      notify(bits.length ? `Migrated here \u00B7 ${bits.join(' + ')}` : 'Migrated to this source');
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Migration failed');
+    } finally {
+      setMigrating(false);
+    }
+  }, [dupPrompt, manga, chapters]);
+
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       <ScrollView
@@ -385,8 +444,11 @@ export function MangaDetailScreen() {
           <Pressable
             onPress={() => {
               if (!manga) return;
-              const nowFav = toggleFavorite(manga);
-              if (nowFav && categories.length > 0) setCatSheet(true);
+              if (favorited) {
+                toggleFavorite(manga);
+              } else {
+                addToLibrary();
+              }
             }}
             onLongPress={() => favorited && setCatSheet(true)}
             style={[
@@ -552,6 +614,14 @@ export function MangaDetailScreen() {
         onClose={() => setMigrateTarget(null)}
       />
 
+      <DuplicateAddSheet
+        existing={dupPrompt}
+        existingSourceName={sources?.find(s => s.id === dupPrompt?.sourceId)?.name}
+        onMigrate={onDupMigrate}
+        onAddBoth={onDupAddBoth}
+        onClose={() => setDupPrompt(null)}
+      />
+
       {migrating ? (
         <View style={styles.migrateOverlay}>
           <ActivityIndicator color="#fff" />
@@ -705,6 +775,84 @@ function MigrateConfirmSheet({
             <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>Keep both</Text>
             <Text style={{ color: theme.colors.textMuted, fontSize: 11.5, marginTop: 1 }}>
               Copy progress, keep the original too
+            </Text>
+          </View>
+        </Pressable>
+
+        <Pressable onPress={onClose} hitSlop={8} style={styles.migrateCancel}>
+          <Text style={{ color: theme.colors.textMuted, fontSize: 13.5, fontWeight: '600' }}>Cancel</Text>
+        </Pressable>
+      </View>
+    </Modal>
+  );
+}
+
+/**
+ * Shown when the user adds a title they already follow on another source.
+ * Offers to migrate their reading state onto this source (removing the old
+ * copy) or to keep both copies in the library.
+ */
+function DuplicateAddSheet({
+  existing,
+  existingSourceName,
+  onMigrate,
+  onAddBoth,
+  onClose,
+}: {
+  existing: FavoriteManga | null;
+  existingSourceName?: string;
+  onMigrate: () => void;
+  onAddBoth: () => void;
+  onClose: () => void;
+}) {
+  const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  const fromName = existingSourceName ?? 'another source';
+  return (
+    <Modal visible={existing != null} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={styles.sheetBackdrop} onPress={onClose} />
+      <View
+        style={[
+          styles.sheet,
+          { backgroundColor: theme.colors.bg, paddingBottom: insets.bottom + 12, borderColor: theme.colors.border },
+        ]}
+      >
+        <View style={styles.grabber} />
+        <Text style={[theme.typography.heading, { color: theme.colors.text, marginBottom: 2 }]}>
+          Already in your library
+        </Text>
+        <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginBottom: 14, lineHeight: 18 }}>
+          {`"${existing?.title ?? 'This title'}" is already in your library from ${fromName}. Migrate your reading progress, history and categories onto this source, or keep both copies?`}
+        </Text>
+
+        <Pressable
+          onPress={onMigrate}
+          style={({ pressed }) => [
+            styles.migrateChoice,
+            { backgroundColor: theme.colors.accent, opacity: pressed ? 0.9 : 1 },
+          ]}
+        >
+          <Icon name="arrowRight" size={18} color={theme.colors.onAccent} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 14 }}>Migrate here</Text>
+            <Text style={{ color: theme.colors.onAccent, opacity: 0.8, fontSize: 11.5, marginTop: 1 }}>
+              Move progress here and remove the copy from {fromName}
+            </Text>
+          </View>
+        </Pressable>
+
+        <Pressable
+          onPress={onAddBoth}
+          style={({ pressed }) => [
+            styles.migrateChoice,
+            { borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border, opacity: pressed ? 0.7 : 1 },
+          ]}
+        >
+          <Icon name="bookmark" size={18} color={theme.colors.text} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>Add both</Text>
+            <Text style={{ color: theme.colors.textMuted, fontSize: 11.5, marginTop: 1 }}>
+              Keep both copies in your library
             </Text>
           </View>
         </Pressable>

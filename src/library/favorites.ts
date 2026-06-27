@@ -9,8 +9,9 @@
  * before the stored data loads, those changes are preserved (adds win, and
  * removals done in the window are not resurrected by the stored copy).
  */
-import { useSyncExternalStore } from 'react';
+import { useMemo, useSyncExternalStore } from 'react';
 import { makePersistence } from '../store/persist';
+import { markRecentlyAdded, clearRecentlyAdded } from './recentlyAdded';
 import type { MangaDto, MangaStatus } from '../engine/types';
 
 export interface FavoriteManga {
@@ -32,6 +33,9 @@ const removedBeforeHydrate = new Set<string>();
 const listeners = new Set<() => void>();
 
 const keyOf = (sourceId: string, url: string) => `${sourceId}\u0000${url}`;
+
+/** Stable identity key for a (source, manga) pair — for `useFavoriteKeySet`. */
+export const favoriteKey = keyOf;
 
 function emit(): void {
   for (const l of listeners) l();
@@ -79,6 +83,35 @@ export function getFavorite(sourceId: string, url: string): FavoriteManga | unde
   return favorites.find(f => f.sourceId === sourceId && f.url === url);
 }
 
+/**
+ * Loose, cross-source title key for duplicate detection. Lowercases and drops
+ * punctuation/spacing so "One Piece" and "one-piece" collide; for titles with no
+ * latin characters (CJK), falls back to whitespace-normalized text so they still
+ * compare sensibly.
+ */
+function titleKey(title: string): string {
+  const stripped = title.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, ' ').trim();
+  return stripped || title.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Finds a library entry with the same (normalized) title that lives on a
+ * *different* (source, url) than the one given. Drives the "you already have
+ * this — migrate or add both?" prompt when manually adding a title the user
+ * already follows on another extension.
+ */
+export function findFavoriteByTitle(
+  title: string,
+  exclude: { sourceId: string; url: string },
+): FavoriteManga | undefined {
+  const key = titleKey(title);
+  if (!key) return undefined;
+  return favorites.find(
+    f =>
+      !(f.sourceId === exclude.sourceId && f.url === exclude.url) && titleKey(f.title) === key,
+  );
+}
+
 /** Non-reactive snapshot of the whole library (e.g. the library-updates scan). */
 export function getFavorites(): FavoriteManga[] {
   return favorites;
@@ -89,6 +122,7 @@ export function removeFavorite(sourceId: string, url: string): void {
   if (!isFavorited(sourceId, url)) return;
   favorites = favorites.filter(f => !(f.sourceId === sourceId && f.url === url));
   if (!hydrated) removedBeforeHydrate.add(keyOf(sourceId, url));
+  clearRecentlyAdded(sourceId, url);
   emit();
   persist();
 }
@@ -99,6 +133,7 @@ export function toggleFavorite(m: MangaDto, categoryIds: string[] = []): boolean
   if (exists) {
     favorites = favorites.filter(f => !(f.sourceId === m.sourceId && f.url === m.url));
     if (!hydrated) removedBeforeHydrate.add(keyOf(m.sourceId, m.url));
+    clearRecentlyAdded(m.sourceId, m.url);
   } else {
     favorites = [
       {
@@ -113,6 +148,8 @@ export function toggleFavorite(m: MangaDto, categoryIds: string[] = []): boolean
       ...favorites,
     ];
     removedBeforeHydrate.delete(keyOf(m.sourceId, m.url));
+    // Surface this manual add in the Updates feed on the next scan.
+    markRecentlyAdded(m.sourceId, m.url);
   }
   emit();
   persist();
@@ -212,6 +249,12 @@ export function useIsFavorite(sourceId: string, url: string): boolean {
 export function useFavorite(sourceId: string, url: string): FavoriteManga | undefined {
   const favs = useSyncExternalStore(subscribe, getSnapshot);
   return favs.find(f => f.sourceId === sourceId && f.url === url);
+}
+
+/** Reactive set of favorite keys, for fast "already in library" lookups in grids. */
+export function useFavoriteKeySet(): Set<string> {
+  const favs = useSyncExternalStore(subscribe, getSnapshot);
+  return useMemo(() => new Set(favs.map(f => keyOf(f.sourceId, f.url))), [favs]);
 }
 
 void hydrate();

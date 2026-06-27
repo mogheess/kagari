@@ -7,7 +7,7 @@ import { SectionHeader } from './SectionHeader';
 import { CoverRail } from './CoverRail';
 import { FeaturedCarousel } from './FeaturedCarousel';
 import { blockLabel, useHomeConfig, type HomeBlock } from '../home/HomeConfig';
-import { useFavorites, favoriteToManga } from '../library/favorites';
+import { useFavorites, favoriteToManga, useFavoriteKeySet, favoriteKey } from '../library/favorites';
 import { pickDefaultSource } from '../utils/sourceSelect';
 import { useSourceHealth, unhealthyIds, recordSourceResult } from '../sources/sourceHealth';
 import { requestDiscover } from '../sources/discoverIntent';
@@ -81,6 +81,7 @@ function BrowseBlock({
   const { navigateTab } = useTabNav();
   const { universalSourceId } = useHomeConfig();
   const health = useSourceHealth();
+  const favKeys = useFavoriteKeySet();
 
   const wantsLatest = block.kind === 'latest';
   // Resolution order: per-section override -> universal source -> smart default.
@@ -135,7 +136,13 @@ function BrowseBlock({
           }
         />
       </View>
-      <CoverRail data={data ?? []} loading={loading} coverWidth={112} onPressItem={onOpenManga} />
+      <CoverRail
+        data={data ?? []}
+        loading={loading}
+        coverWidth={112}
+        inLibraryOf={m => favKeys.has(favoriteKey(m.sourceId, m.url))}
+        onPressItem={onOpenManga}
+      />
     </View>
   );
 }

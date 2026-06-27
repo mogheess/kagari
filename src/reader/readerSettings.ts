@@ -1,7 +1,16 @@
 /**
- * In-memory reader preferences. Kept module-level so a choice persists across
- * chapters within a session (no native storage dependency yet).
+ * Reader preferences.
+ *
+ * The reading mode is remembered per series (sourceId + mangaUrl) so a webtoon
+ * keeps its long-strip layout while a paged manga keeps its own — switching one
+ * never disturbs the other. Series you haven't set explicitly fall back to a
+ * global default, which tracks the last mode you picked so brand-new titles
+ * inherit your most recent preference. Both are persisted (AsyncStorage) so the
+ * choice survives app restarts.
  */
+import { useSyncExternalStore } from 'react';
+import { makePersistence } from '../store/persist';
+
 export type ReaderMode = 'webtoon' | 'vertical' | 'ltr' | 'rtl';
 
 export interface ReaderModeOption {
@@ -17,14 +26,67 @@ export const READER_MODES: ReaderModeOption[] = [
   { mode: 'rtl', label: 'Right to left', hint: 'Paged, manga order' },
 ];
 
-let mode: ReaderMode = 'webtoon';
+const DEFAULT_MODE: ReaderMode = 'webtoon';
 
-export function getReaderMode(): ReaderMode {
-  return mode;
+interface ReaderModeState {
+  /** Fallback for series without an explicit choice (tracks the last pick). */
+  default: ReaderMode;
+  /** Per-series overrides, keyed by `${sourceId}\u0000${mangaUrl}`. */
+  perManga: Record<string, ReaderMode>;
 }
 
-export function setReaderMode(next: ReaderMode): void {
-  mode = next;
+const store = makePersistence<ReaderModeState>('@kagari/readerMode/v1');
+
+let state: ReaderModeState = { default: DEFAULT_MODE, perManga: {} };
+const listeners = new Set<() => void>();
+
+const keyOf = (sourceId: string, mangaUrl: string) => `${sourceId}\u0000${mangaUrl}`;
+
+function emit(): void {
+  for (const l of listeners) l();
+}
+
+async function hydrate(): Promise<void> {
+  const saved = await store.load();
+  if (saved && typeof saved === 'object') {
+    state = {
+      default: saved.default ?? DEFAULT_MODE,
+      perManga: saved.perManga && typeof saved.perManga === 'object' ? saved.perManga : {},
+    };
+    emit();
+  }
+}
+void hydrate();
+
+/**
+ * The effective mode for a series: its explicit override if set, otherwise the
+ * global default. Called with no arguments it returns the global default.
+ */
+export function getReaderMode(sourceId?: string, mangaUrl?: string): ReaderMode {
+  if (sourceId && mangaUrl) {
+    const override = state.perManga[keyOf(sourceId, mangaUrl)];
+    if (override) return override;
+  }
+  return state.default;
+}
+
+/**
+ * Records the reading mode. With a series it sets that series' override and also
+ * advances the global default (so the next new title inherits this pick); with
+ * no series it only moves the global default.
+ */
+export function setReaderMode(next: ReaderMode, sourceId?: string, mangaUrl?: string): void {
+  if (sourceId && mangaUrl) {
+    state = {
+      default: next,
+      perManga: { ...state.perManga, [keyOf(sourceId, mangaUrl)]: next },
+    };
+  } else {
+    if (state.default === next) return;
+    state = { ...state, default: next };
+  }
+  store.save(state);
+  emit();
 }
 
 export function isPaged(m: ReaderMode): boolean {
@@ -33,4 +95,16 @@ export function isPaged(m: ReaderMode): boolean {
 
 export function isHorizontal(m: ReaderMode): boolean {
   return m === 'ltr' || m === 'rtl';
+}
+
+function subscribe(cb: () => void): () => void {
+  listeners.add(cb);
+  return () => {
+    listeners.delete(cb);
+  };
+}
+
+/** Reactive effective mode for a series (re-renders on hydrate and on change). */
+export function useReaderMode(sourceId: string, mangaUrl: string): ReaderMode {
+  return useSyncExternalStore(subscribe, () => getReaderMode(sourceId, mangaUrl));
 }
