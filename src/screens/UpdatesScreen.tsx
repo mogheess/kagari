@@ -316,9 +316,11 @@ function UpdateRow({
         <Text style={{ color: theme.colors.accent, fontSize: 12.5, fontWeight: '700', marginTop: 2 }} numberOfLines={1}>
           {countLabel}
         </Text>
-        <Text style={{ color: theme.colors.textMuted, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
-          {update.latestChapterName}
-        </Text>
+        {update.latestChapterName ? (
+          <Text style={{ color: theme.colors.textMuted, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
+            {update.latestChapterName}
+          </Text>
+        ) : null}
         <Text style={{ color: theme.colors.textFaint, fontSize: 11.5, marginTop: 3 }}>
           {timeAgo(update.foundAt)}
         </Text>

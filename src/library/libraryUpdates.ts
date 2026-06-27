@@ -14,7 +14,7 @@
  */
 import { useSyncExternalStore } from 'react';
 import { makePersistence } from '../store/persist';
-import { getFavorites } from './favorites';
+import { getFavorites, subscribeFavorites, favoritesHydrated } from './favorites';
 import { takeRecentlyAdded } from './recentlyAdded';
 import type { ChapterDto, Engine, MangaDto, MangaStatus } from '../engine/types';
 
@@ -77,8 +77,45 @@ async function hydrate(): Promise<void> {
   if (s && typeof s === 'object') snapshots = s;
   if (m && typeof m === 'object') meta = { lastChecked: m.lastChecked ?? 0, lastSeen: m.lastSeen ?? 0 };
   emit();
+  // Clean up anything left over from a title removed in a previous session.
+  pruneRemovedFavorites();
 }
 void hydrate();
+
+/**
+ * Drops feed entries and tracking snapshots for titles no longer in the library.
+ * Removing a manga should also remove it from Updates and stop tracking it — the
+ * scan already only looks at current favorites, this clears the stale leftovers.
+ *
+ * Guarded on favorites hydration so the brief empty window at startup (library
+ * not loaded yet) can't wipe a real feed.
+ */
+function pruneRemovedFavorites(): void {
+  if (!favoritesHydrated()) return;
+  const live = new Set(getFavorites().map(f => keyOf(f.sourceId, f.url)));
+
+  const nextFeed = feed.filter(u => live.has(keyOf(u.sourceId, u.mangaUrl)));
+  const feedChanged = nextFeed.length !== feed.length;
+  if (feedChanged) {
+    feed = nextFeed;
+    feedStore.save(feed);
+  }
+
+  // Drop snapshots for removed titles so a later re-add baselines fresh.
+  let snapChanged = false;
+  for (const key of Object.keys(snapshots)) {
+    if (!live.has(key)) {
+      delete snapshots[key];
+      snapChanged = true;
+    }
+  }
+  if (snapChanged) snapStore.save(snapshots);
+
+  if (feedChanged) emit();
+}
+
+// Removing a title from the library prunes it from Updates immediately.
+subscribeFavorites(pruneRemovedFavorites);
 
 /** Newest-first: by chapter number when known, else by upload date. */
 function byNewest(a: ChapterDto, b: ChapterDto): number {
@@ -129,48 +166,55 @@ export async function checkLibraryUpdates(engine: Engine, opts?: { force?: boole
     while (cursor < favs.length) {
       const f = favs[cursor++];
       const key = keyOf(f.sourceId, f.url);
-      let chapters: ChapterDto[];
+      let chapters: ChapterDto[] | null = null;
       try {
         chapters = await engine.getChapters(f.sourceId, f.url);
       } catch {
-        continue; // source down / not installed — leave snapshot untouched
+        chapters = null; // source down / not installed
       }
-      if (!chapters || chapters.length === 0) continue;
+      const hasChapters = !!chapters && chapters.length > 0;
 
-      const prev = snapshots[key];
-      snapshots[key] = snapshotUrls(chapters);
-      snapChanged = true;
-
-      // If the user just manually added this title, surface its latest chapter
-      // once so they can confirm it's in the library (works even for completed
-      // series). This is checked *regardless* of whether a baseline snapshot
-      // already exists: a non-forced launch/foreground scan can baseline a title
-      // before the recentlyAdded set finishes hydrating, so the flag must still
-      // win on a later scan instead of being swallowed forever by that snapshot.
+      // If the user just manually added this title, surface it once so they can
+      // confirm it's in the library — even for completed series and even when
+      // the source can't return chapters right now (offline, blocked, not
+      // installed). This is checked *before* the empty/baseline early-returns and
+      // *regardless* of whether a snapshot exists: a non-forced launch scan can
+      // baseline a title before the recentlyAdded set finishes hydrating, so the
+      // flag must still win on a later scan instead of being swallowed forever.
       if (takeRecentlyAdded(f.sourceId, f.url)) {
-        const newest = chapters.slice().sort(byNewest)[0];
-        if (newest) {
-          found.push({
-            sourceId: f.sourceId,
-            mangaUrl: f.url,
-            title: f.title,
-            thumbnailUrl: f.thumbnailUrl,
-            newCount: chapters.length,
-            latestChapterName: newest.name,
-            latestChapterUrl: newest.url,
-            foundAt: Date.now(),
-            kind: 'added',
-          });
+        const newest = hasChapters ? chapters!.slice().sort(byNewest)[0] : undefined;
+        found.push({
+          sourceId: f.sourceId,
+          mangaUrl: f.url,
+          title: f.title,
+          thumbnailUrl: f.thumbnailUrl,
+          newCount: hasChapters ? chapters!.length : 0,
+          latestChapterName: newest?.name ?? '',
+          latestChapterUrl: newest?.url ?? `kagari:added\u0000${key}`,
+          foundAt: Date.now(),
+          kind: 'added',
+        });
+        // Baseline so the (now-known) backlog doesn't re-flood as "new" later.
+        if (hasChapters) {
+          snapshots[key] = snapshotUrls(chapters!);
+          snapChanged = true;
         }
         continue;
       }
+
+      // Nothing fetched and not a manual add — leave the snapshot untouched.
+      if (!hasChapters) continue;
+
+      const prev = snapshots[key];
+      snapshots[key] = snapshotUrls(chapters!);
+      snapChanged = true;
 
       // First time we've seen this manga and it wasn't a manual add: baseline
       // silently so the backlog doesn't flood the feed.
       if (!prev) continue;
 
       const known = new Set(prev);
-      const newChapters = chapters.filter(c => !known.has(c.url));
+      const newChapters = chapters!.filter(c => !known.has(c.url));
       if (newChapters.length === 0) continue;
 
       const newest = newChapters.slice().sort(byNewest)[0];

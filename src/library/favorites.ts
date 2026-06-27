@@ -112,6 +112,24 @@ export function findFavoriteByTitle(
   );
 }
 
+/**
+ * Like {@link findFavoriteByTitle} but returns *every* cross-source match
+ * (newest-added first). Lets the duplicate-add prompt show all candidate copies
+ * so the user picks which one to migrate from instead of the app guessing — e.g.
+ * when two "One Piece"s from different sources are already followed.
+ */
+export function findFavoritesByTitle(
+  title: string,
+  exclude: { sourceId: string; url: string },
+): FavoriteManga[] {
+  const key = titleKey(title);
+  if (!key) return [];
+  return favorites.filter(
+    f =>
+      !(f.sourceId === exclude.sourceId && f.url === exclude.url) && titleKey(f.title) === key,
+  );
+}
+
 /** Non-reactive snapshot of the whole library (e.g. the library-updates scan). */
 export function getFavorites(): FavoriteManga[] {
   return favorites;
@@ -231,6 +249,19 @@ function subscribe(cb: () => void): () => void {
   return () => {
     listeners.delete(cb);
   };
+}
+
+/**
+ * Subscribe to any library change (add/remove/category edits). Used by the
+ * Updates store to prune entries for titles that leave the library.
+ */
+export function subscribeFavorites(cb: () => void): () => void {
+  return subscribe(cb);
+}
+
+/** Whether the library has finished loading from storage (guards startup races). */
+export function favoritesHydrated(): boolean {
+  return hydrated;
 }
 
 function getSnapshot(): FavoriteManga[] {
