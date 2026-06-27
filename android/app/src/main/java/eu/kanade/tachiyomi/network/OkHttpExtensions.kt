@@ -67,7 +67,20 @@ suspend fun Call.await(): Response {
     return suspendCancellableCoroutine { continuation ->
         enqueue(object : Callback {
             override fun onResponse(call: Call, response: Response) {
-                continuation.resume(response)
+                try {
+                    continuation.resume(response)
+                } catch (t: Throwable) {
+                    // Resuming may inline downstream extension code on this OkHttp
+                    // dispatcher thread. If that throws a linkage error (e.g.
+                    // NoClassDefFoundError for a "provided" lib we don't ship), route
+                    // it through the coroutine instead of crashing the process.
+                    if (continuation.isActive) {
+                        try {
+                            continuation.resumeWithException(t)
+                        } catch (_: Throwable) {
+                        }
+                    }
+                }
             }
 
             override fun onFailure(call: Call, e: IOException) {
