@@ -109,6 +109,25 @@ export interface ImageTileDto {
   index: number;
 }
 
+export type TierListExportOrientation = 'landscape' | 'vertical';
+
+export interface TierListExportDto {
+  title: string;
+  orientation: TierListExportOrientation;
+  rows: TierListExportRowDto[];
+}
+
+export interface TierListExportRowDto {
+  name: string;
+  color: string;
+  items: TierListExportItemDto[];
+}
+
+export interface TierListExportItemDto {
+  title: string;
+  coverUri?: string;
+}
+
 /** A configured extension repository (Mihon-style index URL). */
 export interface RepoDto {
   url: string;
@@ -267,6 +286,8 @@ export interface Engine {
   importMihonBackup(uri: string): Promise<MihonBackupDto>;
 
   // save / share
+  /** Renders a high-resolution tier-list image and returns a local file:// uri. */
+  renderTierListImage(exportData: TierListExportDto): Promise<string>;
   /** Saves a local image (file:// uri) to the device gallery; resolves with the saved file name. */
   saveImageToGallery(uri: string): Promise<string>;
   /** Opens the system share sheet for a local image (file:// uri). */

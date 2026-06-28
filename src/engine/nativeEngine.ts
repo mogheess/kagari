@@ -51,6 +51,7 @@ interface ManhwaEngineNative {
   deleteDownloadedChapter(sourceId: string, chapterUrl: string): Promise<void>;
   pickMihonBackup(): Promise<string | null>;
   importMihonBackup(uri: string): Promise<string>;
+  renderTierListImage(exportJson: string): Promise<string>;
   saveImageToGallery(uri: string): Promise<string>;
   shareImage(uri: string): Promise<void>;
   openInWebView(url: string): Promise<void>;
@@ -181,6 +182,12 @@ export function createNativeEngine(): Engine | null {
     },
     async importMihonBackup(uri) {
       return parse<MihonBackupDto>(await Native.importMihonBackup(uri));
+    },
+    async renderTierListImage(exportData) {
+      if (typeof Native.renderTierListImage !== 'function') {
+        throw new Error('Tier list export is unavailable on this build.');
+      }
+      return Native.renderTierListImage(JSON.stringify(exportData));
     },
     async saveImageToGallery(uri: string) {
       if (typeof Native.saveImageToGallery !== 'function') {

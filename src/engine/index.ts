@@ -50,6 +50,7 @@ function createUnavailableEngine(): Engine {
     deleteDownloadedChapter: () => Promise.resolve(),
     pickMihonBackup: () => Promise.resolve(null),
     importMihonBackup: reject,
+    renderTierListImage: reject,
     saveImageToGallery: reject,
     shareImage: reject,
     openInWebView: reject,

@@ -100,6 +100,26 @@ data class ImageTileDto(
 )
 
 @Serializable
+data class TierListExportDto(
+    val title: String = "Kagari Tier List",
+    val orientation: String = "landscape",
+    val rows: List<TierListExportRowDto> = emptyList(),
+)
+
+@Serializable
+data class TierListExportRowDto(
+    val name: String,
+    val color: String,
+    val items: List<TierListExportItemDto> = emptyList(),
+)
+
+@Serializable
+data class TierListExportItemDto(
+    val title: String,
+    val coverUri: String? = null,
+)
+
+@Serializable
 data class RepoDto(
     val url: String,
     val name: String,
