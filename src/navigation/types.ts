@@ -20,4 +20,5 @@ export type RootStackParamList = {
   Extensions: undefined;
   Categories: undefined;
   Downloads: undefined;
+  TierLists: undefined;
 };

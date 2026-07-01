@@ -10,6 +10,7 @@ import com.facebook.react.bridge.ReactMethod
 import com.manhwa.engine.EngineException
 import com.manhwa.engine.EngineFacade
 import com.manhwa.engine.dto.PageDto
+import com.manhwa.engine.dto.TierListExportDto
 import com.manhwa.engine.repo.ApkInstaller
 import com.manhwa.engine.repo.RepoManager
 import com.manhwa.engine.web.SourceWebViewActivity
@@ -253,6 +254,12 @@ class ManhwaEngineModule(
     fun shareImage(uri: String, promise: Promise) = resolve(promise) {
         facade.shareImage(uri)
         ""
+    }
+
+    @ReactMethod
+    fun renderTierListImage(exportJson: String, promise: Promise) = resolve(promise) {
+        val export = json.decodeFromString<TierListExportDto>(exportJson)
+        facade.renderTierListImage(export)
     }
 
     // --- in-app web view (manual Cloudflare clearance) ---

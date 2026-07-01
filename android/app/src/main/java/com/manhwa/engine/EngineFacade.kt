@@ -6,7 +6,12 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.BitmapRegionDecoder
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.Rect
+import android.graphics.RectF
+import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -23,6 +28,7 @@ import com.manhwa.engine.dto.MangaDto
 import com.manhwa.engine.dto.MangasPageDto
 import com.manhwa.engine.dto.PageDto
 import com.manhwa.engine.dto.SourceDto
+import com.manhwa.engine.dto.TierListExportDto
 import com.manhwa.engine.backup.MihonBackupImporter
 import com.manhwa.engine.backup.MihonImportResult
 import com.manhwa.engine.loader.ExtensionLoader
@@ -489,6 +495,158 @@ class EngineFacade(context: Context) {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         appContext.startActivity(chooser)
+    }
+
+    /** Renders a high-resolution tier-list board and returns a local file URI. */
+    fun renderTierListImage(export: TierListExportDto): String {
+        val landscape = export.orientation.lowercase() != "vertical"
+        val width = if (landscape) 2400 else 1440
+        val padding = if (landscape) 72 else 56
+        val titleHeight = if (landscape) 150 else 136
+        val labelWidth = if (landscape) 230 else 0
+        val coverWidth = if (landscape) 118 else 128
+        val coverHeight = if (landscape) 170 else 188
+        val titleTextHeight = if (landscape) 48 else 50
+        val itemGap = if (landscape) 22 else 18
+        val rowGap = if (landscape) 22 else 24
+        val rowPad = if (landscape) 24 else 22
+        val contentWidth = width - padding * 2
+        val gridWidth = contentWidth - labelWidth - if (landscape) rowPad else 0
+        val itemSlot = coverWidth + itemGap
+        val perLine = maxOf(1, (gridWidth + itemGap) / itemSlot)
+        val rowHeights = export.rows.map { row ->
+            val lines = maxOf(1, (row.items.size + perLine - 1) / perLine)
+            if (landscape) {
+                maxOf(240, rowPad * 2 + lines * (coverHeight + titleTextHeight + itemGap) - itemGap)
+            } else {
+                rowPad * 2 + 84 + lines * (coverHeight + titleTextHeight + itemGap) - itemGap
+            }
+        }
+        val height = padding + titleHeight + rowHeights.sum() + rowGap * maxOf(0, export.rows.size - 1) + padding
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        canvas.drawColor(Color.rgb(22, 22, 24))
+
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        paint.color = Color.rgb(244, 244, 246)
+        paint.textSize = if (landscape) 54f else 46f
+        canvas.drawText(export.title.ifBlank { "Kagari Tier List" }, padding.toFloat(), (padding + 58).toFloat(), paint)
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+        paint.color = Color.rgb(154, 154, 163)
+        paint.textSize = 25f
+        canvas.drawText("Created with Kagari", padding.toFloat(), (padding + 98).toFloat(), paint)
+
+        var y = padding + titleHeight
+        export.rows.forEachIndexed { rowIndex, row ->
+            val rowHeight = rowHeights[rowIndex]
+            paint.color = Color.rgb(30, 30, 34)
+            canvas.drawRoundRect(
+                RectF(padding.toFloat(), y.toFloat(), (width - padding).toFloat(), (y + rowHeight).toFloat()),
+                34f,
+                34f,
+                paint,
+            )
+
+            if (landscape) {
+                drawTierLabel(canvas, paint, row.name, row.color, padding + rowPad, y + rowPad, labelWidth - rowPad, rowHeight - rowPad * 2)
+                drawTierItems(canvas, paint, row.items, padding + labelWidth + rowPad, y + rowPad, gridWidth, perLine, coverWidth, coverHeight, itemGap)
+            } else {
+                drawTierLabel(canvas, paint, row.name, row.color, padding + rowPad, y + rowPad, contentWidth - rowPad * 2, 64)
+                drawTierItems(canvas, paint, row.items, padding + rowPad, y + rowPad + 88, contentWidth - rowPad * 2, perLine, coverWidth, coverHeight, itemGap)
+            }
+            y += rowHeight + rowGap
+        }
+
+        val dir = File(appContext.cacheDir, "tier_exports").apply { mkdirs() }
+        dir.listFiles()?.forEach { it.delete() }
+        val file = File(dir, "kagari_tier_${System.currentTimeMillis()}.jpg")
+        file.outputStream().use { out -> bitmap.compress(Bitmap.CompressFormat.JPEG, 96, out) }
+        bitmap.recycle()
+        return Uri.fromFile(file).toString()
+    }
+
+    private fun drawTierLabel(
+        canvas: Canvas,
+        paint: Paint,
+        name: String,
+        color: String,
+        x: Int,
+        y: Int,
+        width: Int,
+        height: Int,
+    ) {
+        paint.color = parseColor(color)
+        canvas.drawRoundRect(RectF(x.toFloat(), y.toFloat(), (x + width).toFloat(), (y + height).toFloat()), 24f, 24f, paint)
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        paint.color = Color.rgb(20, 20, 22)
+        paint.textSize = if (height > 100) 40f else 34f
+        val label = ellipsize(name, paint, width - 28)
+        val baseline = y + height / 2f - (paint.descent() + paint.ascent()) / 2f
+        canvas.drawText(label, x + 14f, baseline, paint)
+    }
+
+    private fun drawTierItems(
+        canvas: Canvas,
+        paint: Paint,
+        items: List<com.manhwa.engine.dto.TierListExportItemDto>,
+        x: Int,
+        y: Int,
+        width: Int,
+        perLine: Int,
+        coverWidth: Int,
+        coverHeight: Int,
+        gap: Int,
+    ) {
+        if (items.isEmpty()) {
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+            paint.color = Color.rgb(110, 110, 119)
+            paint.textSize = 28f
+            canvas.drawText("No titles yet", x.toFloat(), (y + 58).toFloat(), paint)
+            return
+        }
+
+        items.forEachIndexed { index, item ->
+            val col = index % perLine
+            val row = index / perLine
+            val itemX = x + col * (coverWidth + gap)
+            val itemY = y + row * (coverHeight + 50 + gap)
+            drawCover(canvas, paint, item.coverUri, itemX, itemY, coverWidth, coverHeight)
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            paint.color = Color.rgb(244, 244, 246)
+            paint.textSize = 20f
+            val title = ellipsize(item.title, paint, coverWidth)
+            canvas.drawText(title, itemX.toFloat(), (itemY + coverHeight + 28).toFloat(), paint)
+        }
+    }
+
+    private fun drawCover(canvas: Canvas, paint: Paint, uri: String?, x: Int, y: Int, width: Int, height: Int) {
+        val file = uri?.let { Uri.parse(it).path }?.let { File(it) }
+        val bitmap = file?.takeIf { it.exists() && it.length() > 0L }?.let { BitmapFactory.decodeFile(it.absolutePath) }
+        if (bitmap != null) {
+            canvas.drawBitmap(bitmap, null, Rect(x, y, x + width, y + height), paint)
+            bitmap.recycle()
+        } else {
+            paint.color = Color.rgb(38, 38, 43)
+            canvas.drawRoundRect(RectF(x.toFloat(), y.toFloat(), (x + width).toFloat(), (y + height).toFloat()), 18f, 18f, paint)
+        }
+    }
+
+    private fun parseColor(color: String): Int {
+        return try {
+            Color.parseColor(color)
+        } catch (_: Throwable) {
+            Color.rgb(156, 163, 175)
+        }
+    }
+
+    private fun ellipsize(text: String, paint: Paint, maxWidth: Int): String {
+        if (paint.measureText(text) <= maxWidth) return text
+        var out = text
+        while (out.length > 1 && paint.measureText("$out…") > maxWidth) {
+            out = out.dropLast(1)
+        }
+        return "$out…"
     }
 
     private fun localImageFile(fileUri: String): File {

@@ -87,6 +87,7 @@ export function ProfileScreen() {
         />
         <Row icon="grid" label="Customize Home" onPress={() => navigation.navigate('CustomizeHome')} />
         <Row icon="bookmark" label="Categories" onPress={() => navigation.navigate('Categories')} />
+        <Row icon="columns" label="Tier Lists" onPress={() => navigation.navigate('TierLists')} />
         <Row icon="download" label="Downloads" onPress={() => navigation.navigate('Downloads')} />
 
         <Text style={[styles.sectionLabel, { color: theme.colors.textFaint, marginTop: 28 }]}>
