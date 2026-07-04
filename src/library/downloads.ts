@@ -56,11 +56,18 @@ function patch(sourceId: string, chapterUrl: string, changes: Partial<DownloadEn
 
 async function hydrate(): Promise<void> {
   const stored = await store.load();
-  if (stored && Array.isArray(stored) && entries.length === 0) {
-    // Anything mid-flight when the app died goes back in the queue.
-    entries = stored.map(e =>
-      e.status === 'downloading' ? { ...e, status: 'queued' as const, downloaded: 0 } : e,
-    );
+  if (stored && Array.isArray(stored)) {
+    // Anything mid-flight when the app died goes back in the queue. Merge-safe:
+    // a chapter enqueued before hydration finishes wins over its stored entry.
+    const byKey = new Map<string, DownloadEntry>();
+    for (const e of stored) {
+      byKey.set(
+        `${e.sourceId}\u0000${e.chapterUrl}`,
+        e.status === 'downloading' ? { ...e, status: 'queued' as const, downloaded: 0 } : e,
+      );
+    }
+    for (const e of entries) byKey.set(`${e.sourceId}\u0000${e.chapterUrl}`, e);
+    entries = [...byKey.values()];
   }
   hydrated = true;
   emit();
@@ -80,6 +87,12 @@ async function pump(): Promise<void> {
     const engine = getEngine();
     const pages = await engine.getPages(sourceId, chapterUrl);
     if (!entries.some(e => sameChapter(e, sourceId, chapterUrl))) return; // cancelled
+    if (pages.length === 0) {
+      // A "done" download with zero pages is useless and can't be re-queued
+      // (enqueueDownload skips non-error entries), so surface it as a failure.
+      patch(sourceId, chapterUrl, { status: 'error', error: 'The source returned no pages' });
+      return;
+    }
     patch(sourceId, chapterUrl, { pageCount: pages.length });
     for (let i = 0; i < pages.length; i += 1) {
       if (!entries.some(e => sameChapter(e, sourceId, chapterUrl))) return; // cancelled mid-run

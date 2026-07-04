@@ -63,13 +63,15 @@ async function hydrate(): Promise<void> {
   persist();
 }
 
-/** Re-reads favorites from storage (drives pull-to-refresh in the Library). */
+/**
+ * Pull-to-refresh hook-in for the Library. Once hydrated, the in-memory store
+ * is the source of truth (nothing else writes this key); re-reading storage
+ * would race the fire-and-forget save() and could revert a fresh toggle.
+ */
 export async function reloadFavorites(): Promise<void> {
-  const stored = await store.load();
-  if (stored && Array.isArray(stored)) {
-    favorites = stored
-      .map(f => ({ ...f, categoryIds: f.categoryIds ?? [] }))
-      .sort((a, b) => b.addedAt - a.addedAt);
+  if (!hydrated) {
+    await hydrate();
+    return;
   }
   emit();
 }

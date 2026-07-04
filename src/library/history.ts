@@ -58,11 +58,15 @@ async function hydrate(): Promise<void> {
   persist();
 }
 
-/** Re-reads history from storage (drives pull-to-refresh in the Activity tab). */
+/**
+ * Pull-to-refresh hook-in for the History tab. Once hydrated, the in-memory
+ * store is the source of truth (nothing else writes this key); re-reading
+ * storage would race the fire-and-forget save() and could drop a fresh entry.
+ */
 export async function reloadHistory(): Promise<void> {
-  const stored = await store.load();
-  if (stored && Array.isArray(stored)) {
-    history = stored.sort((a, b) => b.readAt - a.readAt).slice(0, MAX_ENTRIES);
+  if (!hydrated) {
+    await hydrate();
+    return;
   }
   emit();
 }

@@ -22,6 +22,7 @@ export interface ExtensionUpdate {
 let updates: ExtensionUpdate[] = [];
 let lastChecked = 0;
 let checking = false;
+let pendingForce = false;
 const listeners = new Set<() => void>();
 
 function emit(): void {
@@ -80,7 +81,12 @@ export async function checkExtensionUpdates(
   engine: Engine,
   opts?: { force?: boolean },
 ): Promise<void> {
-  if (checking) return;
+  if (checking) {
+    // Don't swallow a manual "Check" that races the automatic one — rerun it
+    // once the in-flight check finishes.
+    if (opts?.force) pendingForce = true;
+    return;
+  }
   if (!opts?.force && lastChecked && Date.now() - lastChecked < CHECK_TTL_MS) return;
   checking = true;
   try {
@@ -93,6 +99,10 @@ export async function checkExtensionUpdates(
     // Offline or repo down — keep whatever we had.
   } finally {
     checking = false;
+    if (pendingForce) {
+      pendingForce = false;
+      void checkExtensionUpdates(engine, { force: true });
+    }
   }
 }
 

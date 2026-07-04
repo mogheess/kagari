@@ -32,8 +32,13 @@ function sortByOrder(list: Category[]): Category[] {
 
 async function hydrate(): Promise<void> {
   const stored = await store.load();
-  if (stored && Array.isArray(stored) && categories.length === 0) {
-    categories = sortByOrder(stored);
+  if (stored && Array.isArray(stored)) {
+    // Merge-safe: a category created before hydration finishes wins over its
+    // stored copy without discarding the rest of the persisted list.
+    const byId = new Map<string, Category>();
+    for (const c of stored) byId.set(c.id, c);
+    for (const c of categories) byId.set(c.id, c);
+    categories = sortByOrder([...byId.values()]);
   }
   emit();
   persist();

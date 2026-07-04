@@ -35,8 +35,9 @@ export function clearCollectionCover(id: string): void {
 
 async function hydrate(): Promise<void> {
   const stored = await store.load();
-  if (stored && typeof stored === 'object' && Object.keys(covers).length === 0) {
-    covers = stored;
+  if (stored && typeof stored === 'object') {
+    // Covers picked before hydration finished win over the stored map.
+    covers = { ...stored, ...covers };
   }
   hydrated = true;
   emit();

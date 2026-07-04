@@ -30,7 +30,8 @@ function emit(): void {
 async function hydrate(): Promise<void> {
   const stored = await store.load();
   if (stored && typeof stored === 'object') {
-    health = stored;
+    // Results recorded before hydration finished win over the stored snapshot.
+    health = { ...stored, ...health };
     emit();
   }
 }
