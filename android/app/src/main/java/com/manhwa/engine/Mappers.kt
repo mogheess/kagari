@@ -17,6 +17,7 @@ object Mappers {
 
     fun sourceToDto(source: Source, extensionPkg: String, isNsfw: Boolean): SourceDto {
         val catalogue = source as? CatalogueSource
+        val http = source as? eu.kanade.tachiyomi.source.online.HttpSource
         return SourceDto(
             id = source.id.toString(),
             name = source.name,
@@ -24,6 +25,7 @@ object Mappers {
             supportsLatest = catalogue?.supportsLatest ?: false,
             isNsfw = isNsfw,
             extensionPkg = extensionPkg,
+            baseUrl = http?.baseUrl,
         )
     }
 

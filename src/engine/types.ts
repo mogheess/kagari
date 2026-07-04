@@ -33,6 +33,8 @@ export interface SourceDto {
   /** Owning extension package. */
   extensionPkg: string;
   iconUrl?: string;
+  /** Root URL of the source (e.g. "https://mangafire.to"). */
+  baseUrl?: string;
 }
 
 export type MangaStatus =

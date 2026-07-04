@@ -68,6 +68,7 @@ export function DiscoverScreen() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [chooserOpen, setChooserOpen] = useState(false);
   const [restored, setRestored] = useState(false);
+  const [fetching, setFetching] = useState(false);
 
   const pinned = usePinnedSources();
   const health = useSourceHealth();
@@ -195,6 +196,14 @@ export function DiscoverScreen() {
             style={[styles.input, { color: theme.colors.text }]}
             returnKeyType="search"
           />
+          {query.trim().length > 0 && (query !== debounced || fetching) ? (
+            <ActivityIndicator size="small" color={theme.colors.accent} />
+          ) : null}
+          {query.trim().length > 0 ? (
+            <Pressable onPress={() => setQuery('')} hitSlop={8}>
+              <Icon name="close" size={16} color={theme.colors.textMuted} />
+            </Pressable>
+          ) : null}
         </View>
 
         {mode === 'source' ? (
@@ -243,6 +252,7 @@ export function DiscoverScreen() {
             sourcesCount={sources.length}
             onOpenManga={openManga}
             onAddExtensions={() => navigation.navigate('Extensions')}
+            onFetchingChange={setFetching}
           />
         ) : (
           <GlobalSearch
@@ -365,6 +375,7 @@ function SourceBrowse({
   sourcesCount,
   onOpenManga,
   onAddExtensions,
+  onFetchingChange,
 }: {
   sourceId: string;
   source?: SourceDto;
@@ -373,8 +384,10 @@ function SourceBrowse({
   sourcesCount: number;
   onOpenManga: (m: MangaDto) => void;
   onAddExtensions: () => void;
+  onFetchingChange?: (v: boolean) => void;
 }) {
   const theme = useTheme();
+  const navigation = useNavigation<Nav>();
   const engine = getEngine();
   const { width } = useWindowDimensions();
 
@@ -405,6 +418,10 @@ function SourceBrowse({
     fetchPage,
     [sourceId, q, wantsLatest],
   );
+
+  useEffect(() => {
+    onFetchingChange?.(loading);
+  }, [loading, onFetchingChange]);
 
   const gap = 12;
   const cols = 3;
@@ -476,11 +493,33 @@ function SourceBrowse({
                 {error
                   ? `${source?.name ?? 'The source'} returned an error${
                       /\b(\d{3})\b/.test(error.message) ? ` (${error.message})` : ''
-                    }. It may be blocked or temporarily down. Try another source.`
+                    }. It may be blocked by Cloudflare or temporarily down.`
                   : q
                     ? `No manga matched "${q}" on ${source?.name ?? 'this source'}.`
                     : 'Pick a source above to start browsing.'}
               </Text>
+              {error ? (
+                <View style={styles.errorActions}>
+                  <Pressable onPress={reload} style={[styles.emptyBtn, { backgroundColor: theme.colors.accent }]}>
+                    <Icon name="refresh" size={16} color={theme.colors.onAccent} />
+                    <Text style={{ color: theme.colors.onAccent, fontWeight: '700' }}>Retry</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={async () => {
+                      const url = source?.baseUrl;
+                      if (!url) return;
+                      try {
+                        await engine.openInWebView(url);
+                        reload();
+                      } catch {}
+                    }}
+                    style={[styles.emptyBtn, { backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border }]}
+                  >
+                    <Icon name="globe" size={16} color={theme.colors.text} />
+                    <Text style={{ color: theme.colors.text, fontWeight: '700' }}>Open in WebView</Text>
+                  </Pressable>
+                </View>
+              ) : null}
             </View>
           </View>
         )
@@ -738,5 +777,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     borderRadius: 14,
     marginTop: 18,
+  },
+  errorActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 18,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
   },
 });
