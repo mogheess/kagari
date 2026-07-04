@@ -24,6 +24,7 @@ import Animated, {
   useAnimatedStyle,
   withTiming,
   runOnJS,
+  cancelAnimation,
 } from 'react-native-reanimated';
 import { useAsync } from '../hooks/useAsync';
 import { getEngine } from '../engine';
@@ -89,6 +90,10 @@ export function ReaderScreen() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [zoomed, setZoomed] = useState(false);
+  // True while two fingers are down: the list must stop scrolling immediately,
+  // not only once the pinch ends and `zoomed` lands — otherwise the strip
+  // drifts under the fingers for the whole first pinch.
+  const [pinching, setPinching] = useState(false);
   // Controlled per-page reload counters so a long-press (or the error Retry
   // button) can force a fresh fetch of a specific page.
   const [reloadTokens, setReloadTokens] = useState<Record<number, number>>({});
@@ -394,7 +399,20 @@ export function ReaderScreen() {
   const cy = height / 2;
   const gesture = useMemo(() => {
     const pinch = Gesture.Pinch()
+      .onTouchesDown(e => {
+        if (e.numberOfTouches >= 2) {
+          runOnJS(setPinching)(true);
+        }
+      })
       .onStart(e => {
+        // A reset animation may still be in flight; anchor the pinch on the
+        // live values so the scale doesn't jump at first movement.
+        cancelAnimation(scale);
+        cancelAnimation(tx);
+        cancelAnimation(ty);
+        savedScale.value = scale.value;
+        savedTx.value = tx.value;
+        savedTy.value = ty.value;
         originX.value = e.focalX;
         originY.value = e.focalY;
         baseX.value = (e.focalX - cx - savedTx.value) / savedScale.value;
@@ -423,6 +441,9 @@ export function ReaderScreen() {
           savedTy.value = ty.value;
           runOnJS(setZoomed)(true);
         }
+      })
+      .onFinalize(() => {
+        runOnJS(setPinching)(false);
       });
 
     const pan = Gesture.Pan()
@@ -529,7 +550,13 @@ export function ReaderScreen() {
         </View>
       ) : (
         <GestureDetector gesture={gesture}>
-          <Animated.View style={[styles.zoomLayer, zoomStyle]}>
+          {/* While actively pinching, rasterize the layer so each frame is a
+              pure GPU matrix op instead of a full redraw of every visible
+              page; drops back off on release so the zoomed page stays sharp. */}
+          <Animated.View
+            style={[styles.zoomLayer, zoomStyle]}
+            renderToHardwareTextureAndroid={pinching}
+          >
             <FlatList
               ref={listRef}
               key={mode}
@@ -539,7 +566,7 @@ export function ReaderScreen() {
               horizontal={horizontal}
               inverted={inverted}
               pagingEnabled={paged}
-              scrollEnabled={!zoomed}
+              scrollEnabled={!zoomed && !pinching}
               // Detach far-off-screen pages and keep the render window small,
               // or every scrolled-past full-res page stays mounted and drawn
               // and long chapters get progressively laggier.
