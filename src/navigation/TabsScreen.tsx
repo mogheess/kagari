@@ -55,7 +55,6 @@ export function TabsScreen() {
                 key={tab.key}
                 style={styles.page}
                 collapsable={false}
-                removeClippedSubviews={!focused}
                 pointerEvents={focused ? 'auto' : 'none'}
               >
                 <View style={focused ? styles.attached : styles.detached}>{tab.render()}</View>
