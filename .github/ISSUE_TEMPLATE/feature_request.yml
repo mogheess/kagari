@@ -1,0 +1,43 @@
+name: Feature request
+description: Suggest an improvement or a new capability for Kagari.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before you file:
+        - Search [existing issues](https://github.com/mogheess/kagari/issues?q=is%3Aissue) — someone may have suggested it already (add a 👍 there instead).
+        - Requests to bundle, add, host, or recommend **sources/extensions/repos** are out of scope by design and will be closed.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the friction or missing capability, not just the solution — there may be a simpler design that fits.
+      placeholder: When I finish the last downloaded chapter offline, I can't tell which chapters I still need to download.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How you imagine it working. Mockups or examples from other readers (e.g. Mihon) are very welcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+      placeholder: Workarounds you use today, or other designs that could work.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and this isn't a duplicate.
+          required: true
+        - label: This isn't a request to add or bundle a content source.
+          required: true
