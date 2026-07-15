@@ -19,6 +19,7 @@ data class SourceDto(
     val isNsfw: Boolean,
     val extensionPkg: String,
     val iconUrl: String? = null,
+    val baseUrl: String? = null,
 )
 
 @Serializable
