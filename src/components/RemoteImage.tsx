@@ -44,6 +44,14 @@ export function RemoteImage({
     uri && !isLocalUri(uri) ? peekCover(uri) ?? uri : uri ?? undefined,
   );
   const triedRef = useRef(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     triedRef.current = false;
@@ -69,8 +77,12 @@ export function RemoteImage({
       // A direct load (or a stale cached file) failed: drop any mapping and
       // re-fetch through the source's client, which handles Referer/Cloudflare.
       invalidateCover(uri);
+      // The native fetch can outlive a fast-scrolling grid cell; don't set
+      // state on an unmounted component.
       resolveCover(sourceId ?? '', uri).then(next => {
-        setDisplay(next && isLocalUri(next) ? next : undefined);
+        if (mountedRef.current) {
+          setDisplay(next && isLocalUri(next) ? next : undefined);
+        }
       });
     },
     [onError, sourceId, uri],

@@ -4,6 +4,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { makePersistence } from '../store/persist';
@@ -76,16 +77,20 @@ const HomeConfigContext = createContext<HomeConfigValue | null>(null);
 export function HomeConfigProvider({ children }: { children: React.ReactNode }) {
   const [blocks, setBlocksState] = useState<HomeBlock[]>(DEFAULT_BLOCKS);
   const [universal, setUniversalState] = useState<UniversalSource>({});
+  // Edits made before the persisted config finishes loading must win over the
+  // late-arriving load.
+  const blocksDirty = useRef(false);
+  const universalDirty = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
     store.load().then(stored => {
-      if (!cancelled && stored && Array.isArray(stored) && stored.length > 0) {
+      if (!cancelled && !blocksDirty.current && stored && Array.isArray(stored) && stored.length > 0) {
         setBlocksState(mergeWithDefaults(stored));
       }
     });
     universalStore.load().then(stored => {
-      if (!cancelled && stored && typeof stored === 'object') {
+      if (!cancelled && !universalDirty.current && stored && typeof stored === 'object') {
         setUniversalState(stored);
       }
     });
@@ -95,12 +100,14 @@ export function HomeConfigProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   const setBlocks = useCallback((next: HomeBlock[]) => {
+    blocksDirty.current = true;
     setBlocksState(next);
     store.save(next);
   }, []);
 
   const update = useCallback(
     (fn: (prev: HomeBlock[]) => HomeBlock[]) => {
+      blocksDirty.current = true;
       setBlocksState(prev => {
         const next = fn(prev);
         store.save(next);
@@ -149,6 +156,7 @@ export function HomeConfigProvider({ children }: { children: React.ReactNode }) 
   );
 
   const setUniversalSource = useCallback((sourceId?: string, sourceName?: string) => {
+    universalDirty.current = true;
     const next: UniversalSource = { id: sourceId, name: sourceName };
     setUniversalState(next);
     universalStore.save(next);

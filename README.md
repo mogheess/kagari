@@ -75,6 +75,8 @@ Yes. See [Credits & license](#credits--license) below.
 Kagari is a React Native (TypeScript) app over a native Android engine that runs
 community sources. To build from source, see **[BUILD.md](./BUILD.md)**; for an
 overview of the architecture and conventions, see **[AGENTS.md](./AGENTS.md)**.
+Want to report a bug or contribute a change? Start with
+**[CONTRIBUTING.md](./CONTRIBUTING.md)**.
 
 ## Credits & license
 

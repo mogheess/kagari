@@ -138,6 +138,10 @@ export function LibraryScreen() {
           style={{ flex: 1 }}
           keyExtractor={(m, i) => `${m.sourceId}:${m.url}:${i}`}
           showsVerticalScrollIndicator={false}
+          windowSize={7}
+          initialNumToRender={9}
+          maxToRenderPerBatch={9}
+          removeClippedSubviews
           columnWrapperStyle={{ paddingHorizontal: sidePad, gap: gridGap }}
           contentContainerStyle={{ paddingTop: 4, paddingBottom: TAB_BAR_SPACE, gap: 16 }}
           refreshControl={refreshControl}
@@ -281,6 +285,10 @@ export function LibraryScreen() {
           style={{ flex: 1 }}
           keyExtractor={(m, i) => `${m.sourceId}:${m.url}:${i}`}
           showsVerticalScrollIndicator={false}
+          windowSize={7}
+          initialNumToRender={9}
+          maxToRenderPerBatch={9}
+          removeClippedSubviews
           columnWrapperStyle={{ paddingHorizontal: sidePad, gap: gridGap }}
           contentContainerStyle={{ paddingTop: 4, paddingBottom: TAB_BAR_SPACE, gap: 16 }}
           refreshControl={refreshControl}

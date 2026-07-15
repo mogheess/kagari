@@ -97,7 +97,7 @@ function BrowseBlock({
   const usable = ok(source);
   const sourceId = source?.id;
 
-  const { data, loading } = useAsync<MangaDto[]>(async () => {
+  const { data, loading, error } = useAsync<MangaDto[]>(async () => {
     if (!sourceId || !usable) return [];
     try {
       const res = wantsLatest
@@ -112,6 +112,9 @@ function BrowseBlock({
   }, [sourceId, block.kind, usable, refreshKey]);
 
   if (!usable) return null;
+  // On a failed fetch `data` still holds the PREVIOUS source's titles (useAsync
+  // keeps stale data) — hide the rail rather than mislabel someone else's list.
+  if (error) return null;
   if (!loading && (data?.length ?? 0) === 0) return null;
 
   if (block.kind === 'featured') {

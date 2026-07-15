@@ -44,6 +44,10 @@ export function CoverRail({
     <FlatList
       horizontal
       showsHorizontalScrollIndicator={false}
+      windowSize={5}
+      initialNumToRender={6}
+      maxToRenderPerBatch={6}
+      removeClippedSubviews
       data={data}
       keyExtractor={(m, i) => `${m.sourceId}:${m.url}:${i}`}
       contentContainerStyle={{ paddingHorizontal: theme.spacing.lg, gap: 12 }}

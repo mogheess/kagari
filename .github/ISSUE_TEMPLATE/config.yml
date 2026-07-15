@@ -1,0 +1,10 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question / help using Kagari
+    url: https://github.com/mogheess/kagari/discussions
+    about: Ask questions and get help from the community in Discussions.
+  - name: Problem with a specific source or extension
+    url: https://github.com/mogheess/kagari/blob/main/CONTRIBUTING.md#reporting-issues
+    about: >-
+      Kagari doesn't develop sources. If one source misbehaves while others
+      work, report it to that extension's maintainers — read this first.

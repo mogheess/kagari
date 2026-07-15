@@ -435,6 +435,12 @@ function SourceBrowse({
       style={{ flex: 1 }}
       keyExtractor={(m, i) => `${m.url}:${i}`}
       showsVerticalScrollIndicator={false}
+      // The browse grid grows unbounded with infinite scroll; keep the mounted
+      // window small so hundreds of covers don't accumulate.
+      windowSize={7}
+      initialNumToRender={9}
+      maxToRenderPerBatch={9}
+      removeClippedSubviews
       columnWrapperStyle={{ paddingHorizontal: sidePad, gap }}
       contentContainerStyle={{ paddingTop: 14, paddingBottom: TAB_BAR_SPACE, gap: 16 }}
       onEndReached={loadMore}

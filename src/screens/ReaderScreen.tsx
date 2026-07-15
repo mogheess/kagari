@@ -12,6 +12,8 @@ import {
   StatusBar,
   ToastAndroid,
   ViewToken,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
@@ -22,6 +24,7 @@ import Animated, {
   useAnimatedStyle,
   withTiming,
   runOnJS,
+  cancelAnimation,
 } from 'react-native-reanimated';
 import { useAsync } from '../hooks/useAsync';
 import { getEngine } from '../engine';
@@ -59,6 +62,9 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 type ReaderRoute = RouteProp<RootStackParamList, 'Reader'>;
 const MAX_IMAGE_FETCHES = 1;
 const IMAGE_FETCH_RETRIES = 3;
+/** Bottom spacer under the webtoon strip so the last page clears the chrome. */
+const STRIP_FOOTER_HEIGHT = 80;
+const VIEWABILITY_CONFIG = { itemVisiblePercentThreshold: 50 };
 
 let activeImageFetches = 0;
 const imageFetchQueue: (() => void)[] = [];
@@ -84,6 +90,10 @@ export function ReaderScreen() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [zoomed, setZoomed] = useState(false);
+  // True while two fingers are down: the list must stop scrolling immediately,
+  // not only once the pinch ends and `zoomed` lands — otherwise the strip
+  // drifts under the fingers for the whole first pinch.
+  const [pinching, setPinching] = useState(false);
   // Controlled per-page reload counters so a long-press (or the error Retry
   // button) can force a fresh fetch of a specific page.
   const [reloadTokens, setReloadTokens] = useState<Record<number, number>>({});
@@ -120,9 +130,13 @@ export function ReaderScreen() {
   }, [scale, savedScale, tx, ty, savedTx, savedTy]);
 
   // If this chapter is downloaded, read its pages from local storage (offline)
-  // instead of resolving page URLs over the network.
+  // instead of resolving page URLs over the network. Latched at open: a
+  // download finishing mid-read must not swap the page source under the user
+  // (refetching every page and trashing scroll); the next open picks it up.
   const downloadEntry = useDownloadEntry(params.sourceId, params.chapter.url);
-  const offlinePageCount = downloadEntry?.status === 'done' ? downloadEntry.pageCount : 0;
+  const [offlinePageCount] = useState(() =>
+    downloadEntry?.status === 'done' ? downloadEntry.pageCount : 0,
+  );
   const offline = offlinePageCount > 0;
 
   const { data: pages, loading, error } = useAsync<PageDto[]>(
@@ -214,13 +228,34 @@ export function ReaderScreen() {
     notify('Chapter queued for download');
   }, [params]);
 
+  // Track the FURTHEST visible page, not the topmost: at the bottom of a
+  // webtoon strip the previous page still occupies the top of the viewport, so
+  // the topmost index would stop at N-1 and the chapter would never read out.
   const onViewable = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
-    const first = viewableItems[0];
-    if (first?.index != null) {
-      currentRef.current = first.index;
-      setCurrent(first.index);
+    let furthest = -1;
+    for (const v of viewableItems) {
+      if (v.index != null && v.index > furthest) furthest = v.index;
+    }
+    if (furthest >= 0) {
+      currentRef.current = furthest;
+      setCurrent(furthest);
     }
   }).current;
+
+  // A tall final page may never cross the 50% visibility threshold, so also
+  // treat reaching the very end of the strip as being on the last page.
+  const onStripScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (total <= 0) return;
+      const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
+      const end = contentSize.height - STRIP_FOOTER_HEIGHT - 2;
+      if (contentOffset.y + layoutMeasurement.height >= end && currentRef.current < total - 1) {
+        currentRef.current = total - 1;
+        setCurrent(total - 1);
+      }
+    },
+    [total],
+  );
 
   // Persist reading progress (furthest page) — debounced while reading, then
   // flushed on exit. Works for any source, library or not.
@@ -364,7 +399,20 @@ export function ReaderScreen() {
   const cy = height / 2;
   const gesture = useMemo(() => {
     const pinch = Gesture.Pinch()
+      .onTouchesDown(e => {
+        if (e.numberOfTouches >= 2) {
+          runOnJS(setPinching)(true);
+        }
+      })
       .onStart(e => {
+        // A reset animation may still be in flight; anchor the pinch on the
+        // live values so the scale doesn't jump at first movement.
+        cancelAnimation(scale);
+        cancelAnimation(tx);
+        cancelAnimation(ty);
+        savedScale.value = scale.value;
+        savedTx.value = tx.value;
+        savedTy.value = ty.value;
         originX.value = e.focalX;
         originY.value = e.focalY;
         baseX.value = (e.focalX - cx - savedTx.value) / savedScale.value;
@@ -393,6 +441,9 @@ export function ReaderScreen() {
           savedTy.value = ty.value;
           runOnJS(setZoomed)(true);
         }
+      })
+      .onFinalize(() => {
+        runOnJS(setPinching)(false);
       });
 
     const pan = Gesture.Pan()
@@ -499,7 +550,13 @@ export function ReaderScreen() {
         </View>
       ) : (
         <GestureDetector gesture={gesture}>
-          <Animated.View style={[styles.zoomLayer, zoomStyle]}>
+          {/* While actively pinching, rasterize the layer so each frame is a
+              pure GPU matrix op instead of a full redraw of every visible
+              page; drops back off on release so the zoomed page stays sharp. */}
+          <Animated.View
+            style={[styles.zoomLayer, zoomStyle]}
+            renderToHardwareTextureAndroid={pinching}
+          >
             <FlatList
               ref={listRef}
               key={mode}
@@ -509,12 +566,20 @@ export function ReaderScreen() {
               horizontal={horizontal}
               inverted={inverted}
               pagingEnabled={paged}
-              scrollEnabled={!zoomed}
-              removeClippedSubviews={false}
+              scrollEnabled={!zoomed && !pinching}
+              // Detach far-off-screen pages and keep the render window small,
+              // or every scrolled-past full-res page stays mounted and drawn
+              // and long chapters get progressively laggier.
+              removeClippedSubviews
+              windowSize={7}
+              maxToRenderPerBatch={3}
+              initialNumToRender={3}
               showsVerticalScrollIndicator={false}
               showsHorizontalScrollIndicator={false}
               onViewableItemsChanged={onViewable}
-              viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
+              viewabilityConfig={VIEWABILITY_CONFIG}
+              onScroll={paged ? undefined : onStripScroll}
+              scrollEventThrottle={64}
               getItemLayout={
                 paged
                   ? (_, index) => {
@@ -541,7 +606,7 @@ export function ReaderScreen() {
                   }
                 }, 80);
               }}
-              ListFooterComponent={paged ? null : <View style={{ height: 80 }} />}
+              ListFooterComponent={paged ? null : <View style={{ height: STRIP_FOOTER_HEIGHT }} />}
             />
           </Animated.View>
         </GestureDetector>

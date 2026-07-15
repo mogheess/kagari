@@ -1,0 +1,91 @@
+name: Bug report
+description: Something in Kagari is broken or behaving unexpectedly.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Before you file:
+        - Search [existing issues](https://github.com/mogheess/kagari/issues?q=is%3Aissue) for the same problem.
+        - Confirm it still happens on the [latest release](https://github.com/mogheess/kagari/releases/latest).
+        - If **one specific source** fails while others work, the problem is likely in that extension, not Kagari — see the [contributing guide](https://github.com/mogheess/kagari/blob/main/CONTRIBUTING.md#reporting-issues).
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Exact steps, starting from app launch. The more precise, the faster the fix.
+      placeholder: |
+        1. Open a webtoon chapter with 20 pages
+        2. Scroll to the very last page
+        3. Go back to the manga page
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: The chapter shows as read (dimmed).
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      placeholder: The chapter still shows "Page 19 / 20".
+    validations:
+      required: true
+
+  - type: input
+    id: app-version
+    attributes:
+      label: Kagari version
+      description: Shown on the Profile screen.
+      placeholder: "0.4"
+    validations:
+      required: true
+
+  - type: input
+    id: android-version
+    attributes:
+      label: Android version
+      placeholder: "Android 14"
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: Device
+      placeholder: "Pixel 7 / Galaxy S23 / emulator"
+    validations:
+      required: true
+
+  - type: input
+    id: source
+    attributes:
+      label: Source involved (if any)
+      description: Which extension/source were you using when this happened? Does the same thing happen with other sources?
+      placeholder: "SourceName v1.4.x — also happens on other sources: yes/no"
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Screenshots, recording, or logs
+      description: |
+        Drag & drop images/videos here. For crashes, attach a logcat capture if you can:
+        `adb logcat -d > kagari-log.txt` (run right after reproducing).
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and this isn't a duplicate.
+          required: true
+        - label: I'm on the latest release (or I noted the version above).
+          required: true
+        - label: This report is about Kagari itself, not a request to add/fix a specific source.
+          required: true

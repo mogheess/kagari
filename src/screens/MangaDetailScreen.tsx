@@ -582,7 +582,7 @@ export function MangaDetailScreen() {
                     { borderColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surface : 'transparent' },
                   ]}
                 >
-                  <View style={{ flex: 1 }}>
+                  <View style={{ flex: 1, opacity: prog?.read ? 0.45 : 1 }}>
                     <Text
                       numberOfLines={1}
                       style={[

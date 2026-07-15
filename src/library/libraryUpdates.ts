@@ -62,6 +62,7 @@ let feed: LibraryUpdate[] = [];
 let snapshots: Record<string, string[]> = {};
 let meta: UpdatesMeta = { lastChecked: 0, lastSeen: 0 };
 let checking = false;
+let pendingForce = false;
 const listeners = new Set<() => void>();
 
 const keyOf = (sourceId: string, url: string) => `${sourceId}\u0000${url}`;
@@ -131,6 +132,26 @@ function snapshotUrls(chapters: ChapterDto[]): string[] {
   return urls.length > MAX_SNAPSHOT_PER_MANGA ? urls.slice(0, MAX_SNAPSHOT_PER_MANGA) : urls;
 }
 
+/**
+ * Union of the current chapter list and the previous snapshot, so a transient
+ * partial response (timeout, source hiccup) can't shrink the baseline and make
+ * the next full fetch flood the feed with re-flagged "new" chapters.
+ */
+function mergedSnapshot(prev: string[] | undefined, chapters: ChapterDto[]): string[] {
+  const current = snapshotUrls(chapters);
+  if (!prev || prev.length === 0) return current;
+  const seen = new Set(current);
+  for (const url of prev) {
+    if (!seen.has(url)) {
+      seen.add(url);
+      current.push(url);
+    }
+  }
+  return current.length > MAX_SNAPSHOT_PER_MANGA
+    ? current.slice(0, MAX_SNAPSHOT_PER_MANGA)
+    : current;
+}
+
 /** Prepends freshly-found updates, de-duplicated by manga+chapter, capped. */
 function mergeFeed(found: LibraryUpdate[]): void {
   const seen = new Set(feed.map(detKey));
@@ -145,7 +166,12 @@ function mergeFeed(found: LibraryUpdate[]): void {
  * unless `force` (manual pull-to-refresh).
  */
 export async function checkLibraryUpdates(engine: Engine, opts?: { force?: boolean }): Promise<void> {
-  if (checking) return;
+  if (checking) {
+    // Don't silently swallow a manual pull-to-refresh that races an automatic
+    // scan — run it again once the current scan finishes.
+    if (opts?.force) pendingForce = true;
+    return;
+  }
   if (!opts?.force && meta.lastChecked && Date.now() - meta.lastChecked < CHECK_TTL_MS) return;
 
   const favs = getFavorites();
@@ -160,6 +186,7 @@ export async function checkLibraryUpdates(engine: Engine, opts?: { force?: boole
 
   const found: LibraryUpdate[] = [];
   let snapChanged = false;
+  let anySuccess = false;
   let cursor = 0;
 
   const worker = async (): Promise<void> => {
@@ -169,6 +196,7 @@ export async function checkLibraryUpdates(engine: Engine, opts?: { force?: boole
       let chapters: ChapterDto[] | null = null;
       try {
         chapters = await engine.getChapters(f.sourceId, f.url);
+        anySuccess = true;
       } catch {
         chapters = null; // source down / not installed
       }
@@ -206,7 +234,7 @@ export async function checkLibraryUpdates(engine: Engine, opts?: { force?: boole
       if (!hasChapters) continue;
 
       const prev = snapshots[key];
-      snapshots[key] = snapshotUrls(chapters!);
+      snapshots[key] = mergedSnapshot(prev, chapters!);
       snapChanged = true;
 
       // First time we've seen this manga and it wasn't a manual add: baseline
@@ -240,11 +268,19 @@ export async function checkLibraryUpdates(engine: Engine, opts?: { force?: boole
       feedStore.save(feed);
     }
     if (snapChanged) snapStore.save(snapshots);
-    meta = { ...meta, lastChecked: Date.now() };
-    metaStore.save(meta);
+    // A scan where every source failed (offline, all blocked) did no useful
+    // work; don't throttle the next attempt for 6 hours on its account.
+    if (anySuccess) {
+      meta = { ...meta, lastChecked: Date.now() };
+      metaStore.save(meta);
+    }
   } finally {
     checking = false;
     emit();
+    if (pendingForce) {
+      pendingForce = false;
+      void checkLibraryUpdates(engine, { force: true });
+    }
   }
 }
 
