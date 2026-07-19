@@ -523,6 +523,13 @@ class EngineFacade(context: Context) {
             }
         }
         val height = padding + titleHeight + rowHeights.sum() + rowGap * maxOf(0, export.rows.size - 1) + padding
+        val pixelCount = width.toLong() * height.toLong()
+        if (pixelCount > MAX_EXPORT_PIXELS) {
+            throw EngineException(
+                "too_large",
+                "This tier list is too large to export as one image. Remove some titles or rows and try again.",
+            )
+        }
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
@@ -622,7 +629,9 @@ class EngineFacade(context: Context) {
 
     private fun drawCover(canvas: Canvas, paint: Paint, uri: String?, x: Int, y: Int, width: Int, height: Int) {
         val file = uri?.let { Uri.parse(it).path }?.let { File(it) }
-        val bitmap = file?.takeIf { it.exists() && it.length() > 0L }?.let { BitmapFactory.decodeFile(it.absolutePath) }
+        val bitmap = file
+            ?.takeIf { it.exists() && it.length() > 0L }
+            ?.let { decodeSampledBitmap(it, width, height) }
         if (bitmap != null) {
             canvas.drawBitmap(bitmap, null, Rect(x, y, x + width, y + height), paint)
             bitmap.recycle()
@@ -630,6 +639,24 @@ class EngineFacade(context: Context) {
             paint.color = Color.rgb(38, 38, 43)
             canvas.drawRoundRect(RectF(x.toFloat(), y.toFloat(), (x + width).toFloat(), (y + height).toFloat()), 18f, 18f, paint)
         }
+    }
+
+    private fun decodeSampledBitmap(file: File, targetWidth: Int, targetHeight: Int): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+
+        var sample = 1
+        while (
+            bounds.outWidth / (sample * 2) >= targetWidth &&
+            bounds.outHeight / (sample * 2) >= targetHeight
+        ) {
+            sample *= 2
+        }
+        return BitmapFactory.decodeFile(
+            file.absolutePath,
+            BitmapFactory.Options().apply { inSampleSize = sample },
+        )
     }
 
     private fun parseColor(color: String): Int {
@@ -867,6 +894,7 @@ class EngineFacade(context: Context) {
     companion object {
         private const val READER_IMAGE_TAG = "KagariReaderImage"
         private const val MAX_TILE_HEIGHT = 4096
+        private const val MAX_EXPORT_PIXELS = 12_000_000L
     }
 }
 

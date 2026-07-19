@@ -387,7 +387,6 @@ function SourceBrowse({
   onFetchingChange?: (v: boolean) => void;
 }) {
   const theme = useTheme();
-  const navigation = useNavigation<Nav>();
   const engine = getEngine();
   const { width } = useWindowDimensions();
 

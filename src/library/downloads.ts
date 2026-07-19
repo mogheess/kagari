@@ -160,9 +160,18 @@ function getSnapshot(): DownloadEntry[] {
   return entries;
 }
 
+function getHydratedSnapshot(): boolean {
+  return hydrated;
+}
+
 /** Reactive list of all downloads (newest activity first). */
 export function useDownloads(): DownloadEntry[] {
   return useSyncExternalStore(subscribe, getSnapshot);
+}
+
+/** True once the persisted queue has been merged into memory. */
+export function useDownloadsHydrated(): boolean {
+  return useSyncExternalStore(subscribe, getHydratedSnapshot);
 }
 
 /** Reactive single-chapter download state for a chapter row. */
