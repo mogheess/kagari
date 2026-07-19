@@ -23,6 +23,7 @@ let updates: ExtensionUpdate[] = [];
 let lastChecked = 0;
 let checking = false;
 let pendingForce = false;
+let pendingForceWaiters: Array<{ resolve: () => void; reject: (error: unknown) => void }> = [];
 const listeners = new Set<() => void>();
 
 function emit(): void {
@@ -84,7 +85,12 @@ export async function checkExtensionUpdates(
   if (checking) {
     // Don't swallow a manual "Check" that races the automatic one — rerun it
     // once the in-flight check finishes.
-    if (opts?.force) pendingForce = true;
+    if (opts?.force) {
+      pendingForce = true;
+      return new Promise<void>((resolve, reject) => {
+        pendingForceWaiters.push({ resolve, reject });
+      });
+    }
     return;
   }
   if (!opts?.force && lastChecked && Date.now() - lastChecked < CHECK_TTL_MS) return;
@@ -101,7 +107,14 @@ export async function checkExtensionUpdates(
     checking = false;
     if (pendingForce) {
       pendingForce = false;
-      void checkExtensionUpdates(engine, { force: true });
+      const waiters = pendingForceWaiters;
+      pendingForceWaiters = [];
+      try {
+        await checkExtensionUpdates(engine, { force: true });
+        for (const waiter of waiters) waiter.resolve();
+      } catch (error) {
+        for (const waiter of waiters) waiter.reject(error);
+      }
     }
   }
 }

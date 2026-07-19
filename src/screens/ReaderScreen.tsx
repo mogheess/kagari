@@ -30,7 +30,12 @@ import { useAsync } from '../hooks/useAsync';
 import { getEngine } from '../engine';
 import { recordProgress, recordRead } from '../library/history';
 import { recordChapterProgress } from '../library/chapterProgress';
-import { useDownloadEntry, enqueueDownload, type DownloadStatus } from '../library/downloads';
+import {
+  useDownloadEntry,
+  useDownloadsHydrated,
+  enqueueDownload,
+  type DownloadStatus,
+} from '../library/downloads';
 import { Icon, type IconName } from '../components/Icon';
 import { PageSlider } from '../components/PageSlider';
 import { useTheme } from '../theme/ThemeProvider';
@@ -134,17 +139,23 @@ export function ReaderScreen() {
   // download finishing mid-read must not swap the page source under the user
   // (refetching every page and trashing scroll); the next open picks it up.
   const downloadEntry = useDownloadEntry(params.sourceId, params.chapter.url);
-  const [offlinePageCount] = useState(() =>
-    downloadEntry?.status === 'done' ? downloadEntry.pageCount : 0,
-  );
-  const offline = offlinePageCount > 0;
+  const downloadsHydrated = useDownloadsHydrated();
+  const [offlinePageCount, setOfflinePageCount] = useState<number | null>(null);
+  useEffect(() => {
+    if (!downloadsHydrated || offlinePageCount !== null) return;
+    setOfflinePageCount(downloadEntry?.status === 'done' ? downloadEntry.pageCount : 0);
+  }, [downloadEntry, downloadsHydrated, offlinePageCount]);
+  const downloadStateReady = offlinePageCount !== null;
+  const offline = (offlinePageCount ?? 0) > 0;
 
   const { data: pages, loading, error } = useAsync<PageDto[]>(
     () =>
-      offline
-        ? Promise.resolve(Array.from({ length: offlinePageCount }, (_, i) => ({ index: i })))
+      !downloadStateReady
+        ? Promise.resolve([])
+        : offline
+        ? Promise.resolve(Array.from({ length: offlinePageCount ?? 0 }, (_, i) => ({ index: i })))
         : engine.getPages(params.sourceId, params.chapter.url),
-    [params.chapter.url, offline, offlinePageCount],
+    [params.chapter.url, downloadStateReady, offline, offlinePageCount],
   );
 
   const total = pages?.length ?? 0;
@@ -514,7 +525,7 @@ export function ReaderScreen() {
     <View style={{ flex: 1, backgroundColor: '#000' }}>
       <StatusBar hidden={!chrome} animated />
 
-      {loading ? (
+      {loading || !downloadStateReady ? (
         <View style={styles.center}>
           <ActivityIndicator color="#fff" />
         </View>

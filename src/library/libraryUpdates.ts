@@ -63,6 +63,7 @@ let snapshots: Record<string, string[]> = {};
 let meta: UpdatesMeta = { lastChecked: 0, lastSeen: 0 };
 let checking = false;
 let pendingForce = false;
+let pendingForceWaiters: Array<{ resolve: () => void; reject: (error: unknown) => void }> = [];
 const listeners = new Set<() => void>();
 
 const keyOf = (sourceId: string, url: string) => `${sourceId}\u0000${url}`;
@@ -169,7 +170,12 @@ export async function checkLibraryUpdates(engine: Engine, opts?: { force?: boole
   if (checking) {
     // Don't silently swallow a manual pull-to-refresh that races an automatic
     // scan — run it again once the current scan finishes.
-    if (opts?.force) pendingForce = true;
+    if (opts?.force) {
+      pendingForce = true;
+      return new Promise<void>((resolve, reject) => {
+        pendingForceWaiters.push({ resolve, reject });
+      });
+    }
     return;
   }
   if (!opts?.force && meta.lastChecked && Date.now() - meta.lastChecked < CHECK_TTL_MS) return;
@@ -279,7 +285,14 @@ export async function checkLibraryUpdates(engine: Engine, opts?: { force?: boole
     emit();
     if (pendingForce) {
       pendingForce = false;
-      void checkLibraryUpdates(engine, { force: true });
+      const waiters = pendingForceWaiters;
+      pendingForceWaiters = [];
+      try {
+        await checkLibraryUpdates(engine, { force: true });
+        for (const waiter of waiters) waiter.resolve();
+      } catch (error) {
+        for (const waiter of waiters) waiter.reject(error);
+      }
     }
   }
 }
