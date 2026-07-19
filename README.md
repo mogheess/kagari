@@ -8,6 +8,15 @@ or dark.
 
 ---
 
+## Preview
+
+<p align="center">
+  <img src="docs/screenshots/home.png" alt="Kagari home" width="22%" />
+  <img src="docs/screenshots/library.png" alt="Kagari library" width="22%" />
+  <img src="docs/screenshots/discover.png" alt="Discover manga from an installed source" width="22%" />
+  <img src="docs/screenshots/details.png" alt="Manga details and chapters" width="22%" />
+</p>
+
 ## What it is
 
 Kagari is a **reader, not a content library**. It ships with **no manga and no
@@ -27,6 +36,8 @@ kind of community sources, just wrapped in a new, more polished interface.
   search across your favorite sources at once.
 - **Library & categories.** Follow titles, then organize them into categories you
   create, rename, and filter.
+- **Tier lists.** Rank titles from your library in shareable tier lists and
+  export the finished board as an image.
 - **Bring your library with you.** Import a Mihon/Tachiyomi `.tachibk` backup
   (your follows, categories, and history), and **migrate** a title from one source
   to another if a source stops working — your reading history comes along.
