@@ -12,6 +12,19 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.5',
+    date: '2026-07-19',
+    highlights: [
+      'Create visual tier lists from your library, customize their rows, and export them as shareable images.',
+      'Discover now shows live search feedback and offers Retry or Open in WebView when a source is blocked.',
+      'Reader progress is more accurate at the end of long-strip chapters, with smoother pinch zoom and steadier tab switching.',
+      'Downloaded chapters reliably open offline after a cold start, without racing local storage hydration.',
+      'Long chapters and large cover grids use less memory by keeping a tighter render window.',
+      'Manual update checks now stay active until a queued scan really finishes.',
+      'Hardened cover loading, native module cleanup, and tier-list export memory limits to prevent stale images and avoidable crashes.',
+    ],
+  },
+  {
     version: '0.4',
     date: '2026-06-27',
     highlights: [
