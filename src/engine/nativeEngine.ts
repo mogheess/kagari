@@ -55,6 +55,7 @@ interface ManhwaEngineNative {
   saveImageToGallery(uri: string): Promise<string>;
   shareImage(uri: string): Promise<void>;
   openInWebView(url: string): Promise<void>;
+  setKeepScreenOn(enabled: boolean): Promise<void>;
 }
 
 const Native = NativeModules.ManhwaEngine as ManhwaEngineNative | undefined;
@@ -200,6 +201,11 @@ export function createNativeEngine(): Engine | null {
         throw new Error('Sharing images is unavailable on this build.');
       }
       await Native.shareImage(uri);
+    },
+    async setKeepScreenOn(enabled: boolean) {
+      // Older builds lack the method; keeping the screen on is optional.
+      if (typeof Native.setKeepScreenOn !== 'function') return;
+      await Native.setKeepScreenOn(enabled);
     },
     async openInWebView(url: string) {
       if (typeof Native.openInWebView !== 'function') {

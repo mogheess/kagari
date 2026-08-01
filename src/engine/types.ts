@@ -303,6 +303,10 @@ export interface Engine {
   /** Opens the system share sheet for a local image (file:// uri). */
   shareImage(uri: string): Promise<void>;
 
+  // device
+  /** Holds the screen awake (reader). Best-effort; no-ops without an Activity. */
+  setKeepScreenOn(enabled: boolean): Promise<void>;
+
   // web view
   /**
    * Opens a URL in an in-app WebView that shares the engine's cookie jar, so the

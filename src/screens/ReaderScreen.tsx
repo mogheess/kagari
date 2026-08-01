@@ -51,6 +51,8 @@ import {
   setReaderMode,
   isHorizontal,
   isPaged,
+  useReaderToggles,
+  setReaderToggle,
   type ReaderMode,
 } from '../reader/readerSettings';
 import type { RootStackParamList } from '../navigation/types';
@@ -150,6 +152,18 @@ export function ReaderScreen() {
   }, [scale, savedScale, tx, ty, savedTx, savedTy]);
 
   const downloadsHydrated = useDownloadsHydrated();
+  const toggles = useReaderToggles();
+
+  // Hold the screen awake while reading. Always cleared on unmount, including
+  // when the setting is turned off mid-chapter, so the flag can't leak into the
+  // rest of the app.
+  useEffect(() => {
+    if (!toggles.keepScreenOn) return;
+    void engine.setKeepScreenOn(true);
+    return () => {
+      void engine.setKeepScreenOn(false);
+    };
+  }, [toggles.keepScreenOn, engine]);
 
   // Reading order for the whole series, so the window knows what sits either
   // side of the chapter being read.
@@ -630,7 +644,7 @@ export function ReaderScreen() {
       Gesture.Exclusive(doubleTap, singleTap, longPress),
     );
   }, [
-    zoomed, cx, cy, width, height, toggleChrome, retryPage,
+    zoomed, cx, cy, width, height, toggleChrome, retryCurrentPage,
     scale, savedScale, tx, ty, savedTx, savedTy, originX, originY, baseX, baseY,
   ]);
 
@@ -786,6 +800,8 @@ export function ReaderScreen() {
       <ReaderSettingsSheet
         visible={settingsOpen}
         mode={mode}
+        keepScreenOn={toggles.keepScreenOn}
+        onToggleKeepScreenOn={() => setReaderToggle('keepScreenOn', !toggles.keepScreenOn)}
         onSelect={m => {
           setReaderMode(m, params.sourceId, params.mangaUrl);
           setSettingsOpen(false);
@@ -1081,11 +1097,15 @@ function sortTiles(image: ImageFileDto): ImageTileDto[] {
 function ReaderSettingsSheet({
   visible,
   mode,
+  keepScreenOn,
+  onToggleKeepScreenOn,
   onSelect,
   onClose,
 }: {
   visible: boolean;
   mode: ReaderMode;
+  keepScreenOn: boolean;
+  onToggleKeepScreenOn: () => void;
   onSelect: (m: ReaderMode) => void;
   onClose: () => void;
 }) {
@@ -1128,6 +1148,50 @@ function ReaderSettingsSheet({
             </Pressable>
           );
         })}
+
+        <Text
+          style={[
+            theme.typography.heading,
+            { color: theme.colors.text, marginTop: 18, marginBottom: 6 },
+          ]}
+        >
+          Behaviour
+        </Text>
+        <Pressable
+          onPress={onToggleKeepScreenOn}
+          style={({ pressed }) => [
+            styles.modeRow,
+            { backgroundColor: pressed ? theme.colors.surface : 'transparent' },
+          ]}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
+              Keep screen on
+            </Text>
+            <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginTop: 2 }}>
+              Stop the display sleeping while the reader is open
+            </Text>
+          </View>
+          <View
+            style={[
+              styles.toggle,
+              {
+                backgroundColor: keepScreenOn ? theme.colors.accent : theme.colors.surface,
+                borderColor: keepScreenOn ? theme.colors.accent : theme.colors.border,
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.toggleKnob,
+                {
+                  backgroundColor: keepScreenOn ? theme.colors.onAccent : theme.colors.textFaint,
+                  alignSelf: keepScreenOn ? 'flex-end' : 'flex-start',
+                },
+              ]}
+            />
+          </View>
+        </Pressable>
       </View>
     </Modal>
   );
@@ -1243,6 +1307,19 @@ const styles = StyleSheet.create({
   zoomLayer: {
     flex: 1,
     overflow: 'hidden',
+  },
+  toggle: {
+    width: 44,
+    height: 26,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 3,
+    justifyContent: 'center',
+  },
+  toggleKnob: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
   },
   transition: {
     alignItems: 'center',

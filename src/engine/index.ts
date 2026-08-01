@@ -53,6 +53,7 @@ function createUnavailableEngine(): Engine {
     renderTierListImage: reject,
     saveImageToGallery: reject,
     shareImage: reject,
+    setKeepScreenOn: () => Promise.resolve(),
     openInWebView: reject,
   };
 }

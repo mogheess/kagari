@@ -2,6 +2,7 @@ package com.manhwa.engine.bridge
 
 import android.app.Activity
 import android.content.Intent
+import android.view.WindowManager
 import com.facebook.react.bridge.ActivityEventListener
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -61,6 +62,28 @@ class ManhwaEngineModule(
     fun reload(promise: Promise) = resolve(promise) {
         facade.reload()
         ""
+    }
+
+    /**
+     * Holds the screen awake while reading. The flag lives on the window, so it
+     * must be set on the UI thread and cleared when the reader closes —
+     * otherwise the screen stays on for the rest of the session.
+     */
+    @ReactMethod
+    fun setKeepScreenOn(enabled: Boolean, promise: Promise) {
+        val activity: Activity? = reactContext.currentActivity
+        if (activity == null) {
+            promise.resolve(null)
+            return
+        }
+        activity.runOnUiThread {
+            if (enabled) {
+                activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            } else {
+                activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+            promise.resolve(null)
+        }
     }
 
     @ReactMethod
