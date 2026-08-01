@@ -25,6 +25,7 @@ import Animated, {
   cancelAnimation,
 } from 'react-native-reanimated';
 import { getEngine } from '../engine';
+import { loadPages } from '../engine/pageCache';
 import { recordProgress, recordRead } from '../library/history';
 import { recordChapterProgress, setChaptersRead } from '../library/chapterProgress';
 import {
@@ -199,7 +200,7 @@ export function ReaderScreen() {
         const pages =
           offlineCount > 0
             ? Array.from({ length: offlineCount }, (_, i) => ({ index: i }))
-            : await engine.getPages(params.sourceId, url);
+            : await loadPages(params.sourceId, url);
         setLoadedChapters(prev =>
           insertChapter(prev, { chapter, pages, offline: offlineCount > 0 }, orderedChapters),
         );

@@ -7,6 +7,7 @@
 import { useSyncExternalStore } from 'react';
 import { makePersistence } from '../store/persist';
 import { getEngine } from '../engine';
+import { loadPages } from '../engine/pageCache';
 import type { MangaDto, ChapterDto } from '../engine/types';
 
 export type DownloadStatus = 'queued' | 'downloading' | 'done' | 'error';
@@ -85,7 +86,7 @@ async function pump(): Promise<void> {
   patch(sourceId, chapterUrl, { status: 'downloading', downloaded: 0, error: undefined });
   try {
     const engine = getEngine();
-    const pages = await engine.getPages(sourceId, chapterUrl);
+    const pages = await loadPages(sourceId, chapterUrl);
     if (!entries.some(e => sameChapter(e, sourceId, chapterUrl))) return; // cancelled
     if (pages.length === 0) {
       // A "done" download with zero pages is useless and can't be re-queued
