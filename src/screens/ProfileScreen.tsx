@@ -9,6 +9,7 @@ import { useAppUpdate, checkForAppUpdate } from '../app/appUpdate';
 import { useExtensionUpdates, checkExtensionUpdates } from '../sources/extensionUpdates';
 import { getEngine } from '../engine';
 import { APP_VERSION } from '../app/version';
+import { DISCORD_INVITE_URL, hasCommunityLinks } from '../app/community';
 import { pickAndImportMihonBackup } from '../library/mihonImport';
 import type { RootStackParamList } from '../navigation/types';
 
@@ -95,9 +96,33 @@ export function ProfileScreen() {
         </Text>
         <MihonImportRow />
 
+        {/* Only rendered once an invite is configured in `app/community.ts`, so
+            an unset link never ships as a dead row. */}
+        {hasCommunityLinks() ? (
+          <>
+            <Text style={[styles.sectionLabel, { color: theme.colors.textFaint, marginTop: 28 }]}>
+              COMMUNITY
+            </Text>
+            {DISCORD_INVITE_URL ? (
+              <Row
+                icon="globe"
+                label="Discord"
+                hint="Join the server"
+                onPress={() => Linking.openURL(DISCORD_INVITE_URL)}
+              />
+            ) : null}
+          </>
+        ) : null}
+
         <Text style={[styles.sectionLabel, { color: theme.colors.textFaint, marginTop: 28 }]}>
           ABOUT
         </Text>
+        <Row
+          icon="book"
+          label="What's new"
+          hint={`v${APP_VERSION}`}
+          onPress={() => navigation.navigate('Changelog')}
+        />
         {appUpdate.available && appUpdate.latest ? (
           <View style={[styles.updateCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.accent }]}>
             <View style={[styles.updateIcon, { backgroundColor: theme.colors.elevated }]}>
