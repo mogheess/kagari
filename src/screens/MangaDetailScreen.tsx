@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme } from '../theme/ThemeProvider';
+import { useCoverAccent, useTitleTheme } from '../theme/coverAccent';
 import { useAsync } from '../hooks/useAsync';
 import { getEngine } from '../engine';
 import { peekManga, loadMangaDetails, loadChapters, invalidateManga } from '../engine/mangaCache';
@@ -104,7 +105,8 @@ function formatProgress(p: ChapterProgress): string {
 }
 
 export function MangaDetailScreen() {
-  const theme = useTheme();
+  // This screen is about one title, so its chrome takes colour from that cover.
+  const theme = useTitleTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const { params } = useRoute<DetailRoute>();
@@ -190,6 +192,10 @@ export function MangaDetailScreen() {
       author: details.author ?? params.preview.author,
     };
   }, [details, params.preview]);
+  // Publish this cover's accent so the screen's chrome (and the reader opened
+  // from it) picks up the artwork's colour.
+  useCoverAccent(params.sourceId, manga?.thumbnailUrl, theme.scheme === 'dark');
+
   const tint = seededColor(manga?.thumbnailUrl ?? manga?.title ?? 'x', 0.5, 0.32);
   const backdropHeight = Math.round(width * 0.78);
   const progressMap = useChapterProgress();
@@ -1246,7 +1252,8 @@ function DuplicateAddSheet({
         </Text>
         <ScrollView style={styles.pickList} keyboardShouldPersistTaps="handled">
           {list.map(c => {
-            const tint = seededColor(c.thumbnailUrl ?? c.title, 0.5, 0.3);
+
+  const tint = seededColor(c.thumbnailUrl ?? c.title, 0.5, 0.3);
             return (
               <Pressable
                 key={`${c.sourceId}\u0000${c.url}`}
@@ -1332,7 +1339,8 @@ function MigrateResultPickSheet({
 
         <ScrollView style={styles.pickList} keyboardShouldPersistTaps="handled">
           {results.map(m => {
-            const tint = seededColor(m.thumbnailUrl ?? m.title, 0.5, 0.3);
+
+  const tint = seededColor(m.thumbnailUrl ?? m.title, 0.5, 0.3);
             return (
               <Pressable
                 key={m.url}

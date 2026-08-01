@@ -193,6 +193,32 @@ class EngineFacade(context: Context) {
         }
     }
 
+    /**
+     * Accent colour drawn out of a cover, for chrome that belongs to one title.
+     * Fetches the cover through the source first so gated CDNs work.
+     */
+    suspend fun coverAccent(sourceId: String, coverUrl: String, forDark: Boolean): String {
+        // Cache-only: never download just to pick a colour. A cover the user is
+        // looking at is already on disk from rendering it, and making the accent
+        // wait on a network fetch is what made it arrive seconds late. A miss
+        // returns nothing; the next visit finds the file and gets it instantly.
+        val local = cachedCoverPath(coverUrl) ?: return ""
+        return CoverColor.extract(local, forDark).orEmpty()
+    }
+
+    /** Path of an already-downloaded cover, or null. Never fetches. */
+    private fun cachedCoverPath(url: String): String? {
+        if (url.startsWith("file://")) return url
+        if (!url.startsWith("http")) return null
+        val cacheDir = File(appContext.cacheDir, "covers")
+        if (!cacheDir.isDirectory) return null
+        val key = hashKey(url)
+        val hit = cacheDir.listFiles()?.firstOrNull {
+            it.name.startsWith("$key.") && !it.name.endsWith(".tmp") && it.length() > 0L
+        } ?: return null
+        return Uri.fromFile(hit).toString()
+    }
+
     /** UA shared with the Cloudflare WebView solver so cleared cookies stay valid. */
     fun userAgent(): String = network.defaultUserAgentProvider()
 

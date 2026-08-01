@@ -100,6 +100,12 @@ class ManhwaEngineModule(
     }
 
     @ReactMethod
+    fun coverAccent(sourceId: String, coverUrl: String, forDark: Boolean, promise: Promise) =
+        resolve(promise) {
+            facade.coverAccent(sourceId, coverUrl, forDark)
+        }
+
+    @ReactMethod
     fun listExtensions(promise: Promise) = resolve(promise) {
         json.encodeToString(facade.listExtensions())
     }

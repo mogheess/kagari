@@ -22,6 +22,7 @@ export type RootStackParamList = {
      */
     startAtEnd?: boolean;
   };
+  Appearance: undefined;
   Changelog: undefined;
   CustomizeHome: undefined;
   Extensions: undefined;

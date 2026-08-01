@@ -3,13 +3,14 @@ import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Linki
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useTheme, useThemePreference, type ThemePreference } from '../theme/ThemeProvider';
+import { useTheme, useAppearance } from '../theme/ThemeProvider';
 import { Icon, type IconName } from '../components/Icon';
 import { useAppUpdate, checkForAppUpdate } from '../app/appUpdate';
 import { useExtensionUpdates, checkExtensionUpdates } from '../sources/extensionUpdates';
 import { getEngine } from '../engine';
 import { APP_VERSION } from '../app/version';
 import { DISCORD_INVITE_URL, hasCommunityLinks } from '../app/community';
+import { themeById } from '../theme/themes';
 import { pickAndImportMihonBackup } from '../library/mihonImport';
 import { exportMihonBackup } from '../library/mihonExport';
 import type { RootStackParamList } from '../navigation/types';
@@ -21,15 +22,10 @@ export function ProfileScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
-  const { preference, setPreference } = useThemePreference();
+  const { appearance } = useAppearance();
   const appUpdate = useAppUpdate();
   const extUpdates = useExtensionUpdates();
 
-  const modes: { key: ThemePreference; label: string; icon: IconName }[] = [
-    { key: 'system', label: 'Auto', icon: 'settings' },
-    { key: 'light', label: 'Light', icon: 'sun' },
-    { key: 'dark', label: 'Dark', icon: 'moon' },
-  ];
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
@@ -46,36 +42,12 @@ export function ProfileScreen() {
         </Text>
 
         <Text style={[styles.sectionLabel, { color: theme.colors.textFaint }]}>APPEARANCE</Text>
-        <View style={[styles.segment, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-          {modes.map(m => {
-            const active = m.key === preference;
-            return (
-              <Pressable
-                key={m.key}
-                onPress={() => setPreference(m.key)}
-                style={[
-                  styles.segmentItem,
-                  active && { backgroundColor: theme.colors.accent },
-                ]}
-              >
-                <Icon
-                  name={m.icon}
-                  size={16}
-                  color={active ? theme.colors.onAccent : theme.colors.textMuted}
-                />
-                <Text
-                  style={{
-                    color: active ? theme.colors.onAccent : theme.colors.textMuted,
-                    fontWeight: '600',
-                    fontSize: 13,
-                  }}
-                >
-                  {m.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        <Row
+          icon="sun"
+          label="Theme"
+          hint={themeById(appearance.themeId).name}
+          onPress={() => navigation.navigate('Appearance')}
+        />
 
         <Text style={[styles.sectionLabel, { color: theme.colors.textFaint, marginTop: 28 }]}>
           SOURCES
