@@ -180,6 +180,7 @@ function Row({
       onPress={onPress}
       style={({ pressed }) => [
         styles.row,
+        theme.elevation.card,
         {
           backgroundColor: pressed ? theme.colors.elevated : theme.colors.surface,
           borderColor: theme.colors.border,
@@ -232,6 +233,7 @@ function BackupExportRow() {
       disabled={working}
       style={({ pressed }) => [
         styles.row,
+        theme.elevation.card,
         {
           backgroundColor: pressed ? theme.colors.elevated : theme.colors.surface,
           borderColor: theme.colors.border,

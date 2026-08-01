@@ -4,6 +4,7 @@ import { makePersistence } from '../store/persist';
 import {
   spacing,
   radius,
+  elevation,
   typography,
   motion,
   type ColorScheme,
@@ -30,8 +31,6 @@ const prefStore = makePersistence<ThemePreference>('@kagari/theme-preference/v1'
 export interface Appearance {
   themeId: ThemeId;
   amoled: boolean;
-  /** Tint chrome with a colour pulled from the cover being viewed. */
-  coverAccent: boolean;
   density: Density;
   corners: Corners;
 }
@@ -39,7 +38,6 @@ export interface Appearance {
 const DEFAULT_APPEARANCE: Appearance = {
   themeId: DEFAULT_THEME_ID,
   amoled: false,
-  coverAccent: true,
   density: 'comfortable',
   corners: 'soft',
 };
@@ -51,6 +49,7 @@ export interface Theme {
   colors: Palette;
   spacing: typeof spacing;
   radius: typeof radius;
+  elevation: typeof elevation;
   typography: typeof typography;
   motion: typeof motion;
 }
@@ -112,6 +111,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       colors,
       spacing: scaledSpacing,
       radius: scaledRadius,
+      elevation,
       typography,
       motion,
     };
@@ -130,10 +130,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  // Deliberately excludes anything that changes during navigation: every
-  // `useTheme()` caller re-renders when this value does, and every tab stays
-  // mounted. The per-title cover accent lives in `coverAccent.ts` for exactly
-  // that reason.
+  // Keep out anything that changes during navigation: every `useTheme()` caller
+  // re-renders when this value does, and every tab stays mounted.
   const value = useMemo(
     () => ({ theme, preference, setPreference: setPref, appearance, setAppearance }),
     [theme, preference, setPref, appearance, setAppearance],

@@ -46,7 +46,6 @@ import {
 import { Icon, type IconName } from '../components/Icon';
 import { PageSlider } from '../components/PageSlider';
 import { useTheme } from '../theme/ThemeProvider';
-import { useCoverAccent, useTitleTheme } from '../theme/coverAccent';
 import {
   READER_MODES,
   useReaderMode,
@@ -96,7 +95,7 @@ export function ReaderScreen() {
   const { params } = useRoute<ReaderRoute>();
   const { width, height } = useWindowDimensions();
   const engine = getEngine();
-  const theme = useTitleTheme();
+  const theme = useTheme();
   const listRef = useRef<FlatList>(null);
 
   // Open immersive: the page fills the screen and a single tap reveals the
@@ -156,9 +155,6 @@ export function ReaderScreen() {
   const downloadsHydrated = useDownloadsHydrated();
   const toggles = useReaderToggles();
 
-  // Keep the title's cover accent applied while reading, so the chrome matches
-  // the series rather than snapping back to the app default.
-  useCoverAccent(params.sourceId, params.mangaThumbnailUrl, true);
 
   // Hold the screen awake while reading. Always cleared on unmount, including
   // when the setting is turned off mid-chapter, so the flag can't leak into the

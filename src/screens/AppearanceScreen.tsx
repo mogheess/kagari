@@ -1,10 +1,10 @@
 /**
  * Appearance: look, cover colour, layout, pure black.
  *
- * Deliberately not a hue picker. The app's colour is meant to come from cover
- * artwork, so the choices here are the ones that don't fight that: the surface
- * quality (neutral vs warm), whether covers drive the accent, and layout
- * density — none of which can make anything unreadable.
+ * Deliberately not a hue picker: the palette carries text-on-surface contrast,
+ * and exposing those directly is how apps end up unreadable. The choices here
+ * are the ones that can't — surface quality (neutral vs warm), layout density,
+ * and corner style.
  *
  * Each look's card is drawn from its own palette, so adding one in
  * `theme/themes.ts` shows up here correctly with no changes to this screen.
@@ -125,17 +125,6 @@ export function AppearanceScreen() {
         </View>
 
         <Text style={[styles.sectionLabel, { color: theme.colors.textFaint, marginTop: 28 }]}>
-          COLOUR
-        </Text>
-        <Toggle
-          icon="image"
-          label="Colour from cover"
-          hint="Tint a title's screens with a colour taken from its artwork"
-          value={appearance.coverAccent}
-          onToggle={() => setAppearance({ coverAccent: !appearance.coverAccent })}
-        />
-
-        <Text style={[styles.sectionLabel, { color: theme.colors.textFaint, marginTop: 28 }]}>
           LAYOUT
         </Text>
         <Choice
@@ -200,6 +189,7 @@ function Toggle({
       disabled={disabled}
       style={({ pressed }) => [
         styles.row,
+        theme.elevation.card,
         {
           backgroundColor: pressed ? theme.colors.elevated : theme.colors.surface,
           borderColor: theme.colors.border,

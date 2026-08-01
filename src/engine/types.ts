@@ -303,9 +303,6 @@ export interface Engine {
   /** Opens the system share sheet for a local image (file:// uri). */
   shareImage(uri: string): Promise<void>;
 
-  /** Accent colour pulled from a cover; '' when the art has no usable colour. */
-  coverAccent(sourceId: string, coverUrl: string, forDark: boolean): Promise<string>;
-
   // backup
   /** Writes a Mihon-compatible `.tachibk`; returns a shareable content URI. */
   exportMihonBackup(request: unknown, fileName: string): Promise<{

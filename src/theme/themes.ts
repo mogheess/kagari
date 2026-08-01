@@ -6,9 +6,7 @@
  * row of hue-shifted chromes would work against the thing that gives the app
  * its character. What varies here is the *quality* of the surface — neutral vs
  * warm, and the contrast curve — which is a real choice; hue isn't.
- *
- * Per-title colour is handled separately by `coverAccent.ts`, which pulls an
- * accent out of the cover being viewed.
+
  */
 import type { ColorScheme, Palette } from './tokens';
 import { palettes as inkPalettes } from './tokens';

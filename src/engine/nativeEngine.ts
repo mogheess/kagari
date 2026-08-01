@@ -56,7 +56,6 @@ interface ManhwaEngineNative {
   shareImage(uri: string): Promise<void>;
   openInWebView(url: string): Promise<void>;
   setKeepScreenOn(enabled: boolean): Promise<void>;
-  coverAccent(sourceId: string, coverUrl: string, forDark: boolean): Promise<string>;
   exportMihonBackup(requestJson: string, fileName: string): Promise<string>;
   shareBackup(uri: string, fileName: string): Promise<void>;
 }
@@ -204,10 +203,6 @@ export function createNativeEngine(): Engine | null {
         throw new Error('Sharing images is unavailable on this build.');
       }
       await Native.shareImage(uri);
-    },
-    async coverAccent(sourceId: string, coverUrl: string, forDark: boolean) {
-      if (typeof Native.coverAccent !== 'function') return '';
-      return await Native.coverAccent(sourceId, coverUrl, forDark);
     },
     async exportMihonBackup(request: unknown, fileName: string) {
       if (typeof Native.exportMihonBackup !== 'function') {
