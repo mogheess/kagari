@@ -24,6 +24,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       'The back button now steps back through tabs instead of closing the app.',
       'Fixed "next chapter" going backwards on sources that do not number their chapters.',
       'Adult-content labels are accurate again, instead of flagging most of the catalogue.',
+      'New versions now announce themselves: when an update is available you get a prompt on opening the app, with that release\'s notes, once per version rather than every launch.',
       'Browse release notes any time from Settings.',
     ],
   },
