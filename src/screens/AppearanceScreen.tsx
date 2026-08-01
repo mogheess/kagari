@@ -1,5 +1,5 @@
 /**
- * Appearance: look, cover colour, layout, pure black.
+ * Appearance: look, layout, pure black.
  *
  * Deliberately not a hue picker: the palette carries text-on-surface contrast,
  * and exposing those directly is how apps end up unreadable. The choices here

@@ -1,12 +1,10 @@
 /**
  * Theme looks.
  *
- * Two, not a swatch menu. The app's direction is that colour comes from cover
- * artwork and the chrome stays out of the way (see `tokens.ts`), so shipping a
- * row of hue-shifted chromes would work against the thing that gives the app
- * its character. What varies here is the *quality* of the surface — neutral vs
- * warm, and the contrast curve — which is a real choice; hue isn't.
-
+ * Two, not a swatch menu. What varies is the *quality* of the surface — neutral
+ * vs warm, and the contrast curve — which is a real choice. Hue isn't: a row of
+ * tinted chromes reads as generic, and it competes with the cover art the app
+ * is built around.
  */
 import type { ColorScheme, Palette } from './tokens';
 import { palettes as inkPalettes } from './tokens';
@@ -95,27 +93,6 @@ export function applyAmoled(palette: Palette): Palette {
     glass: 'rgba(0,0,0,0.66)',
     scrim: 'rgba(0,0,0,0.55)',
   };
-}
-
-/** Swaps in a different accent, leaving every other token alone. */
-export function applyAccent(palette: Palette, accent: string | null): Palette {
-  if (!accent) return palette;
-  return { ...palette, accent, onAccent: readableOn(accent) };
-}
-
-/**
- * Black or white text for a given fill, by perceived luminance. Needed because
- * a cover-derived accent has no `onAccent` picked for it in advance.
- */
-export function readableOn(hex: string): string {
-  const v = hex.replace('#', '');
-  if (v.length < 6) return '#FFFFFF';
-  const r = parseInt(v.slice(0, 2), 16) / 255;
-  const g = parseInt(v.slice(2, 4), 16) / 255;
-  const b = parseInt(v.slice(4, 6), 16) / 255;
-  const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
-  const luminance = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-  return luminance > 0.45 ? '#141414' : '#FFFFFF';
 }
 
 /**
