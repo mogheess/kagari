@@ -10,6 +10,7 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.manhwa.engine.EngineException
 import com.manhwa.engine.EngineFacade
+import com.manhwa.engine.backup.ExportRequest
 import com.manhwa.engine.dto.PageDto
 import com.manhwa.engine.dto.TierListExportDto
 import com.manhwa.engine.repo.ApkInstaller
@@ -84,6 +85,18 @@ class ManhwaEngineModule(
             }
             promise.resolve(null)
         }
+    }
+
+    @ReactMethod
+    fun exportMihonBackup(requestJson: String, fileName: String, promise: Promise) = resolve(promise) {
+        val request = json.decodeFromString(ExportRequest.serializer(), requestJson)
+        json.encodeToString(facade.exportMihonBackup(request, fileName))
+    }
+
+    @ReactMethod
+    fun shareBackup(uri: String, fileName: String, promise: Promise) = resolve(promise) {
+        facade.shareBackup(uri, fileName)
+        ""
     }
 
     @ReactMethod

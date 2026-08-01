@@ -303,6 +303,17 @@ export interface Engine {
   /** Opens the system share sheet for a local image (file:// uri). */
   shareImage(uri: string): Promise<void>;
 
+  // backup
+  /** Writes a Mihon-compatible `.tachibk`; returns a shareable content URI. */
+  exportMihonBackup(request: unknown, fileName: string): Promise<{
+    uri: string;
+    fileName: string;
+    bytes: number;
+    mangaCount: number;
+  }>;
+  /** Opens the system share sheet for an exported backup. */
+  shareBackup(uri: string, fileName: string): Promise<void>;
+
   // device
   /** Holds the screen awake (reader). Best-effort; no-ops without an Activity. */
   setKeepScreenOn(enabled: boolean): Promise<void>;

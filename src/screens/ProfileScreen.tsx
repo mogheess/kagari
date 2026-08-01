@@ -11,6 +11,7 @@ import { getEngine } from '../engine';
 import { APP_VERSION } from '../app/version';
 import { DISCORD_INVITE_URL, hasCommunityLinks } from '../app/community';
 import { pickAndImportMihonBackup } from '../library/mihonImport';
+import { exportMihonBackup } from '../library/mihonExport';
 import type { RootStackParamList } from '../navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -95,6 +96,7 @@ export function ProfileScreen() {
           DATA
         </Text>
         <MihonImportRow />
+        <BackupExportRow />
 
         {/* Only rendered once an invite is configured in `app/community.ts`, so
             an unset link never ships as a dead row. */}
@@ -224,6 +226,62 @@ function Row({
         <Text style={{ color: theme.colors.textFaint, fontSize: 12 }}>{hint}</Text>
       ) : null}
       <Icon name="chevronRight" size={18} color={theme.colors.textFaint} />
+    </Pressable>
+  );
+}
+
+/**
+ * Writes a Mihon-compatible `.tachibk` and opens the share sheet so the user
+ * picks where it lands. Compatible on purpose: the backup restores into Mihon
+ * as well as Kagari.
+ */
+function BackupExportRow() {
+  const theme = useTheme();
+  const [state, setState] = useState<ImportState>({ status: 'idle' });
+  const working = state.status === 'working';
+
+  const run = async () => {
+    if (working) return;
+    setState({ status: 'working' });
+    try {
+      const result = await exportMihonBackup();
+      setState({
+        status: 'done',
+        message: `${result.mangaCount} title${result.mangaCount === 1 ? '' : 's'} exported`,
+      });
+    } catch (e) {
+      setState({ status: 'error', message: e instanceof Error ? e.message : 'Export failed' });
+    }
+  };
+
+  return (
+    <Pressable
+      onPress={run}
+      disabled={working}
+      style={({ pressed }) => [
+        styles.row,
+        {
+          backgroundColor: pressed ? theme.colors.elevated : theme.colors.surface,
+          borderColor: theme.colors.border,
+        },
+      ]}
+    >
+      <Icon name="share" size={20} color={theme.colors.textMuted} />
+      <View style={{ flex: 1 }}>
+        <Text style={[theme.typography.body, { color: theme.colors.text }]}>Export backup</Text>
+        <Text style={{ color: theme.colors.textFaint, fontSize: 12, marginTop: 2 }}>
+          {state.status === 'done'
+            ? state.message
+            : state.status === 'error'
+              ? state.message
+              : 'Save a .tachibk that Mihon can also restore'}
+        </Text>
+      </View>
+      {working ? (
+        <ActivityIndicator size="small" color={theme.colors.textMuted} />
+      ) : (
+        <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 12.5 }}>Export</Text>
+      )}
     </Pressable>
   );
 }

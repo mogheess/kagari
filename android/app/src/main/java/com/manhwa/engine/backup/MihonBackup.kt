@@ -23,13 +23,13 @@ import java.util.zip.GZIPInputStream
  */
 
 @Serializable
-private class MBackup(
+internal class MBackup(
     @ProtoNumber(1) val backupManga: List<MBackupManga> = emptyList(),
     @ProtoNumber(2) val backupCategories: List<MBackupCategory> = emptyList(),
 )
 
 @Serializable
-private class MBackupManga(
+internal class MBackupManga(
     @ProtoNumber(1) val source: Long = 0,
     @ProtoNumber(2) val url: String = "",
     @ProtoNumber(3) val title: String = "",
@@ -44,7 +44,7 @@ private class MBackupManga(
 )
 
 @Serializable
-private class MBackupChapter(
+internal class MBackupChapter(
     @ProtoNumber(1) val url: String = "",
     @ProtoNumber(2) val name: String = "",
     @ProtoNumber(4) val read: Boolean = false,
@@ -52,13 +52,13 @@ private class MBackupChapter(
 )
 
 @Serializable
-private class MBackupHistory(
+internal class MBackupHistory(
     @ProtoNumber(1) val url: String = "",
     @ProtoNumber(2) val lastRead: Long = 0,
 )
 
 @Serializable
-private class MBackupCategory(
+internal class MBackupCategory(
     @ProtoNumber(1) val name: String = "",
     @ProtoNumber(2) val order: Long = 0,
 )

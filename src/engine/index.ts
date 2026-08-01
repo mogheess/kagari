@@ -53,6 +53,8 @@ function createUnavailableEngine(): Engine {
     renderTierListImage: reject,
     saveImageToGallery: reject,
     shareImage: reject,
+    exportMihonBackup: reject,
+    shareBackup: reject,
     setKeepScreenOn: () => Promise.resolve(),
     openInWebView: reject,
   };

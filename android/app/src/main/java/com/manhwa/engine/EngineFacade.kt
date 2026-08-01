@@ -29,6 +29,9 @@ import com.manhwa.engine.dto.MangasPageDto
 import com.manhwa.engine.dto.PageDto
 import com.manhwa.engine.dto.SourceDto
 import com.manhwa.engine.dto.TierListExportDto
+import com.manhwa.engine.backup.ExportRequest
+import com.manhwa.engine.backup.ExportResult
+import com.manhwa.engine.backup.MihonBackupExporter
 import com.manhwa.engine.backup.MihonBackupImporter
 import com.manhwa.engine.backup.MihonImportResult
 import com.manhwa.engine.loader.ExtensionLoader
@@ -53,12 +56,10 @@ import uy.kohesive.injekt.injectLazy
  * The single entry point the RN bridge talks to. Holds loaded sources and
  * exposes a suspend API that returns DTOs.
  *
- * Browse/detail/page calls currently go through the source's RxJava `fetch*`
- * Observable (bridged to suspend via `awaitSingle`). The vendored source-api
- * exposes only those deprecated Rx methods, not extension-lib 1.6's suspend
- * `getPopularManga`/`getPageList`/etc. Most keiyoushi `ParsedHttpSource`
- * extensions override the request/parse methods, so the Rx path works; sources
- * that override *only* the suspend methods will not. See AGENTS.md "Known gaps".
+ * Browse/detail/page calls go through extension-lib 1.6's suspend API. Lib 1.4
+ * extensions don't implement it, but the vendored `HttpSource` bridges each
+ * suspend call down to the deprecated RxJava `fetch*` method they do implement,
+ * so both generations work from one call path.
  */
 class EngineFacade(context: Context) {
 
@@ -110,6 +111,25 @@ class EngineFacade(context: Context) {
     /** Decodes a Mihon/Tachiyomi `.tachibk` backup into an importable summary. */
     fun importMihonBackup(uriString: String): MihonImportResult {
         return MihonBackupImporter.parse(appContext, uriString)
+    }
+
+    /** Writes a Mihon-compatible `.tachibk` and returns a shareable URI. */
+    fun exportMihonBackup(request: ExportRequest, fileName: String): ExportResult {
+        return MihonBackupExporter.export(appContext, request, fileName)
+    }
+
+    /** Hands an exported backup to the system share sheet. */
+    fun shareBackup(uriString: String, fileName: String) {
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "application/octet-stream"
+            putExtra(Intent.EXTRA_STREAM, Uri.parse(uriString))
+            putExtra(Intent.EXTRA_TITLE, fileName)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        val chooser = Intent.createChooser(send, "Save backup").apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        appContext.startActivity(chooser)
     }
 
     fun trustSignature(pkg: String, certSha256: String) {
