@@ -15,7 +15,14 @@ export type RootStackParamList = {
     chapters: ChapterDto[];
     /** 0-based page to open at (resume). Honored in paged modes. */
     initialPage?: number;
+    /**
+     * Open on the last page instead of the first. Set when the reader walks
+     * backwards into the previous chapter, so the user lands where they'd have
+     * been had they read straight through.
+     */
+    startAtEnd?: boolean;
   };
+  Changelog: undefined;
   CustomizeHome: undefined;
   Extensions: undefined;
   Categories: undefined;

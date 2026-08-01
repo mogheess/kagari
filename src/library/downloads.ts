@@ -135,6 +135,51 @@ export function enqueueDownload(manga: MangaDto, chapter: ChapterDto): void {
   void pump();
 }
 
+/**
+ * Queues many chapters at once, skipping any already queued, downloading or
+ * done (a failed one is retried). One store write and one notification for the
+ * batch — [enqueueDownload] in a loop re-serializes the whole queue per
+ * chapter, which stalls the UI when adding a few hundred.
+ *
+ * Returns the number of chapters actually added.
+ */
+export function enqueueDownloads(manga: MangaDto, chapters: readonly ChapterDto[]): number {
+  const skip = new Set(
+    entries
+      .filter(e => e.sourceId === manga.sourceId && e.status !== 'error')
+      .map(e => e.chapterUrl),
+  );
+  const now = Date.now();
+  const added: DownloadEntry[] = [];
+  const seen = new Set<string>();
+  for (const chapter of chapters) {
+    if (skip.has(chapter.url) || seen.has(chapter.url)) continue;
+    seen.add(chapter.url);
+    added.push({
+      sourceId: manga.sourceId,
+      mangaUrl: manga.url,
+      title: manga.title,
+      thumbnailUrl: manga.thumbnailUrl,
+      chapterUrl: chapter.url,
+      chapterName: chapter.name,
+      status: 'queued',
+      pageCount: 0,
+      downloaded: 0,
+      createdAt: now,
+    });
+  }
+  if (added.length === 0) return 0;
+  // Drop any failed entries being requeued, then append in the given order.
+  entries = [
+    ...entries.filter(e => !(e.sourceId === manga.sourceId && seen.has(e.chapterUrl))),
+    ...added,
+  ];
+  emit();
+  persist();
+  void pump();
+  return added.length;
+}
+
 /** Removes a chapter from the queue/library and deletes its files. */
 export function removeDownload(sourceId: string, chapterUrl: string): void {
   entries = entries.filter(e => !sameChapter(e, sourceId, chapterUrl));

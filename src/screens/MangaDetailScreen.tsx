@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -7,10 +7,13 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
+  BackHandler,
   Modal,
   RefreshControl,
   ToastAndroid,
   useWindowDimensions,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,7 +23,7 @@ import { useTheme } from '../theme/ThemeProvider';
 import { useAsync } from '../hooks/useAsync';
 import { getEngine } from '../engine';
 import { peekManga, loadMangaDetails, loadChapters, invalidateManga } from '../engine/mangaCache';
-import { Icon } from '../components/Icon';
+import { Icon, type IconName } from '../components/Icon';
 import { Skeleton } from '../components/Skeleton';
 import { RemoteImage } from '../components/RemoteImage';
 import { CategoryAssignSheet } from '../components/CategoryAssignSheet';
@@ -37,13 +40,20 @@ import {
 import { useCategories } from '../library/categories';
 import { recordRead } from '../library/history';
 import { planMigration, migrateManga, type MigrationPlan } from '../library/migrate';
-import { useChapterProgress, chapterKey, type ChapterProgress } from '../library/chapterProgress';
+import {
+  useChapterProgress,
+  chapterKey,
+  setChaptersRead,
+  type ChapterProgress,
+} from '../library/chapterProgress';
 import {
   useDownloadEntry,
   enqueueDownload,
+  enqueueDownloads,
   removeDownload,
   retryDownload,
 } from '../library/downloads';
+import { FastScroller } from '../components/FastScroller';
 import type { RootStackParamList } from '../navigation/types';
 import type { MangaDto, ChapterDto, SourceDto } from '../engine/types';
 
@@ -125,6 +135,22 @@ export function MangaDetailScreen() {
   // sources). The user picks which copy to migrate from.
   const [dupPrompt, setDupPrompt] = useState<FavoriteManga[] | null>(null);
 
+  // Chapter selection. Long-pressing a row enters selection mode; a second
+  // long-press extends from the anchor so a run of chapters is two gestures.
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
+  const [anchor, setAnchor] = useState<string | null>(null);
+  const [bulkSheet, setBulkSheet] = useState(false);
+  const selecting = selected.size > 0;
+
+  // Geometry for the fast-scroll thumb.
+  const scrollRef = useRef<ScrollView | null>(null);
+  const [scrollY, setScrollY] = useState(0);
+  const [contentHeight, setContentHeight] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(0);
+  const onScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    setScrollY(e.nativeEvent.contentOffset.y);
+  }, []);
+
   const cached = peekManga(params.sourceId, params.mangaUrl);
   const { data: details, reload: reloadDetails } = useAsync<MangaDto>(
     () => loadMangaDetails(params.sourceId, params.mangaUrl),
@@ -192,6 +218,124 @@ export function MangaDetailScreen() {
     () => pickResume(chapters ?? [], progressMap, params.sourceId),
     [chapters, progressMap, params.sourceId],
   );
+
+  /** Chapters with no read flag, in source (newest-first) order. */
+  const unreadChapters = useMemo(
+    () =>
+      (chapters ?? []).filter(
+        ch => !progressMap[chapterKey(params.sourceId, ch.url)]?.read,
+      ),
+    [chapters, progressMap, params.sourceId],
+  );
+
+  const clearSelection = useCallback(() => {
+    setSelected(new Set());
+    setAnchor(null);
+  }, []);
+
+  // Back exits selection first, the screen second — leaving the manga with a
+  // selection still active would silently discard it.
+  useEffect(() => {
+    if (!selecting) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      clearSelection();
+      return true;
+    });
+    return () => sub.remove();
+  }, [selecting, clearSelection]);
+
+  const toggleSelect = useCallback((url: string) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(url)) next.delete(url);
+      else next.add(url);
+      return next;
+    });
+    setAnchor(url);
+  }, []);
+
+  /** Adds every row between the anchor and `url`, inclusive, in display order. */
+  const selectRangeTo = useCallback(
+    (url: string) => {
+      const from = displayedChapters.findIndex(c => c.url === anchor);
+      const to = displayedChapters.findIndex(c => c.url === url);
+      if (from < 0 || to < 0) {
+        toggleSelect(url);
+        return;
+      }
+      const [lo, hi] = from <= to ? [from, to] : [to, from];
+      setSelected(prev => {
+        const next = new Set(prev);
+        for (let i = lo; i <= hi; i += 1) next.add(displayedChapters[i].url);
+        return next;
+      });
+      setAnchor(url);
+    },
+    [anchor, displayedChapters, toggleSelect],
+  );
+
+  const onChapterPress = useCallback(
+    (ch: ChapterDto) => {
+      if (selecting) toggleSelect(ch.url);
+      else openReader(ch);
+    },
+    // openReader closes over navigation/manga, both stable enough for a tap.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selecting, toggleSelect, manga, chapters],
+  );
+
+  const onChapterLongPress = useCallback(
+    (ch: ChapterDto) => {
+      if (selecting && anchor) selectRangeTo(ch.url);
+      else toggleSelect(ch.url);
+    },
+    [selecting, anchor, selectRangeTo, toggleSelect],
+  );
+
+  const selectAll = useCallback(() => {
+    setSelected(new Set(displayedChapters.map(c => c.url)));
+  }, [displayedChapters]);
+
+  const markSelected = useCallback(
+    (read: boolean) => {
+      const urls = [...selected];
+      const changed = setChaptersRead(params.sourceId, urls, read);
+      clearSelection();
+      notify(
+        changed === 0
+          ? `Already marked ${read ? 'read' : 'unread'}`
+          : `Marked ${changed} chapter${changed === 1 ? '' : 's'} ${read ? 'read' : 'unread'}`,
+      );
+    },
+    [selected, params.sourceId, clearSelection],
+  );
+
+  /** Queues `list` and reports how many were actually added. */
+  const queueDownloads = useCallback(
+    (list: ChapterDto[], label: string) => {
+      if (!manga) return;
+      if (list.length === 0) {
+        notify(`No ${label} to download`);
+        return;
+      }
+      const added = enqueueDownloads(manga, list);
+      notify(
+        added === 0
+          ? `All ${label} are already downloaded or queued`
+          : `Queued ${added} chapter${added === 1 ? '' : 's'}`,
+      );
+    },
+    [manga],
+  );
+
+  const downloadSelected = useCallback(() => {
+    const urls = selected;
+    queueDownloads(
+      displayedChapters.filter(c => urls.has(c.url)),
+      'chapters',
+    );
+    clearSelection();
+  }, [selected, displayedChapters, queueDownloads, clearSelection]);
 
   const onToggleCategory = (categoryId: string) => {
     if (!favorite) return;
@@ -382,8 +526,13 @@ export function MangaDetailScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       <ScrollView
+        ref={scrollRef}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 40 }}
+        scrollEventThrottle={16}
+        onScroll={onScroll}
+        onContentSizeChange={(_w, h) => setContentHeight(h)}
+        onLayout={e => setViewportHeight(e.nativeEvent.layout.height)}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -540,17 +689,27 @@ export function MangaDetailScreen() {
           <Text style={[theme.typography.heading, { color: theme.colors.text }]}>
             Chapters{chapters ? ` (${chapters.length})` : ''}
           </Text>
-          <Pressable
-            onPress={() => setSortAsc(a => !a)}
-            hitSlop={8}
-            disabled={!chapters?.length}
-            style={styles.sortBtn}
-          >
-            <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, fontWeight: '700' }}>
-              {sortAsc ? 'Oldest first' : 'Newest first'}
-            </Text>
-            <Icon name="filter" size={16} color={theme.colors.textMuted} />
-          </Pressable>
+          <View style={styles.chapterHeaderActions}>
+            <Pressable
+              onPress={() => setBulkSheet(true)}
+              hitSlop={8}
+              disabled={!chapters?.length}
+              style={styles.sortBtn}
+            >
+              <Icon name="download" size={17} color={theme.colors.textMuted} />
+            </Pressable>
+            <Pressable
+              onPress={() => setSortAsc(a => !a)}
+              hitSlop={8}
+              disabled={!chapters?.length}
+              style={styles.sortBtn}
+            >
+              <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, fontWeight: '700' }}>
+                {sortAsc ? 'Oldest first' : 'Newest first'}
+              </Text>
+              <Icon name="filter" size={16} color={theme.colors.textMuted} />
+            </Pressable>
+          </View>
         </View>
 
         {!chapters && chaptersLoading ? (
@@ -573,15 +732,37 @@ export function MangaDetailScreen() {
           displayedChapters.map((ch, i) => {
               const prog = progressMap[chapterKey(params.sourceId, ch.url)];
               const inProgress = !!prog && !prog.read && prog.lastPage > 0;
+              const picked = selected.has(ch.url);
               return (
                 <Pressable
                   key={`${ch.url}:${i}`}
-                  onPress={() => openReader(ch)}
+                  onPress={() => onChapterPress(ch)}
+                  onLongPress={() => onChapterLongPress(ch)}
+                  delayLongPress={250}
                   style={({ pressed }) => [
                     styles.chapterRow,
-                    { borderColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surface : 'transparent' },
+                    {
+                      borderColor: theme.colors.border,
+                      backgroundColor: picked
+                        ? withAlpha(theme.colors.accent, 0.16)
+                        : pressed
+                        ? theme.colors.surface
+                        : 'transparent',
+                    },
                   ]}
                 >
+                  {selecting ? (
+                    <View
+                      style={[
+                        styles.selectDot,
+                        picked
+                          ? { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent }
+                          : { borderColor: theme.colors.textFaint },
+                      ]}
+                    >
+                      {picked ? <Icon name="check" size={12} color={theme.colors.onAccent} /> : null}
+                    </View>
+                  ) : null}
                   <View style={{ flex: 1, opacity: prog?.read ? 0.45 : 1 }}>
                     <Text
                       numberOfLines={1}
@@ -604,12 +785,48 @@ export function MangaDetailScreen() {
                       ) : null}
                     </View>
                   </View>
-                  <ChapterDownloadButton manga={manga} chapter={ch} />
+                  {selecting ? null : <ChapterDownloadButton manga={manga} chapter={ch} />}
                 </Pressable>
               );
             })
         )}
       </ScrollView>
+
+      <FastScroller
+        scrollRef={scrollRef}
+        contentHeight={contentHeight}
+        viewportHeight={viewportHeight}
+        scrollY={scrollY}
+        topInset={insets.top + 56}
+        bottomInset={insets.bottom + 24}
+      />
+
+      {selecting ? (
+        <SelectionBar
+          count={selected.size}
+          total={displayedChapters.length}
+          onSelectAll={selectAll}
+          onClear={clearSelection}
+          onMarkRead={() => markSelected(true)}
+          onMarkUnread={() => markSelected(false)}
+          onDownload={downloadSelected}
+        />
+      ) : null}
+
+      <BulkDownloadSheet
+        visible={bulkSheet}
+        totalCount={chapters?.length ?? 0}
+        unreadCount={unreadChapters.length}
+        onAll={() => {
+          setBulkSheet(false);
+          queueDownloads(chapters ?? [], 'chapters');
+        }}
+        onUnread={() => {
+          setBulkSheet(false);
+          queueDownloads(unreadChapters, 'unread chapters');
+        }}
+        onClose={() => setBulkSheet(false)}
+      />
 
       <CategoryAssignSheet
         visible={catSheet}
@@ -675,6 +892,156 @@ export function MangaDetailScreen() {
 }
 
 /** Bottom sheet of actions for the source a manga belongs to. */
+/**
+ * Bottom action bar shown while chapters are selected. Mirrors the long-press
+ * selection pattern used elsewhere in the app: the bar owns the bulk actions so
+ * the rows themselves stay tap-to-toggle.
+ */
+function SelectionBar({
+  count,
+  total,
+  onSelectAll,
+  onClear,
+  onMarkRead,
+  onMarkUnread,
+  onDownload,
+}: {
+  count: number;
+  total: number;
+  onSelectAll: () => void;
+  onClear: () => void;
+  onMarkRead: () => void;
+  onMarkUnread: () => void;
+  onDownload: () => void;
+}) {
+  const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  const actions: { key: string; icon: IconName; label: string; onPress: () => void }[] = [
+    { key: 'read', icon: 'check', label: 'Read', onPress: onMarkRead },
+    { key: 'unread', icon: 'book', label: 'Unread', onPress: onMarkUnread },
+    { key: 'download', icon: 'download', label: 'Download', onPress: onDownload },
+  ];
+  return (
+    <View
+      style={[
+        styles.selectionBar,
+        {
+          backgroundColor: theme.colors.surface,
+          borderColor: theme.colors.border,
+          paddingBottom: insets.bottom + 10,
+        },
+      ]}
+    >
+      <View style={styles.selectionHeader}>
+        <Pressable onPress={onClear} hitSlop={10} style={styles.selectionClose}>
+          <Icon name="close" size={18} color={theme.colors.text} />
+        </Pressable>
+        <Text style={[theme.typography.bodyStrong, { color: theme.colors.text, flex: 1 }]}>
+          {count} selected
+        </Text>
+        <Pressable onPress={count === total ? onClear : onSelectAll} hitSlop={10}>
+          <Text style={{ color: theme.colors.accent, fontSize: 12.5, fontWeight: '700' }}>
+            {count === total ? 'Clear' : 'Select all'}
+          </Text>
+        </Pressable>
+      </View>
+      <View style={styles.selectionActions}>
+        {actions.map(a => (
+          <Pressable
+            key={a.key}
+            onPress={a.onPress}
+            style={({ pressed }) => [
+              styles.selectionAction,
+              { backgroundColor: pressed ? theme.colors.bg : 'transparent' },
+            ]}
+          >
+            <Icon name={a.icon} size={20} color={theme.colors.text} />
+            <Text style={{ color: theme.colors.textMuted, fontSize: 11.5, fontWeight: '700' }}>
+              {a.label}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+/** Bulk download picker: the whole manga, or only what hasn't been read. */
+function BulkDownloadSheet({
+  visible,
+  totalCount,
+  unreadCount,
+  onAll,
+  onUnread,
+  onClose,
+}: {
+  visible: boolean;
+  totalCount: number;
+  unreadCount: number;
+  onAll: () => void;
+  onUnread: () => void;
+  onClose: () => void;
+}) {
+  const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  const items = [
+    {
+      key: 'unread',
+      icon: 'book' as IconName,
+      label: 'Unread chapters',
+      hint: `${unreadCount} chapter${unreadCount === 1 ? '' : 's'} not marked read`,
+      onPress: onUnread,
+    },
+    {
+      key: 'all',
+      icon: 'download' as IconName,
+      label: 'Whole manga',
+      hint: `All ${totalCount} chapter${totalCount === 1 ? '' : 's'}`,
+      onPress: onAll,
+    },
+  ];
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={styles.sheetBackdrop} onPress={onClose} />
+      <View
+        style={[
+          styles.sheet,
+          { backgroundColor: theme.colors.bg, paddingBottom: insets.bottom + 10, borderColor: theme.colors.border },
+        ]}
+      >
+        <View style={styles.grabber} />
+        <Text style={[theme.typography.heading, { color: theme.colors.text, marginBottom: 2 }]}>
+          Download chapters
+        </Text>
+        <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginBottom: 8 }}>
+          Chapters already downloaded or queued are skipped. Downloads run one at a time
+          in the background.
+        </Text>
+        {items.map(item => (
+          <Pressable
+            key={item.key}
+            onPress={item.onPress}
+            style={({ pressed }) => [
+              styles.actionRow,
+              { backgroundColor: pressed ? theme.colors.surface : 'transparent' },
+            ]}
+          >
+            <Icon name={item.icon} size={20} color={theme.colors.text} />
+            <View style={{ flex: 1 }}>
+              <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
+                {item.label}
+              </Text>
+              <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginTop: 2 }}>
+                {item.hint}
+              </Text>
+            </View>
+          </Pressable>
+        ))}
+      </View>
+    </Modal>
+  );
+}
+
 function SourceActionsSheet({
   visible,
   sourceName,
@@ -1250,6 +1617,48 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+  },
+  chapterHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  selectDot: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  selectionBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: 10,
+  },
+  selectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  selectionClose: {
+    padding: 2,
+  },
+  selectionActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  selectionAction: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 10,
+    borderRadius: 12,
   },
   chapterRow: {
     flexDirection: 'row',

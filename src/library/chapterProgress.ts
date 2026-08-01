@@ -134,21 +134,55 @@ export function getChapterProgressSnapshot(): Record<string, ChapterProgress> {
   return progress;
 }
 
+/** Read state for one chapter, without touching the store. */
+function withRead(prev: ChapterProgress | undefined, read: boolean): ChapterProgress {
+  return {
+    // Marking read implies the whole chapter was seen; marking unread rewinds
+    // to the start so the row stops showing a "Page X / Y" hint.
+    lastPage: read ? Math.max(prev?.lastPage ?? 0, prev?.pageCount ?? 0) : 0,
+    pageCount: prev?.pageCount ?? 0,
+    read,
+    readAt: Date.now(),
+  };
+}
+
 /** Explicitly sets the read flag for a chapter (e.g. a manual toggle). */
 export function setChapterRead(sourceId: string, chapterUrl: string, read: boolean): void {
   const key = chapterKey(sourceId, chapterUrl);
-  const prev = progress[key];
-  progress = {
-    ...progress,
-    [key]: {
-      lastPage: read ? Math.max(prev?.lastPage ?? 0, prev?.pageCount ?? 0) : prev?.lastPage ?? 0,
-      pageCount: prev?.pageCount ?? 0,
-      read,
-      readAt: Date.now(),
-    },
-  };
+  progress = { ...progress, [key]: withRead(progress[key], read) };
   emit();
   persist();
+}
+
+/**
+ * Sets the read flag for many chapters at once.
+ *
+ * One store write and one notification for the whole batch — calling
+ * [setChapterRead] in a loop would re-render and re-serialize per chapter,
+ * which is visibly slow on a 500-chapter selection.
+ *
+ * Returns the number of chapters whose state actually changed.
+ */
+export function setChaptersRead(
+  sourceId: string,
+  chapterUrls: readonly string[],
+  read: boolean,
+): number {
+  const next = { ...progress };
+  let changed = 0;
+  for (const url of chapterUrls) {
+    const key = chapterKey(sourceId, url);
+    const prev = next[key];
+    if (prev?.read === read && (read || (prev?.lastPage ?? 0) === 0)) continue;
+    next[key] = withRead(prev, read);
+    changed += 1;
+  }
+  if (changed === 0) return 0;
+  progress = next;
+  prune();
+  emit();
+  persist();
+  return changed;
 }
 
 function subscribe(cb: () => void): () => void {

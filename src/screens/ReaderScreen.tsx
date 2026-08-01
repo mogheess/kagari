@@ -69,6 +69,14 @@ const MAX_IMAGE_FETCHES = 1;
 const IMAGE_FETCH_RETRIES = 3;
 /** Bottom spacer under the webtoon strip so the last page clears the chrome. */
 const STRIP_FOOTER_HEIGHT = 80;
+/**
+ * Height of the panel shown before the first and after the last page of a
+ * chapter in strip mode. Tall enough that scrolling through it reads as
+ * "continue", rather than something you cross by accident on a fling.
+ */
+const CHAPTER_TRANSITION_HEIGHT = 260;
+/** Slack for "the list is at its top/bottom", in px. */
+const EDGE_EPSILON = 4;
 const VIEWABILITY_CONFIG = { itemVisiblePercentThreshold: 50 };
 
 let activeImageFetches = 0;
@@ -253,19 +261,52 @@ export function ReaderScreen() {
     }
   }).current;
 
+  // Reading-order chapter list (ascending by number, falling back to the given
+  // order when a source doesn't number its chapters) for the prev/next buttons
+  // and the continuous transitions.
+  const orderedChapters = useMemo(() => {
+    const list = params.chapters ?? [];
+    // Sources hand back chapters newest-first. When they populate
+    // `chapter_number` we can sort on it; plenty don't (it defaults to -1 in
+    // the source API, and Madara-style sources never set it), and there
+    // reading order is simply the reverse of what the source gave us. Taking
+    // the list as-is would make "next chapter" walk backwards through the
+    // series.
+    if (!list.some(c => c.chapterNumber >= 0)) return list.slice().reverse();
+    return list
+      .map((c, i) => ({ c, i }))
+      .sort((a, b) => a.c.chapterNumber - b.c.chapterNumber || a.i - b.i)
+      .map(x => x.c);
+  }, [params.chapters]);
+  const orderIdx = useMemo(
+    () => orderedChapters.findIndex(c => c.url === params.chapter.url),
+    [orderedChapters, params.chapter.url],
+  );
+  const prevChapter = orderIdx > 0 ? orderedChapters[orderIdx - 1] : undefined;
+  const nextChapter =
+    orderIdx >= 0 && orderIdx < orderedChapters.length - 1
+      ? orderedChapters[orderIdx + 1]
+      : undefined;
+
+  // Strip-mode spacers. When there's a neighbouring chapter the spacer becomes a
+  // transition panel tall enough that scrolling through it is a deliberate act —
+  // that scroll is what commits the chapter change (see `onScrollEndDrag`).
+  const stripHeaderHeight = prevChapter ? CHAPTER_TRANSITION_HEIGHT : 0;
+  const stripFooterHeight = nextChapter ? CHAPTER_TRANSITION_HEIGHT : STRIP_FOOTER_HEIGHT;
+
   // A tall final page may never cross the 50% visibility threshold, so also
   // treat reaching the very end of the strip as being on the last page.
   const onStripScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
       if (total <= 0) return;
       const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
-      const end = contentSize.height - STRIP_FOOTER_HEIGHT - 2;
+      const end = contentSize.height - stripFooterHeight - 2;
       if (contentOffset.y + layoutMeasurement.height >= end && currentRef.current < total - 1) {
         currentRef.current = total - 1;
         setCurrent(total - 1);
       }
     },
-    [total],
+    [total, stripFooterHeight],
   );
 
   // Persist reading progress (furthest page) — debounced while reading, then
@@ -317,28 +358,8 @@ export function ReaderScreen() {
   );
   const onSliderSeekEnd = useCallback((index: number) => goToPage(index), [goToPage]);
 
-  // Reading-order chapter list (ascending by number, falling back to the given
-  // order when a source doesn't number its chapters) for the prev/next buttons.
-  const orderedChapters = useMemo(() => {
-    const list = params.chapters ?? [];
-    if (!list.some(c => c.chapterNumber >= 0)) return list.slice();
-    return list
-      .map((c, i) => ({ c, i }))
-      .sort((a, b) => a.c.chapterNumber - b.c.chapterNumber || a.i - b.i)
-      .map(x => x.c);
-  }, [params.chapters]);
-  const orderIdx = useMemo(
-    () => orderedChapters.findIndex(c => c.url === params.chapter.url),
-    [orderedChapters, params.chapter.url],
-  );
-  const prevChapter = orderIdx > 0 ? orderedChapters[orderIdx - 1] : undefined;
-  const nextChapter =
-    orderIdx >= 0 && orderIdx < orderedChapters.length - 1
-      ? orderedChapters[orderIdx + 1]
-      : undefined;
-
   const openChapter = useCallback(
-    (chapter?: ChapterDto) => {
+    (chapter?: ChapterDto, startAtEnd = false) => {
       if (!chapter) return;
       recordRead(
         {
@@ -360,10 +381,77 @@ export function ReaderScreen() {
         chapter,
         chapters: params.chapters,
         initialPage: 0,
+        startAtEnd,
       });
     },
     [navigation, params],
   );
+
+  // Continuous chapter transitions (webtoon strip).
+  //
+  // Android's scroll views clamp at their bounds — there is no rubber-band
+  // overscroll to detect — so the trigger can't be "pull past the edge". The
+  // list instead grows a tall transition panel at each end; scrolling all the
+  // way through one and lifting your finger there is the commit. Reaching the
+  // edge mid-fling doesn't count, because the check runs on drag release.
+  //
+  // `advancing` latches so the gesture can't fire twice while the replacement
+  // screen mounts.
+  const advancing = useRef(false);
+  const atStart = useRef(false);
+  const atEnd = useRef(false);
+  // Opening a chapter puts the header panel on screen; going back is only armed
+  // once the reader has actually scrolled into the chapter, so the very first
+  // drag can't bounce straight into the previous chapter.
+  const backArmed = useRef(false);
+
+  const onListScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (!paged) onStripScroll(e);
+      if (paged) return;
+
+      const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
+      const offset = contentOffset.y;
+      const remaining = contentSize.height - layoutMeasurement.height - offset;
+      atStart.current = offset <= EDGE_EPSILON;
+      atEnd.current = remaining <= EDGE_EPSILON;
+      if (offset > stripHeaderHeight + EDGE_EPSILON) backArmed.current = true;
+    },
+    [paged, stripHeaderHeight, onStripScroll],
+  );
+
+  const onScrollEndDrag = useCallback(() => {
+    if (paged || advancing.current || total <= 0) return;
+    if (atEnd.current && nextChapter) {
+      advancing.current = true;
+      openChapter(nextChapter);
+    } else if (atStart.current && backArmed.current && prevChapter) {
+      advancing.current = true;
+      openChapter(prevChapter, true);
+    }
+  }, [paged, total, nextChapter, prevChapter, openChapter]);
+
+  // Strip mode starts at the top, which is the previous-chapter panel. Skip past
+  // it so the chapter itself is what's on screen, unless we're resuming or
+  // entering backwards (both of which position the list themselves).
+  const positioned = useRef(false);
+  useEffect(() => {
+    if (paged || positioned.current || total <= 0) return;
+    positioned.current = true;
+    // Entering backwards positions the list itself, at the last page.
+    if (params.startAtEnd || stripHeaderHeight <= 0) return;
+    requestAnimationFrame(() => {
+      listRef.current?.scrollToOffset({ offset: stripHeaderHeight, animated: false });
+    });
+  }, [paged, total, stripHeaderHeight, params.startAtEnd]);
+
+  // Entering a chapter backwards: land on its last page once the count is known.
+  const startedAtEnd = useRef(false);
+  useEffect(() => {
+    if (!params.startAtEnd || startedAtEnd.current || total <= 0) return;
+    startedAtEnd.current = true;
+    goToPage(total - 1);
+  }, [params.startAtEnd, total, goToPage]);
 
   const renderPage = useCallback(
     ({ item }: { item: PageDto }) => (
@@ -589,8 +677,9 @@ export function ReaderScreen() {
               showsHorizontalScrollIndicator={false}
               onViewableItemsChanged={onViewable}
               viewabilityConfig={VIEWABILITY_CONFIG}
-              onScroll={paged ? undefined : onStripScroll}
-              scrollEventThrottle={64}
+              onScroll={paged ? undefined : onListScroll}
+              onScrollEndDrag={paged ? undefined : onScrollEndDrag}
+              scrollEventThrottle={16}
               getItemLayout={
                 paged
                   ? (_, index) => {
@@ -617,7 +706,28 @@ export function ReaderScreen() {
                   }
                 }, 80);
               }}
-              ListFooterComponent={paged ? null : <View style={{ height: STRIP_FOOTER_HEIGHT }} />}
+              ListHeaderComponent={
+                paged || !prevChapter ? null : (
+                  <ChapterTransition
+                    direction="prev"
+                    chapter={prevChapter}
+                    height={stripHeaderHeight}
+                    onPress={() => openChapter(prevChapter, true)}
+                  />
+                )
+              }
+              ListFooterComponent={
+                paged ? null : nextChapter ? (
+                  <ChapterTransition
+                    direction="next"
+                    chapter={nextChapter}
+                    height={stripFooterHeight}
+                    onPress={() => openChapter(nextChapter)}
+                  />
+                ) : (
+                  <View style={{ height: stripFooterHeight }} />
+                )
+              }
             />
           </Animated.View>
         </GestureDetector>
@@ -743,6 +853,40 @@ async function fetchNativeImageWithRetry(
     }
   }
   throw lastError;
+}
+
+/**
+ * Panel shown above the first page and below the last page of a chapter in
+ * strip mode. Scrolling to the far end of it and releasing moves to that
+ * chapter (see `onScrollEndDrag`); tapping does the same for anyone who'd
+ * rather not scroll.
+ */
+function ChapterTransition({
+  direction,
+  chapter,
+  height,
+  onPress,
+}: {
+  direction: 'prev' | 'next';
+  chapter: ChapterDto;
+  height: number;
+  onPress: () => void;
+}) {
+  const next = direction === 'next';
+  return (
+    <Pressable onPress={onPress} style={[styles.transition, { height }]}>
+      <Icon name={next ? 'chevronDown' : 'chevronRight'} size={22} color="#6d6d6d" />
+      <Text style={styles.transitionLabel}>
+        {next ? 'Next chapter' : 'Previous chapter'}
+      </Text>
+      <Text numberOfLines={2} style={styles.transitionName}>
+        {chapter.name}
+      </Text>
+      <Text style={styles.transitionHint}>
+        {next ? 'Keep scrolling to continue' : 'Scroll up to go back'}
+      </Text>
+    </Pressable>
+  );
 }
 
 function ReaderPage({
@@ -1078,6 +1222,31 @@ const styles = StyleSheet.create({
   zoomLayer: {
     flex: 1,
     overflow: 'hidden',
+  },
+  transition: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: 32,
+    backgroundColor: '#000',
+  },
+  transitionLabel: {
+    color: '#8a8a8a',
+    fontSize: 11.5,
+    fontWeight: '800',
+    letterSpacing: 1.1,
+    textTransform: 'uppercase',
+  },
+  transitionName: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  transitionHint: {
+    color: '#6d6d6d',
+    fontSize: 12,
+    marginTop: 2,
   },
   center: {
     position: 'absolute',
