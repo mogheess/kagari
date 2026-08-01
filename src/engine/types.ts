@@ -146,6 +146,14 @@ export interface AvailableExtensionDto {
   versionName: string;
   versionCode: number;
   isNsfw: boolean;
+  /**
+   * Content rating from an index v2 repo: 1 safe, 2 suggestive, 3 NSFW.
+   * 0 when the repo's index doesn't carry one.
+   */
+  contentRating: number;
+  /** Extension-lib version the APK was built against, e.g. "1.4" or "1.6". */
+  extensionLib: string;
+  iconUrl?: string;
   sources: { name: string; lang: string; id: string; baseUrl?: string }[];
   repoUrl: string;
   installed: boolean;

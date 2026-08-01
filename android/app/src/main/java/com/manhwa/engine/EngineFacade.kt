@@ -117,22 +117,29 @@ class EngineFacade(context: Context) {
         reload()
     }
 
+    // Browse/read always goes through the extension-lib 1.6 suspend API. Lib 1.4
+    // extensions don't implement it, but `HttpSource` bridges each call down to
+    // the Observable `fetch*` method they do implement. Calling `fetch*`
+    // directly would be wrong in the other direction: a 1.6 extension may
+    // implement only the suspend entry point (Weeb Central, for one, ships no
+    // `fetchPopularManga` at all).
+
     suspend fun getPopular(sourceId: String, page: Int): MangasPageDto {
         val source = catalogue(sourceId)
-        val result = source.fetchPopularManga(page).awaitSingle()
+        val result = source.getPopularManga(page)
         return Mappers.mangasPageToDto(source.id, result)
     }
 
     suspend fun getLatest(sourceId: String, page: Int): MangasPageDto {
         val source = catalogue(sourceId)
-        val result = source.fetchLatestUpdates(page).awaitSingle()
+        val result = source.getLatestUpdates(page)
         return Mappers.mangasPageToDto(source.id, result)
     }
 
     suspend fun search(sourceId: String, query: String, page: Int): MangasPageDto {
         val source = catalogue(sourceId)
         val filters: FilterList = source.getFilterList()
-        val result = source.fetchSearchManga(page, query, filters).awaitSingle()
+        val result = source.getSearchManga(page, query, filters)
         return Mappers.mangasPageToDto(source.id, result)
     }
 
@@ -142,7 +149,10 @@ class EngineFacade(context: Context) {
         // `mangaDetailsParse` typically returns a partial SManga without `url`
         // (the app already knows it). Re-attach the known url so the mapper
         // doesn't hit an uninitialized lateinit.
-        val result = source.fetchMangaDetails(stub).awaitSingle().apply { url = mangaUrl }
+        val result = source
+            .getMangaUpdate(stub, emptyList(), fetchDetails = true, fetchChapters = false)
+            .manga
+            .apply { url = mangaUrl }
         return Mappers.mangaToDto(source.id, result)
     }
 
@@ -169,14 +179,16 @@ class EngineFacade(context: Context) {
     suspend fun getChapters(sourceId: String, mangaUrl: String): List<ChapterDto> {
         val source = source(sourceId)
         val stub = SManga.create().apply { url = mangaUrl; title = "" }
-        val result: List<SChapter> = source.fetchChapterList(stub).awaitSingle()
+        val result: List<SChapter> = source
+            .getMangaUpdate(stub, emptyList(), fetchDetails = false, fetchChapters = true)
+            .chapters
         return result.map { Mappers.chapterToDto(source.id, mangaUrl, it) }
     }
 
     suspend fun getPages(sourceId: String, chapterUrl: String): List<PageDto> {
         val source = source(sourceId)
         val stub = SChapter.create().apply { url = chapterUrl; name = "" }
-        val result: List<Page> = source.fetchPageList(stub).awaitSingle()
+        val result: List<Page> = source.getPageList(stub)
         return result.map { Mappers.pageToDto(it) }
     }
 
@@ -189,7 +201,7 @@ class EngineFacade(context: Context) {
         }
         val url = page.imageUrl ?: if (source is HttpSource) {
             val model = Page(page.index, page.url ?: "", page.imageUrl)
-            source.fetchImageUrl(model).awaitSingle()
+            source.getImageUrl(model)
         } else {
             page.url ?: ""
         }
@@ -739,7 +751,7 @@ class EngineFacade(context: Context) {
         if (!existing.isNullOrBlank()) return existing
 
         return try {
-            source.fetchImageUrl(model).awaitSingle()
+            source.getImageUrl(model)
         } catch (error: Throwable) {
             val directPageUrl = page.url?.takeIf { isLikelyImageUrl(it) }
             if (directPageUrl.isNullOrBlank()) {
