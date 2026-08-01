@@ -219,6 +219,22 @@ export function useDownloadsHydrated(): boolean {
   return useSyncExternalStore(subscribe, getHydratedSnapshot);
 }
 
+/**
+ * Non-reactive download lookup, for callers outside React (the reader loads
+ * chapters on demand as you scroll, not from a hook).
+ */
+export function getDownloadEntry(
+  sourceId: string,
+  chapterUrl: string,
+): DownloadEntry | undefined {
+  return entries.find(e => sameChapter(e, sourceId, chapterUrl));
+}
+
+/** Whether the persisted queue has been merged into memory yet. */
+export function isDownloadsHydrated(): boolean {
+  return hydrated;
+}
+
 /** Reactive single-chapter download state for a chapter row. */
 export function useDownloadEntry(
   sourceId: string,

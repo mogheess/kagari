@@ -12,8 +12,6 @@ import {
   StatusBar,
   ToastAndroid,
   ViewToken,
-  NativeSyntheticEvent,
-  NativeScrollEvent,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
@@ -26,12 +24,20 @@ import Animated, {
   runOnJS,
   cancelAnimation,
 } from 'react-native-reanimated';
-import { useAsync } from '../hooks/useAsync';
 import { getEngine } from '../engine';
 import { recordProgress, recordRead } from '../library/history';
-import { recordChapterProgress } from '../library/chapterProgress';
+import { recordChapterProgress, setChaptersRead } from '../library/chapterProgress';
 import {
-  useDownloadEntry,
+  buildReaderItems,
+  indexOfPage,
+  insertChapter,
+  neighboursOf,
+  toReadingOrder,
+  type LoadedChapter,
+  type ReaderItem,
+} from '../reader/chapterWindow';
+import {
+  getDownloadEntry,
   useDownloadsHydrated,
   enqueueDownload,
   type DownloadStatus,
@@ -75,8 +81,6 @@ const STRIP_FOOTER_HEIGHT = 80;
  * "continue", rather than something you cross by accident on a fling.
  */
 const CHAPTER_TRANSITION_HEIGHT = 260;
-/** Slack for "the list is at its top/bottom", in px. */
-const EDGE_EPSILON = 4;
 const VIEWABILITY_CONFIG = { itemVisiblePercentThreshold: 50 };
 
 let activeImageFetches = 0;
@@ -94,9 +98,6 @@ export function ReaderScreen() {
   // Open immersive: the page fills the screen and a single tap reveals the
   // top/bottom chrome (tap again to hide).
   const [chrome, setChrome] = useState(false);
-  // Resume at the requested page (paged modes scroll there via initialScrollIndex;
-  // webtoon starts at the top but the progress counter still reflects this).
-  const [current, setCurrent] = useState(Math.max(0, params.initialPage ?? 0));
   // Per-series reading mode: a manhwa keeps Webtoon, a manga keeps its own
   // paged layout, and brand-new titles inherit the most recent pick.
   const mode = useReaderMode(params.sourceId, params.mangaUrl);
@@ -108,12 +109,17 @@ export function ReaderScreen() {
   // drifts under the fingers for the whole first pinch.
   const [pinching, setPinching] = useState(false);
   // Controlled per-page reload counters so a long-press (or the error Retry
-  // button) can force a fresh fetch of a specific page.
-  const [reloadTokens, setReloadTokens] = useState<Record<number, number>>({});
+  // button) can force a fresh fetch of a specific page. Keyed by the item key,
+  // which is chapter-scoped — page indices repeat across chapters.
+  const [reloadTokens, setReloadTokens] = useState<Record<string, number>>({});
   const retryPage = useCallback(
-    (index: number) => setReloadTokens(m => ({ ...m, [index]: (m[index] ?? 0) + 1 })),
+    (key: string) => setReloadTokens(m => ({ ...m, [key]: (m[key] ?? 0) + 1 })),
     [],
   );
+  /** Reloads whichever page is currently in view (long-press gesture). */
+  const retryCurrentPage = useCallback(() => {
+    if (currentRef.current) retryPage(currentRef.current);
+  }, [retryPage]);
 
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -128,9 +134,10 @@ export function ReaderScreen() {
   const baseX = useSharedValue(0);
   const baseY = useSharedValue(0);
 
-  // Furthest visible page mirrored into a ref so gesture callbacks can read it
-  // without forcing the memoised gesture to rebuild on every scroll.
-  const currentRef = useRef(0);
+  // Key of the furthest visible page. Read through a callback rather than
+  // handed to the gesture directly: a ref captured inside a worklet gets frozen
+  // by Reanimated, and writing to it afterwards warns on every scroll.
+  const currentRef = useRef('');
 
   const resetZoom = useCallback(() => {
     scale.value = withTiming(1);
@@ -142,31 +149,82 @@ export function ReaderScreen() {
     setZoomed(false);
   }, [scale, savedScale, tx, ty, savedTx, savedTy]);
 
-  // If this chapter is downloaded, read its pages from local storage (offline)
-  // instead of resolving page URLs over the network. Latched at open: a
-  // download finishing mid-read must not swap the page source under the user
-  // (refetching every page and trashing scroll); the next open picks it up.
-  const downloadEntry = useDownloadEntry(params.sourceId, params.chapter.url);
   const downloadsHydrated = useDownloadsHydrated();
-  const [offlinePageCount, setOfflinePageCount] = useState<number | null>(null);
-  useEffect(() => {
-    if (!downloadsHydrated || offlinePageCount !== null) return;
-    setOfflinePageCount(downloadEntry?.status === 'done' ? downloadEntry.pageCount : 0);
-  }, [downloadEntry, downloadsHydrated, offlinePageCount]);
-  const downloadStateReady = offlinePageCount !== null;
-  const offline = (offlinePageCount ?? 0) > 0;
 
-  const { data: pages, loading, error } = useAsync<PageDto[]>(
-    () =>
-      !downloadStateReady
-        ? Promise.resolve([])
-        : offline
-        ? Promise.resolve(Array.from({ length: offlinePageCount ?? 0 }, (_, i) => ({ index: i })))
-        : engine.getPages(params.sourceId, params.chapter.url),
-    [params.chapter.url, downloadStateReady, offline, offlinePageCount],
+  // Reading order for the whole series, so the window knows what sits either
+  // side of the chapter being read.
+  const orderedChapters = useMemo(() => toReadingOrder(params.chapters ?? []), [params.chapters]);
+
+  // The loaded window. Several chapters are kept resolved at once and flattened
+  // into one list, so reading across a boundary is plain scrolling rather than
+  // a screen change. See `reader/chapterWindow.ts`.
+  const [loadedChapters, setLoadedChapters] = useState<LoadedChapter[]>([]);
+  const [activeUrl, setActiveUrl] = useState(params.chapter.url);
+  const [activePage, setActivePage] = useState(Math.max(0, params.initialPage ?? 0));
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const inFlight = useRef(new Set<string>());
+
+  /**
+   * Resolves a chapter's pages and slots it into the window. Downloaded
+   * chapters read from local storage; everything else goes to the source.
+   */
+  const ensureChapter = useCallback(
+    async (chapter: ChapterDto | undefined) => {
+      if (!chapter || !downloadsHydrated) return;
+      const url = chapter.url;
+      if (inFlight.current.has(url)) return;
+      inFlight.current.add(url);
+      try {
+        const entry = getDownloadEntry(params.sourceId, url);
+        const offlineCount = entry?.status === 'done' ? entry.pageCount : 0;
+        const pages =
+          offlineCount > 0
+            ? Array.from({ length: offlineCount }, (_, i) => ({ index: i }))
+            : await engine.getPages(params.sourceId, url);
+        setLoadedChapters(prev =>
+          insertChapter(prev, { chapter, pages, offline: offlineCount > 0 }, orderedChapters),
+        );
+      } catch (e) {
+        // Only the chapter the reader was opened on is worth surfacing; a
+        // failed preload of a neighbour just means its transition panel stays.
+        if (url === params.chapter.url) {
+          setLoadError(e instanceof Error ? e.message : 'Could not load this chapter');
+        }
+      } finally {
+        inFlight.current.delete(url);
+      }
+    },
+    [downloadsHydrated, engine, orderedChapters, params.sourceId, params.chapter.url],
   );
 
-  const total = pages?.length ?? 0;
+  // Open on the requested chapter, then keep its neighbours warm. Preloading is
+  // what removes the transition panel at the boundary: by the time the last
+  // page is on screen the next chapter is already part of the list.
+  useEffect(() => {
+    void ensureChapter(params.chapter);
+  }, [ensureChapter, params.chapter]);
+
+  useEffect(() => {
+    if (loadedChapters.length === 0) return;
+    const { prev, next } = neighboursOf(orderedChapters, activeUrl);
+    void ensureChapter(next);
+    void ensureChapter(prev);
+  }, [activeUrl, loadedChapters.length, orderedChapters, ensureChapter]);
+
+  const items = useMemo(
+    () => buildReaderItems(loadedChapters, orderedChapters),
+    [loadedChapters, orderedChapters],
+  );
+
+  const activeChapter = useMemo(
+    () => loadedChapters.find(l => l.chapter.url === activeUrl)?.chapter ?? params.chapter,
+    [loadedChapters, activeUrl, params.chapter],
+  );
+  const activeEntry = loadedChapters.find(l => l.chapter.url === activeUrl);
+  const total = activeEntry?.pages.length ?? 0;
+  const current = activePage;
+  const loading = loadedChapters.length === 0 && !loadError;
+  const error = loadError;
   const horizontal = isHorizontal(mode);
   const paged = isPaged(mode);
   const inverted = mode === 'rtl';
@@ -191,17 +249,17 @@ export function ReaderScreen() {
   // Resolve the current page to a local file:// uri (cache-backed, so this is
   // cheap once the page has rendered) for the save/share actions.
   const resolveCurrentUri = useCallback(async (): Promise<string | null> => {
-    const page = pages?.[current];
+    const page = activeEntry?.pages[current];
     if (!page) return null;
     try {
-      const image = offline
-        ? await engine.fetchDownloadedImage(params.sourceId, params.chapter.url, page.index)
+      const image = activeEntry?.offline
+        ? await engine.fetchDownloadedImage(params.sourceId, activeUrl, page.index)
         : await engine.fetchImage(params.sourceId, page);
       return image.uri;
     } catch {
       return null;
     }
-  }, [pages, current, offline, engine, params.sourceId, params.chapter.url]);
+  }, [activeEntry, current, engine, params.sourceId, activeUrl]);
 
   const onSavePage = useCallback(async () => {
     setMenuOpen(false);
@@ -237,115 +295,97 @@ export function ReaderScreen() {
     const manga: MangaDto = {
       sourceId: params.sourceId,
       url: params.mangaUrl,
-      title: params.mangaTitle ?? params.chapter.name,
+      title: params.mangaTitle ?? activeChapter.name,
       thumbnailUrl: params.mangaThumbnailUrl,
       genres: [],
       status: 'unknown',
       initialized: false,
     };
-    enqueueDownload(manga, params.chapter);
+    enqueueDownload(manga, activeChapter);
     notify('Chapter queued for download');
-  }, [params]);
+  }, [params, activeChapter]);
 
   // Track the FURTHEST visible page, not the topmost: at the bottom of a
   // webtoon strip the previous page still occupies the top of the viewport, so
   // the topmost index would stop at N-1 and the chapter would never read out.
+  //
+  // The list spans several chapters, so this also decides which chapter is
+  // "current" — that is the only thing a boundary changes now.
+  const itemsRef = useRef<ReaderItem[]>([]);
+  itemsRef.current = items;
+  const activeRef = useRef({ url: activeUrl, page: activePage });
+  activeRef.current = { url: activeUrl, page: activePage };
+
   const onViewable = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
-    let furthest = -1;
+    let furthest: ReaderItem | null = null;
+    let furthestIndex = -1;
     for (const v of viewableItems) {
-      if (v.index != null && v.index > furthest) furthest = v.index;
+      if (v.index == null || v.index <= furthestIndex) continue;
+      const item = itemsRef.current[v.index];
+      if (item?.kind !== 'page') continue;
+      furthest = item;
+      furthestIndex = v.index;
     }
-    if (furthest >= 0) {
-      currentRef.current = furthest;
-      setCurrent(furthest);
+    if (!furthest) return;
+
+    const prevUrl = activeRef.current.url;
+    if (furthest.chapter.url !== prevUrl) {
+      // Moving forward past a chapter means it was read to the end — the last
+      // page may be taller than the viewport and never cross the visibility
+      // threshold on its own.
+      const order = itemsRef.current;
+      const leavingForward =
+        order.findIndex(i => i.kind === 'page' && i.chapter.url === prevUrl) <
+        order.findIndex(i => i.kind === 'page' && i.chapter.url === furthest!.chapter.url);
+      if (leavingForward) setChaptersRead(furthest.chapter.sourceId, [prevUrl], true);
+      setActiveUrl(furthest.chapter.url);
     }
+    setActivePage(furthest.pageIndex);
+    currentRef.current = furthest.key;
   }).current;
 
-  // Reading-order chapter list (ascending by number, falling back to the given
-  // order when a source doesn't number its chapters) for the prev/next buttons
-  // and the continuous transitions.
-  const orderedChapters = useMemo(() => {
-    const list = params.chapters ?? [];
-    // Sources hand back chapters newest-first. When they populate
-    // `chapter_number` we can sort on it; plenty don't (it defaults to -1 in
-    // the source API, and Madara-style sources never set it), and there
-    // reading order is simply the reverse of what the source gave us. Taking
-    // the list as-is would make "next chapter" walk backwards through the
-    // series.
-    if (!list.some(c => c.chapterNumber >= 0)) return list.slice().reverse();
-    return list
-      .map((c, i) => ({ c, i }))
-      .sort((a, b) => a.c.chapterNumber - b.c.chapterNumber || a.i - b.i)
-      .map(x => x.c);
-  }, [params.chapters]);
-  const orderIdx = useMemo(
-    () => orderedChapters.findIndex(c => c.url === params.chapter.url),
-    [orderedChapters, params.chapter.url],
-  );
-  const prevChapter = orderIdx > 0 ? orderedChapters[orderIdx - 1] : undefined;
-  const nextChapter =
-    orderIdx >= 0 && orderIdx < orderedChapters.length - 1
-      ? orderedChapters[orderIdx + 1]
-      : undefined;
-
-  // Strip-mode spacers. When there's a neighbouring chapter the spacer becomes a
-  // transition panel tall enough that scrolling through it is a deliberate act —
-  // that scroll is what commits the chapter change (see `onScrollEndDrag`).
-  const stripHeaderHeight = prevChapter ? CHAPTER_TRANSITION_HEIGHT : 0;
-  const stripFooterHeight = nextChapter ? CHAPTER_TRANSITION_HEIGHT : STRIP_FOOTER_HEIGHT;
-
-  // A tall final page may never cross the 50% visibility threshold, so also
-  // treat reaching the very end of the strip as being on the last page.
-  const onStripScroll = useCallback(
-    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      if (total <= 0) return;
-      const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
-      const end = contentSize.height - stripFooterHeight - 2;
-      if (contentOffset.y + layoutMeasurement.height >= end && currentRef.current < total - 1) {
-        currentRef.current = total - 1;
-        setCurrent(total - 1);
-      }
-    },
-    [total, stripFooterHeight],
+  const { prev: prevChapter, next: nextChapter } = useMemo(
+    () => neighboursOf(orderedChapters, activeUrl),
+    [orderedChapters, activeUrl],
   );
 
   // Persist reading progress (furthest page) — debounced while reading, then
   // flushed on exit. Works for any source, library or not.
-  const progressRef = useRef({ page: 0, total: 0 });
+  const progressRef = useRef({ url: activeUrl, page: 0, total: 0 });
   useEffect(() => {
     if (total <= 0) return;
-    progressRef.current = { page: current + 1, total };
+    progressRef.current = { url: activeUrl, page: current + 1, total };
     const t = setTimeout(() => {
       recordProgress(params.sourceId, params.mangaUrl, current + 1, total);
-      recordChapterProgress(params.sourceId, params.chapter.url, current + 1, total);
+      recordChapterProgress(params.sourceId, activeUrl, current + 1, total);
     }, 600);
     return () => clearTimeout(t);
-  }, [current, total, params.sourceId, params.mangaUrl, params.chapter.url]);
+  }, [current, total, activeUrl, params.sourceId, params.mangaUrl]);
 
   useEffect(() => {
     return () => {
-      const { page, total: t } = progressRef.current;
+      const { url, page, total: t } = progressRef.current;
       if (t > 0) {
         recordProgress(params.sourceId, params.mangaUrl, page, t);
-        recordChapterProgress(params.sourceId, params.chapter.url, page, t);
+        recordChapterProgress(params.sourceId, url, page, t);
       }
     };
-  }, [params.sourceId, params.mangaUrl, params.chapter.url]);
+  }, [params.sourceId, params.mangaUrl]);
 
-  // Jump the list to a page (used by the slider). Paged modes have getItemLayout
-  // so this is exact; the webtoon strip relies on onScrollToIndexFailed below.
+  /** Scrolls to a page of the active chapter (used by the slider). */
   const goToPage = useCallback(
     (index: number) => {
       const clamped = Math.max(0, Math.min(index, total - 1));
-      currentRef.current = clamped;
-      setCurrent(clamped);
+      setActivePage(clamped);
+      const target = indexOfPage(items, activeUrl, clamped);
+      if (target < 0) return;
       try {
-        listRef.current?.scrollToIndex({ index: clamped, animated: false });
+        listRef.current?.scrollToIndex({ index: target, animated: false });
       } catch {
         // onScrollToIndexFailed handles the rare miss.
       }
     },
-    [total],
+    [total, items, activeUrl],
   );
 
   // Live scrub: paged modes jump per page (snappy); the webtoon strip commits on
@@ -358,8 +398,13 @@ export function ReaderScreen() {
   );
   const onSliderSeekEnd = useCallback((index: number) => goToPage(index), [goToPage]);
 
+  /**
+   * Jumps to another chapter without leaving the screen: load it if needed,
+   * then scroll to it in the shared list. Used by the prev/next chrome buttons
+   * and the transition panels.
+   */
   const openChapter = useCallback(
-    (chapter?: ChapterDto, startAtEnd = false) => {
+    async (chapter?: ChapterDto, startAtEnd = false) => {
       if (!chapter) return;
       recordRead(
         {
@@ -373,105 +418,85 @@ export function ReaderScreen() {
         },
         chapter,
       );
-      navigation.replace('Reader', {
-        sourceId: params.sourceId,
-        mangaUrl: params.mangaUrl,
-        mangaTitle: params.mangaTitle,
-        mangaThumbnailUrl: params.mangaThumbnailUrl,
-        chapter,
-        chapters: params.chapters,
-        initialPage: 0,
-        startAtEnd,
-      });
+      await ensureChapter(chapter);
+      pendingJump.current = { url: chapter.url, atEnd: startAtEnd };
     },
-    [navigation, params],
+    [ensureChapter, params.sourceId, params.mangaUrl, params.mangaTitle, params.mangaThumbnailUrl],
   );
 
-  // Continuous chapter transitions (webtoon strip).
-  //
-  // Android's scroll views clamp at their bounds — there is no rubber-band
-  // overscroll to detect — so the trigger can't be "pull past the edge". The
-  // list instead grows a tall transition panel at each end; scrolling all the
-  // way through one and lifting your finger there is the commit. Reaching the
-  // edge mid-fling doesn't count, because the check runs on drag release.
-  //
-  // `advancing` latches so the gesture can't fire twice while the replacement
-  // screen mounts.
-  const advancing = useRef(false);
-  const atStart = useRef(false);
-  const atEnd = useRef(false);
-  // Opening a chapter puts the header panel on screen; going back is only armed
-  // once the reader has actually scrolled into the chapter, so the very first
-  // drag can't bounce straight into the previous chapter.
-  const backArmed = useRef(false);
-
-  const onListScroll = useCallback(
-    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      if (!paged) onStripScroll(e);
-      if (paged) return;
-
-      const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
-      const offset = contentOffset.y;
-      const remaining = contentSize.height - layoutMeasurement.height - offset;
-      atStart.current = offset <= EDGE_EPSILON;
-      atEnd.current = remaining <= EDGE_EPSILON;
-      if (offset > stripHeaderHeight + EDGE_EPSILON) backArmed.current = true;
-    },
-    [paged, stripHeaderHeight, onStripScroll],
-  );
-
-  const onScrollEndDrag = useCallback(() => {
-    if (paged || advancing.current || total <= 0) return;
-    if (atEnd.current && nextChapter) {
-      advancing.current = true;
-      openChapter(nextChapter);
-    } else if (atStart.current && backArmed.current && prevChapter) {
-      advancing.current = true;
-      openChapter(prevChapter, true);
-    }
-  }, [paged, total, nextChapter, prevChapter, openChapter]);
-
-  // Strip mode starts at the top, which is the previous-chapter panel. Skip past
-  // it so the chapter itself is what's on screen, unless we're resuming or
-  // entering backwards (both of which position the list themselves).
-  const positioned = useRef(false);
+  // A jump can only be performed once the target's pages are in `items`, which
+  // is a render later than the load resolving.
+  const pendingJump = useRef<{ url: string; atEnd: boolean } | null>(null);
   useEffect(() => {
-    if (paged || positioned.current || total <= 0) return;
-    positioned.current = true;
-    // Entering backwards positions the list itself, at the last page.
-    if (params.startAtEnd || stripHeaderHeight <= 0) return;
+    const jump = pendingJump.current;
+    if (!jump) return;
+    const entry = loadedChapters.find(l => l.chapter.url === jump.url);
+    if (!entry || entry.pages.length === 0) return;
+    pendingJump.current = null;
+    const page = jump.atEnd ? entry.pages.length - 1 : 0;
+    const target = indexOfPage(items, jump.url, page);
+    if (target < 0) return;
+    setActiveUrl(jump.url);
+    setActivePage(page);
     requestAnimationFrame(() => {
-      listRef.current?.scrollToOffset({ offset: stripHeaderHeight, animated: false });
+      try {
+        listRef.current?.scrollToIndex({ index: target, animated: false });
+      } catch {
+        // onScrollToIndexFailed recovers.
+      }
     });
-  }, [paged, total, stripHeaderHeight, params.startAtEnd]);
+  }, [loadedChapters, items]);
 
-  // Entering a chapter backwards: land on its last page once the count is known.
-  const startedAtEnd = useRef(false);
+  // Resume: position on the requested page once the opening chapter is in.
+  const resumed = useRef(false);
   useEffect(() => {
-    if (!params.startAtEnd || startedAtEnd.current || total <= 0) return;
-    startedAtEnd.current = true;
-    goToPage(total - 1);
-  }, [params.startAtEnd, total, goToPage]);
+    const wanted = params.startAtEnd ? -1 : params.initialPage ?? 0;
+    if (resumed.current || items.length === 0) return;
+    const entry = loadedChapters.find(l => l.chapter.url === params.chapter.url);
+    if (!entry || entry.pages.length === 0) return;
+    resumed.current = true;
+    const page = wanted < 0 ? entry.pages.length - 1 : Math.min(wanted, entry.pages.length - 1);
+    const target = indexOfPage(items, params.chapter.url, page);
+    if (target <= 0) return;
+    setActivePage(page);
+    requestAnimationFrame(() => {
+      try {
+        listRef.current?.scrollToIndex({ index: target, animated: false });
+      } catch {
+        // onScrollToIndexFailed recovers.
+      }
+    });
+  }, [items, loadedChapters, params.chapter.url, params.initialPage, params.startAtEnd]);
 
-  const renderPage = useCallback(
-    ({ item }: { item: PageDto }) => (
-      <ReaderPage
-        sourceId={params.sourceId}
-        chapterUrl={params.chapter.url}
-        downloaded={offline}
-        page={item}
-        width={width}
-        screenHeight={height}
-        layout={paged ? 'page' : 'strip'}
-        reloadToken={reloadTokens[item.index] ?? 0}
-        onRetry={() => retryPage(item.index)}
-        onOpenWebView={onOpenInWebView}
-      />
-    ),
+  const renderItem = useCallback(
+    ({ item }: { item: ReaderItem }) =>
+      item.kind === 'transition' ? (
+        <ChapterTransition
+          direction={item.direction}
+          from={item.from}
+          to={item.to}
+          // In a paged viewer every cell must be one screen tall or
+          // getItemLayout's uniform maths breaks.
+          height={paged ? height : CHAPTER_TRANSITION_HEIGHT}
+          onPress={() => void openChapter(item.to, item.direction === 'prev')}
+        />
+      ) : (
+        <ReaderPage
+          sourceId={params.sourceId}
+          chapterUrl={item.chapter.url}
+          downloaded={item.offline}
+          page={item.page}
+          width={width}
+          screenHeight={height}
+          layout={paged ? 'page' : 'strip'}
+          reloadToken={reloadTokens[item.key] ?? 0}
+          onRetry={() => retryPage(item.key)}
+          onOpenWebView={onOpenInWebView}
+        />
+      ),
     [
       params.sourceId,
-      params.chapter.url,
-      offline,
+      openChapter,
       width,
       height,
       paged,
@@ -595,7 +620,7 @@ export function ReaderScreen() {
     const longPress = Gesture.LongPress()
       .minDuration(500)
       .onStart(() => {
-        runOnJS(retryPage)(currentRef.current);
+        runOnJS(retryCurrentPage)();
       });
 
     // Pinch + pan run together; the tap family stays in its own Exclusive so the
@@ -613,7 +638,7 @@ export function ReaderScreen() {
     <View style={{ flex: 1, backgroundColor: '#000' }}>
       <StatusBar hidden={!chrome} animated />
 
-      {loading || !downloadStateReady ? (
+      {loading ? (
         <View style={styles.center}>
           <ActivityIndicator color="#fff" />
         </View>
@@ -659,9 +684,9 @@ export function ReaderScreen() {
             <FlatList
               ref={listRef}
               key={mode}
-              data={pages ?? []}
-              keyExtractor={p => String(p.index)}
-              renderItem={renderPage}
+              data={items}
+              keyExtractor={i => i.key}
+              renderItem={renderItem}
               horizontal={horizontal}
               inverted={inverted}
               pagingEnabled={paged}
@@ -677,9 +702,12 @@ export function ReaderScreen() {
               showsHorizontalScrollIndicator={false}
               onViewableItemsChanged={onViewable}
               viewabilityConfig={VIEWABILITY_CONFIG}
-              onScroll={paged ? undefined : onListScroll}
-              onScrollEndDrag={paged ? undefined : onScrollEndDrag}
               scrollEventThrottle={16}
+              // Loading an earlier chapter prepends items; without this the
+              // content under the reader's finger would jump down by its height.
+              maintainVisibleContentPosition={
+                paged ? undefined : { minIndexForVisible: 1 }
+              }
               getItemLayout={
                 paged
                   ? (_, index) => {
@@ -688,7 +716,6 @@ export function ReaderScreen() {
                     }
                   : undefined
               }
-              initialScrollIndex={paged && current > 0 ? current : undefined}
               onScrollToIndexFailed={info => {
                 // Webtoon has no getItemLayout, so a far jump can miss: approximate
                 // by average height, then settle on the exact index once measured.
@@ -706,27 +733,8 @@ export function ReaderScreen() {
                   }
                 }, 80);
               }}
-              ListHeaderComponent={
-                paged || !prevChapter ? null : (
-                  <ChapterTransition
-                    direction="prev"
-                    chapter={prevChapter}
-                    height={stripHeaderHeight}
-                    onPress={() => openChapter(prevChapter, true)}
-                  />
-                )
-              }
               ListFooterComponent={
-                paged ? null : nextChapter ? (
-                  <ChapterTransition
-                    direction="next"
-                    chapter={nextChapter}
-                    height={stripFooterHeight}
-                    onPress={() => openChapter(nextChapter)}
-                  />
-                ) : (
-                  <View style={{ height: stripFooterHeight }} />
-                )
+                paged ? null : <View style={{ height: STRIP_FOOTER_HEIGHT }} />
               }
             />
           </Animated.View>
@@ -739,7 +747,7 @@ export function ReaderScreen() {
             <Icon name="back" size={24} color="#fff" />
           </Pressable>
           <Text numberOfLines={1} style={styles.chapterTitle}>
-            {params.chapter.name}
+            {activeChapter.name}
           </Text>
           <View style={styles.topActions}>
             <Pressable hitSlop={10} onPress={() => setMenuOpen(true)}>
@@ -761,8 +769,8 @@ export function ReaderScreen() {
             inverted={inverted}
             onSeek={onSliderSeek}
             onSeekEnd={onSliderSeekEnd}
-            onPrevChapter={() => openChapter(prevChapter)}
-            onNextChapter={() => openChapter(nextChapter)}
+            onPrevChapter={() => void openChapter(prevChapter, true)}
+            onNextChapter={() => void openChapter(nextChapter)}
             hasPrev={!!prevChapter}
             hasNext={!!nextChapter}
           />
@@ -787,7 +795,7 @@ export function ReaderScreen() {
 
       <ReaderMenuSheet
         visible={menuOpen}
-        downloadStatus={downloadEntry?.status}
+        downloadStatus={getDownloadEntry(params.sourceId, activeUrl)?.status}
         onSave={onSavePage}
         onShare={onSharePage}
         onDownload={onDownloadChapter}
@@ -863,16 +871,31 @@ async function fetchNativeImageWithRetry(
  */
 function ChapterTransition({
   direction,
-  chapter,
+  from,
+  to,
   height,
   onPress,
 }: {
   direction: 'prev' | 'next';
-  chapter: ChapterDto;
+  from: ChapterDto;
+  to?: ChapterDto;
   height: number;
   onPress: () => void;
 }) {
   const next = direction === 'next';
+  // No neighbour means the end of the series in that direction.
+  if (!to) {
+    return (
+      <View style={[styles.transition, { height }]}>
+        <Text style={styles.transitionLabel}>
+          {next ? 'Last chapter' : 'First chapter'}
+        </Text>
+        <Text numberOfLines={2} style={styles.transitionHint}>
+          {from.name}
+        </Text>
+      </View>
+    );
+  }
   return (
     <Pressable onPress={onPress} style={[styles.transition, { height }]}>
       <Icon name={next ? 'chevronDown' : 'chevronRight'} size={22} color="#6d6d6d" />
@@ -880,11 +903,9 @@ function ChapterTransition({
         {next ? 'Next chapter' : 'Previous chapter'}
       </Text>
       <Text numberOfLines={2} style={styles.transitionName}>
-        {chapter.name}
+        {to.name}
       </Text>
-      <Text style={styles.transitionHint}>
-        {next ? 'Keep scrolling to continue' : 'Scroll up to go back'}
-      </Text>
+      <Text style={styles.transitionHint}>Loading\u2026</Text>
     </Pressable>
   );
 }

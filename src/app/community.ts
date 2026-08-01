@@ -11,7 +11,7 @@
  * Paste the invite here (e.g. 'https://discord.gg/xxxxxxx') to make the row
  * appear under Community in Settings. Leave empty to hide it.
  */
-export const DISCORD_INVITE_URL = '';
+export const DISCORD_INVITE_URL = 'https://discord.gg/nyzRtytyvE';
 
 /** Whether any community link is configured. */
 export function hasCommunityLinks(): boolean {
