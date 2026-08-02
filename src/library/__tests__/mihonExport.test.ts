@@ -5,9 +5,15 @@
 import { buildBackupRequest } from '../mihonExport';
 import { toggleFavorite, setMangaCategories } from '../favorites';
 import { addCategory } from '../categories';
-import { setChaptersRead, recordChapterProgress } from '../chapterProgress';
+import {
+  chapterKey,
+  getChapterProgressSnapshot,
+  recordChapterProgress,
+  setChaptersRead,
+} from '../chapterProgress';
 import { recordRead } from '../history';
 import { primeMangaCache } from '../../engine/mangaCache';
+import { applyMihonBackup } from '../mihonImport';
 import type { ChapterDto, MangaDto } from '../../engine/types';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
@@ -70,7 +76,7 @@ describe('buildBackupRequest', () => {
     // Only chapters with something to restore, and never the untouched one.
     const byUrl = Object.fromEntries(entry.chapters.map(c => [c.url, c]));
     expect(byUrl[chapter(1).url]).toMatchObject({ read: true, name: 'Chapter 1' });
-    expect(byUrl[chapter(2).url]).toMatchObject({ read: false, lastPageRead: 4 });
+    expect(byUrl[chapter(2).url]).toMatchObject({ read: false, lastPageRead: 3 });
     expect(byUrl[chapter(3).url]).toBeUndefined();
   });
 
@@ -90,5 +96,32 @@ describe('buildBackupRequest', () => {
     // and the other title's state stayed put
     const solo = request.manga.find(m => m.url === manga.url);
     expect(solo?.chapters.some(c => c.url === '/manga/other/ch-1')).toBe(false);
+  });
+
+  test('converts Mihon zero-based page indexes back to Kagari page numbers', () => {
+    const sourceId = 'import-source';
+    applyMihonBackup({
+      categories: [],
+      manga: [
+        {
+          sourceId,
+          url: '/imported',
+          title: 'Imported',
+          dateAdded: Date.now(),
+          categories: [],
+          chapters: [
+            { url: '/imported/ch-1', name: 'Chapter 1', read: false, lastPageRead: 3 },
+            { url: '/imported/ch-2', name: 'Chapter 2', read: true, lastPageRead: 0 },
+          ],
+        },
+      ],
+    });
+
+    const progress = getChapterProgressSnapshot();
+    expect(progress[chapterKey(sourceId, '/imported/ch-1')].lastPage).toBe(4);
+    expect(progress[chapterKey(sourceId, '/imported/ch-2')]).toMatchObject({
+      lastPage: 1,
+      read: true,
+    });
   });
 });

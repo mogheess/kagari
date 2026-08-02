@@ -12,8 +12,6 @@ import {
   RefreshControl,
   ToastAndroid,
   useWindowDimensions,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -53,7 +51,7 @@ import {
   removeDownload,
   retryDownload,
 } from '../library/downloads';
-import { FastScroller } from '../components/FastScroller';
+import { FastScroller, type FastScrollerHandle } from '../components/FastScroller';
 import type { RootStackParamList } from '../navigation/types';
 import type { MangaDto, ChapterDto, SourceDto } from '../engine/types';
 
@@ -145,12 +143,9 @@ export function MangaDetailScreen() {
 
   // Geometry for the fast-scroll thumb.
   const scrollRef = useRef<ScrollView | null>(null);
-  const [scrollY, setScrollY] = useState(0);
+  const fastScrollerRef = useRef<FastScrollerHandle | null>(null);
   const [contentHeight, setContentHeight] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
-  const onScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    setScrollY(e.nativeEvent.contentOffset.y);
-  }, []);
 
   const cached = peekManga(params.sourceId, params.mangaUrl);
   const { data: details, reload: reloadDetails } = useAsync<MangaDto>(
@@ -532,7 +527,7 @@ export function MangaDetailScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 40 }}
         scrollEventThrottle={16}
-        onScroll={onScroll}
+        onScroll={e => fastScrollerRef.current?.onScroll(e.nativeEvent.contentOffset.y)}
         onContentSizeChange={(_w, h) => setContentHeight(h)}
         onLayout={e => setViewportHeight(e.nativeEvent.layout.height)}
         refreshControl={
@@ -795,10 +790,10 @@ export function MangaDetailScreen() {
       </ScrollView>
 
       <FastScroller
+        ref={fastScrollerRef}
         scrollRef={scrollRef}
         contentHeight={contentHeight}
         viewportHeight={viewportHeight}
-        scrollY={scrollY}
         topInset={insets.top + 56}
         bottomInset={insets.bottom + 24}
       />

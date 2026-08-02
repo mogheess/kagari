@@ -2,6 +2,7 @@ import {
   buildReaderItems,
   indexOfPage,
   insertChapter,
+  MAX_LOADED_CHAPTERS,
   neighboursOf,
   toReadingOrder,
   type LoadedChapter,
@@ -125,6 +126,20 @@ describe('insertChapter', () => {
     const ordered = [chapter(1), chapter(2)];
     const start = [loaded(1, 1)];
     expect(insertChapter(start, loaded(1, 1), ordered)).toBe(start);
+  });
+
+  test('bounds long reading sessions around the active chapter', () => {
+    const ordered = Array.from({ length: 12 }, (_, i) => chapter(i + 1));
+    let window: LoadedChapter[] = [];
+
+    for (let n = 1; n <= ordered.length; n++) {
+      window = insertChapter(window, loaded(n, 20), ordered, ordered[n - 1].url);
+      expect(window.length).toBeLessThanOrEqual(MAX_LOADED_CHAPTERS);
+    }
+
+    expect(window.map(item => item.chapter.url)).toEqual(
+      ordered.slice(-MAX_LOADED_CHAPTERS).map(item => item.url),
+    );
   });
 });
 

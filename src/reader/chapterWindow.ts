@@ -21,6 +21,9 @@ export interface LoadedChapter {
   offline: boolean;
 }
 
+/** Keep a Mihon-sized neighbourhood rather than retaining a whole reading session. */
+export const MAX_LOADED_CHAPTERS = 5;
+
 export type ReaderItem =
   | {
       kind: 'page';
@@ -134,16 +137,24 @@ export function indexOfPage(
 /**
  * Inserts a chapter into the window, keeping reading order.
  *
- * Chapters are never dropped once loaded: removing entries above the viewport
- * would yank the scroll position, and a loaded chapter only costs its page
- * metadata — the images themselves are virtualised by the list.
+ * The window is bounded around the active chapter. This limits retained page
+ * metadata and component keys during long continuous-reading sessions.
  */
 export function insertChapter(
   loaded: readonly LoadedChapter[],
   entry: LoadedChapter,
   ordered: readonly ChapterDto[],
+  activeUrl = entry.chapter.url,
+  maxChapters = MAX_LOADED_CHAPTERS,
 ): LoadedChapter[] {
   if (loaded.some(l => l.chapter.url === entry.chapter.url)) return loaded as LoadedChapter[];
   const rank = (url: string) => ordered.findIndex(c => c.url === url);
-  return [...loaded, entry].sort((a, b) => rank(a.chapter.url) - rank(b.chapter.url));
+  const sorted = [...loaded, entry].sort((a, b) => rank(a.chapter.url) - rank(b.chapter.url));
+  if (sorted.length <= maxChapters) return sorted;
+
+  const activeIndex = sorted.findIndex(item => item.chapter.url === activeUrl);
+  const center = activeIndex >= 0 ? activeIndex : sorted.findIndex(item => item === entry);
+  const half = Math.floor(maxChapters / 2);
+  const start = Math.max(0, Math.min(center - half, sorted.length - maxChapters));
+  return sorted.slice(start, start + maxChapters);
 }

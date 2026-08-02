@@ -1,4 +1,4 @@
-import { decodeRepoIndexPb, ContentRating } from '../repoIndexPb';
+import { decodeRepoExtensionListPb, decodeRepoIndexPb, ContentRating } from '../repoIndexPb';
 
 /** Minimal protobuf writer, just enough to build fixtures. */
 function varint(value: number | bigint): number[] {
@@ -108,6 +108,18 @@ test('decodes multi-byte UTF-8 names', () => {
   const extension = [...str(1, 'マンガ / 漫画'), ...str(2, 'eu.kanade.tachiyomi.extension.ja.x')];
   const decoded = decodeRepoIndexPb(new Uint8Array([...msg(101, msg(1, extension))]));
   expect(decoded.extensions[0].name).toBe('マンガ / 漫画');
+});
+
+test('decodes an external extension-list URL and standalone list', () => {
+  const extension = [...str(1, 'External'), ...str(2, 'ext.external')];
+  const index = decodeRepoIndexPb(
+    new Uint8Array(str(102, 'https://example.test/extensions.pb')),
+  );
+  const list = decodeRepoExtensionListPb(new Uint8Array(msg(1, extension)));
+
+  expect(index.extensionListUrl).toBe('https://example.test/extensions.pb');
+  expect(list).toHaveLength(1);
+  expect(list[0].pkg).toBe('ext.external');
 });
 
 test('rejects a truncated payload', () => {

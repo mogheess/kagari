@@ -53,6 +53,7 @@ class ManhwaEngineModule(
     override fun invalidate() {
         reactContext.removeActivityEventListener(this)
         pickPromise = null
+        clearKeepScreenOn()
         scope.cancel()
         super.invalidate()
     }
@@ -84,6 +85,13 @@ class ManhwaEngineModule(
                 activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             }
             promise.resolve(null)
+        }
+    }
+
+    private fun clearKeepScreenOn() {
+        val activity = reactContext.currentActivity ?: return
+        activity.runOnUiThread {
+            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
     }
 

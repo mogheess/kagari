@@ -8,7 +8,15 @@
  * The thumb fades in while the list moves (or while it's being dragged) and
  * fades out after a short idle, so it doesn't sit on top of the content.
  */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   Animated,
   PanResponder,
@@ -17,6 +25,7 @@ import {
   type ScrollView,
 } from 'react-native';
 import { useTheme } from '../theme/ThemeProvider';
+import { thumbTopForDrag } from './fastScrollerMath';
 
 interface Props {
   scrollRef: React.RefObject<ScrollView | null>;
@@ -24,11 +33,14 @@ interface Props {
   contentHeight: number;
   /** Visible height of the scroll view, from `onLayout`. */
   viewportHeight: number;
-  /** Current scroll offset, from `onScroll`. */
-  scrollY: number;
   /** Space to leave clear at the top and bottom of the track. */
   topInset?: number;
   bottomInset?: number;
+}
+
+export interface FastScrollerHandle {
+  /** Updates the thumb without re-rendering the chapter-list parent. */
+  onScroll(scrollY: number): void;
 }
 
 const THUMB_HEIGHT = 52;
@@ -38,15 +50,18 @@ const TOUCH_WIDTH = 36;
 const MIN_OVERFLOW_RATIO = 2;
 const FADE_OUT_DELAY = 1400;
 
-export function FastScroller({
-  scrollRef,
-  contentHeight,
-  viewportHeight,
-  scrollY,
-  topInset = 0,
-  bottomInset = 0,
-}: Props) {
+export const FastScroller = forwardRef<FastScrollerHandle, Props>(function FastScrollerComponent(
+  {
+    scrollRef,
+    contentHeight,
+    viewportHeight,
+    topInset = 0,
+    bottomInset = 0,
+  },
+  ref,
+) {
   const theme = useTheme();
+  const [scrollY, setScrollY] = useState(0);
   const [dragging, setDragging] = useState(false);
   // Mirrors the fade so the touch strip can be made inert while hidden — an
   // invisible grab area down the right edge would otherwise swallow ordinary
@@ -54,6 +69,9 @@ export function FastScroller({
   const [visible, setVisible] = useState(false);
   const opacity = useRef(new Animated.Value(0)).current;
   const fadeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dragStartTop = useRef(0);
+
+  useImperativeHandle(ref, () => ({ onScroll: setScrollY }), []);
 
   const trackHeight = Math.max(0, viewportHeight - topInset - bottomInset);
   const maxScroll = Math.max(0, contentHeight - viewportHeight);
@@ -106,13 +124,16 @@ export function FastScroller({
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: () => true,
         onPanResponderGrant: () => {
+          dragStartTop.current = geometry.current.thumbTop;
           setDragging(true);
           show();
         },
         onPanResponderMove: (_evt, gesture) => {
-          const { travel: t, maxScroll: m, thumbTop: start } = geometry.current;
+          const { travel: t, maxScroll: m } = geometry.current;
           if (t <= 0 || m <= 0) return;
-          const next = Math.min(Math.max(start + gesture.dy, 0), t);
+          // `gesture.dy` is cumulative from grant, so it must be applied to the
+          // thumb position captured at grant rather than the live thumb.
+          const next = thumbTopForDrag(dragStartTop.current, gesture.dy, t);
           scrollRef.current?.scrollTo({ y: (next / t) * m, animated: false });
         },
         onPanResponderRelease: () => {
@@ -152,7 +173,7 @@ export function FastScroller({
       </View>
     </Animated.View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   track: {

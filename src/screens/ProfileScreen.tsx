@@ -218,9 +218,12 @@ function BackupExportRow() {
     setState({ status: 'working' });
     try {
       const result = await exportMihonBackup();
+      const incomplete = result.mangaMissingChapters;
       setState({
         status: 'done',
-        message: `${result.mangaCount} title${result.mangaCount === 1 ? '' : 's'} exported`,
+        message: incomplete
+          ? `${result.mangaCount} title${result.mangaCount === 1 ? '' : 's'} exported; ${incomplete} missing chapter progress`
+          : `${result.mangaCount} title${result.mangaCount === 1 ? '' : 's'} exported`,
       });
     } catch (e) {
       setState({ status: 'error', message: e instanceof Error ? e.message : 'Export failed' });

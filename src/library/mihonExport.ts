@@ -10,7 +10,7 @@
  * them would break the compatibility this is for.
  */
 import { getEngine } from '../engine';
-import { peekManga } from '../engine/mangaCache';
+import { loadChapters, peekManga } from '../engine/mangaCache';
 import { getFavorites } from './favorites';
 import { getCategoriesSnapshot } from './categories';
 import { getChapterProgressSnapshot, chapterKey } from './chapterProgress';
@@ -21,6 +21,8 @@ export interface BackupExportResult {
   fileName: string;
   bytes: number;
   mangaCount: number;
+  /** Titles whose chapter state could not be included because their source failed. */
+  mangaMissingChapters: number;
 }
 
 export interface BackupChapter {
@@ -92,7 +94,9 @@ export function buildBackupRequest(now: Date = new Date()): {
         url: ch.url,
         name: ch.name,
         read: entry.read,
-        lastPageRead: entry.lastPage,
+        // Mihon stores the zero-based reader page index; Kagari stores a
+        // one-based page number for display and completion checks.
+        lastPageRead: Math.max(0, entry.lastPage - 1),
       });
     }
 
@@ -120,11 +124,36 @@ export function buildBackupRequest(now: Date = new Date()): {
   };
 }
 
+/**
+ * Resolve chapter lists that have fallen out of the bounded manga cache before
+ * assembling the backup. Sources can be unavailable or uninstalled, so this is
+ * best-effort and the remaining count is surfaced to the user.
+ */
+async function refreshMissingChapterLists(): Promise<void> {
+  const missing = getFavorites().filter(
+    fav => (peekManga(fav.sourceId, fav.url).chapters?.length ?? 0) === 0,
+  );
+  let cursor = 0;
+  const worker = async () => {
+    for (;;) {
+      const fav = missing[cursor++];
+      if (!fav) return;
+      try {
+        await loadChapters(fav.sourceId, fav.url);
+      } catch {
+        // The final missing count makes partial exports explicit.
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(3, missing.length) }, worker));
+}
+
 /** Writes the backup and hands it to the system share sheet. */
 export async function exportMihonBackup(): Promise<BackupExportResult> {
-  const { fileName, request } = buildBackupRequest();
+  await refreshMissingChapterLists();
+  const { fileName, request, mangaMissingChapters } = buildBackupRequest();
   const engine = getEngine();
   const result = await engine.exportMihonBackup(request, fileName);
   await engine.shareBackup(result.uri, result.fileName);
-  return result;
+  return { ...result, mangaMissingChapters };
 }

@@ -179,6 +179,8 @@ export function ReaderScreen() {
   const [activePage, setActivePage] = useState(Math.max(0, params.initialPage ?? 0));
   const [loadError, setLoadError] = useState<string | null>(null);
   const inFlight = useRef(new Set<string>());
+  const activeUrlRef = useRef(activeUrl);
+  activeUrlRef.current = activeUrl;
 
   /**
    * Resolves a chapter's pages and slots it into the window. Downloaded
@@ -198,7 +200,12 @@ export function ReaderScreen() {
             ? Array.from({ length: offlineCount }, (_, i) => ({ index: i }))
             : await loadPages(params.sourceId, url);
         setLoadedChapters(prev =>
-          insertChapter(prev, { chapter, pages, offline: offlineCount > 0 }, orderedChapters),
+          insertChapter(
+            prev,
+            { chapter, pages, offline: offlineCount > 0 },
+            orderedChapters,
+            activeUrlRef.current,
+          ),
         );
       } catch (e) {
         // Only the chapter the reader was opened on is worth surfacing; a
@@ -210,7 +217,7 @@ export function ReaderScreen() {
         inFlight.current.delete(url);
       }
     },
-    [downloadsHydrated, engine, orderedChapters, params.sourceId, params.chapter.url],
+    [downloadsHydrated, orderedChapters, params.sourceId, params.chapter.url],
   );
 
   // Open on the requested chapter, then keep its neighbours warm. Preloading is
@@ -443,6 +450,32 @@ export function ReaderScreen() {
   // A jump can only be performed once the target's pages are in `items`, which
   // is a render later than the load resolving.
   const pendingJump = useRef<{ url: string; atEnd: boolean } | null>(null);
+
+  // In paged modes, preloading an earlier chapter prepends cells. FlatList
+  // does not maintain the visible item for horizontal/paged lists, so restore
+  // the same page key at its new index after the data window changes.
+  const previousPagedKeys = useRef<string[]>([]);
+  useEffect(() => {
+    if (!paged) {
+      previousPagedKeys.current = [];
+      return;
+    }
+    const key = currentRef.current;
+    const previousKeys = previousPagedKeys.current;
+    previousPagedKeys.current = items.map(item => item.key);
+    if (!key) return;
+    const previousIndex = previousKeys.indexOf(key);
+    const index = items.findIndex(item => item.key === key);
+    if (previousIndex < 0 || index < 0 || previousIndex === index) return;
+    requestAnimationFrame(() => {
+      try {
+        listRef.current?.scrollToIndex({ index, animated: false });
+      } catch {
+        // onScrollToIndexFailed recovers.
+      }
+    });
+  }, [items, paged]);
+
   useEffect(() => {
     const jump = pendingJump.current;
     if (!jump) return;

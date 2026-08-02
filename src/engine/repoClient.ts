@@ -21,7 +21,7 @@
  * siblings of the index under `apk/<apk>` (legacy).
  */
 import { gunzipSync } from 'fflate';
-import { decodeRepoIndexPb, ContentRating } from './repoIndexPb';
+import { decodeRepoExtensionListPb, decodeRepoIndexPb, ContentRating } from './repoIndexPb';
 import type { PbExtension } from './repoIndexPb';
 import type { AvailableExtensionDto, RepoDto } from './types';
 
@@ -154,6 +154,14 @@ function decodeText(bytes: Uint8Array): string {
   return decodeURIComponent(escape(out));
 }
 
+function resolveIndexUrl(url: string, base: string): string {
+  try {
+    return new URL(url, base).toString();
+  } catch {
+    return url;
+  }
+}
+
 function fromPb(ext: PbExtension, repoUrl: string): AvailableExtensionDto {
   return {
     name: cleanName(ext.name),
@@ -221,7 +229,7 @@ async function loadIndex(
     const descriptor = JSON.parse(decodeText(bytes)) as RepoDescriptor;
     const next = descriptor.index_v2;
     if (!next) throw new Error('Repo descriptor has no index_v2');
-    return loadIndex(next, repoUrl, depth + 1);
+    return loadIndex(resolveIndexUrl(next, indexUrl), repoUrl, depth + 1);
   }
 
   // `[` — legacy JSON index.
@@ -230,7 +238,14 @@ async function loadIndex(
     return raw.map(e => fromLegacyJson(e, indexUrl, repoUrl));
   }
 
-  return decodeRepoIndexPb(bytes).extensions.map(e => fromPb(e, repoUrl));
+  const decoded = decodeRepoIndexPb(bytes);
+  if (decoded.extensionListUrl) {
+    if (depth > 2) throw new Error('Repo index redirects too many times');
+    let listBytes = await fetchBinary(resolveIndexUrl(decoded.extensionListUrl, indexUrl));
+    if (isGzip(listBytes)) listBytes = gunzipSync(listBytes);
+    return decodeRepoExtensionListPb(listBytes).map(e => fromPb(e, repoUrl));
+  }
+  return decoded.extensions.map(e => fromPb(e, repoUrl));
 }
 
 /** Fetches a single repo index and maps it to AvailableExtensionDto[]. */

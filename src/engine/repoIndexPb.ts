@@ -16,6 +16,7 @@
  *     3   string signingKeyFingerprint
  *     4   Meta   { 1 string website; 2 string support }
  *     101  ExtensionList { repeated Extension extensions = 1 }
+ *     102  string extensionListUrl
  *   }
  *
  *   Extension {
@@ -74,6 +75,7 @@ export interface PbIndex {
   shortName?: string;
   signingKeyFingerprint?: string;
   website?: string;
+  extensionListUrl?: string;
   extensions: PbExtension[];
 }
 
@@ -246,6 +248,20 @@ function decodeExtension(r: Reader): PbExtension {
   return ext;
 }
 
+function decodeExtensionList(r: Reader): PbExtension[] {
+  const extensions: PbExtension[] = [];
+  for (const [field, wire] of r.tags()) {
+    if (field === 1 && wire === WIRE_LEN) extensions.push(decodeExtension(r.sub()));
+    else r.skip(wire);
+  }
+  return extensions;
+}
+
+/** Decodes an already-inflated standalone `ExtensionList` payload. */
+export function decodeRepoExtensionListPb(bytes: Uint8Array): PbExtension[] {
+  return decodeExtensionList(new Reader(bytes));
+}
+
 /** Decodes an already-inflated `index.pb` payload. */
 export function decodeRepoIndexPb(bytes: Uint8Array): PbIndex {
   const index: PbIndex = { name: '', extensions: [] };
@@ -261,12 +277,9 @@ export function decodeRepoIndexPb(bytes: Uint8Array): PbIndex {
         else meta.skip(mw);
       }
     } else if (field === 101 && wire === WIRE_LEN) {
-      const list = r.sub();
-      for (const [lf, lw] of list.tags()) {
-        if (lf === 1 && lw === WIRE_LEN) index.extensions.push(decodeExtension(list.sub()));
-        else list.skip(lw);
-      }
-    } else r.skip(wire);
+      index.extensions.push(...decodeExtensionList(r.sub()));
+    } else if (field === 102 && wire === WIRE_LEN) index.extensionListUrl = r.string();
+    else r.skip(wire);
   }
   return index;
 }

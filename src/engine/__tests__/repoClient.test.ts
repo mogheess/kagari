@@ -88,6 +88,35 @@ function pbIndex(pkg: string, versionName: string, apkUrl: string): Uint8Array {
   return new Uint8Array(bytes);
 }
 
+function pbExternalIndex(url: string): Uint8Array {
+  const body = utf8(url);
+  // field 102, wire type 2 => tag 818 => b2 06
+  return new Uint8Array([0xb2, 0x06, body.length, ...body]);
+}
+
+function pbExtensionList(pkg: string, versionName: string, apkUrl: string): Uint8Array {
+  const full = pbIndex(pkg, versionName, apkUrl);
+  // Reuse the fixture encoder by decoding the outer index's field 101 payload:
+  // skip field 1 (repo name), then the field-101 tag and its length.
+  let offset = 0;
+  const readVarint = () => {
+    let value = 0;
+    let multiplier = 1;
+    for (;;) {
+      const byte = full[offset++];
+      value += (byte % 128) * multiplier;
+      if (byte < 128) return value;
+      multiplier *= 128;
+    }
+  };
+  readVarint();
+  const nameLength = readVarint();
+  offset += nameLength;
+  readVarint();
+  const length = readVarint();
+  return full.slice(offset, offset + length);
+}
+
 const NOT_INSTALLED = () => false;
 
 const TOMBSTONE = JSON.stringify([
@@ -191,6 +220,25 @@ test('accepts a bare repo directory URL', async () => {
 
   expect(result).toHaveLength(1);
   expect(result[0].lang).toBe('all');
+});
+
+test('follows index v2 extensionListUrl', async () => {
+  const requested = mockHttp({
+    'https://example.test/repo/index.pb': pbExternalIndex('extensions.pb'),
+    'https://example.test/repo/extensions.pb': pbExtensionList(
+      'eu.kanade.tachiyomi.extension.en.external',
+      '1.6.2',
+      'https://cdn.test/external.apk',
+    ),
+  });
+
+  const result = await fetchRepoExtensions('https://example.test/repo', NOT_INSTALLED);
+
+  expect(requested).toEqual([
+    'https://example.test/repo/index.pb',
+    'https://example.test/repo/extensions.pb',
+  ]);
+  expect(result[0].pkg).toBe('eu.kanade.tachiyomi.extension.en.external');
 });
 
 test('marks installed extensions', async () => {

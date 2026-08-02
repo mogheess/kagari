@@ -63,13 +63,16 @@ export function applyMihonBackup(backup: MihonBackupDto): MihonImportSummary {
     });
 
     for (const c of m.chapters) {
+      // Mihon persists the zero-based reader page index. Kagari's progress is
+      // one-based; a read chapter with index 0 still represents one seen page.
+      const lastPage = c.lastPageRead > 0 ? c.lastPageRead + 1 : c.read ? 1 : 0;
       chapters.push({
         sourceId: m.sourceId,
         chapterUrl: c.url,
-        lastPage: c.lastPageRead,
+        lastPage,
         // Mihon doesn't store total page count in the backup; mark read chapters
         // as complete (lastPage acts as the floor) and leave others open-ended.
-        pageCount: c.read ? Math.max(c.lastPageRead, 1) : 0,
+        pageCount: c.read ? Math.max(lastPage, 1) : 0,
         read: c.read,
         readAt: m.lastChapter?.readAt ?? m.dateAdded,
       });
