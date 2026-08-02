@@ -55,7 +55,7 @@ test('decodes an index v2 payload', () => {
     ...str(4, '1.6'),
     ...uint(5, 24),
     ...str(6, '1.6.24'),
-    ...uint(7, ContentRating.Suggestive),
+    ...uint(7, ContentRating.Mixed),
     ...msg(8, source),
   ];
   const index = [
@@ -79,7 +79,7 @@ test('decodes an index v2 payload', () => {
   expect(ext.versionName).toBe('1.6.24');
   expect(ext.versionCode).toBe(24);
   expect(ext.extensionLib).toBe('1.6');
-  expect(ext.contentRating).toBe(ContentRating.Suggestive);
+  expect(ext.contentRating).toBe(ContentRating.Mixed);
   expect(ext.apkUrl).toContain('.apk');
   expect(ext.jarUrl).toContain('.jar');
   expect(ext.sources).toHaveLength(1);

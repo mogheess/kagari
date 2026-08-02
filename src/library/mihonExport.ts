@@ -125,14 +125,24 @@ export function buildBackupRequest(now: Date = new Date()): {
 }
 
 /**
- * Resolve chapter lists that have fallen out of the bounded manga cache before
+ * Number of uncached titles to fetch before giving up and exporting what we
+ * have. Two reasons for a cap: the user is staring at a spinner with no
+ * progress, and `mangaCache` holds a bounded number of entries — fetching more
+ * than it can hold would evict the earlier results before the backup is even
+ * assembled, so the extra requests buy nothing.
+ */
+const MAX_CHAPTER_REFETCHES = 60;
+const REFETCH_CONCURRENCY = 3;
+
+/**
+ * Resolve chapter lists that have fallen out of the manga cache before
  * assembling the backup. Sources can be unavailable or uninstalled, so this is
  * best-effort and the remaining count is surfaced to the user.
  */
 async function refreshMissingChapterLists(): Promise<void> {
-  const missing = getFavorites().filter(
-    fav => (peekManga(fav.sourceId, fav.url).chapters?.length ?? 0) === 0,
-  );
+  const missing = getFavorites()
+    .filter(fav => (peekManga(fav.sourceId, fav.url).chapters?.length ?? 0) === 0)
+    .slice(0, MAX_CHAPTER_REFETCHES);
   let cursor = 0;
   const worker = async () => {
     for (;;) {
@@ -145,7 +155,9 @@ async function refreshMissingChapterLists(): Promise<void> {
       }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(3, missing.length) }, worker));
+  await Promise.all(
+    Array.from({ length: Math.min(REFETCH_CONCURRENCY, missing.length) }, worker),
+  );
 }
 
 /** Writes the backup and hands it to the system share sheet. */

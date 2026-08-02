@@ -239,11 +239,18 @@ async function loadIndex(
   }
 
   const decoded = decodeRepoIndexPb(bytes);
-  if (decoded.extensionListUrl) {
-    if (depth > 2) throw new Error('Repo index redirects too many times');
-    let listBytes = await fetchBinary(resolveIndexUrl(decoded.extensionListUrl, indexUrl));
-    if (isGzip(listBytes)) listBytes = gunzipSync(listBytes);
-    return decodeRepoExtensionListPb(listBytes).map(e => fromPb(e, repoUrl));
+  // A store may keep its catalogue in a separate file (Mihon's
+  // `extensionListUrl`). Both fields can be present, so an unreachable external
+  // list falls back to whatever was inline rather than failing the whole repo.
+  if (decoded.extensionListUrl && depth <= 2) {
+    try {
+      let listBytes = await fetchBinary(resolveIndexUrl(decoded.extensionListUrl, indexUrl));
+      if (isGzip(listBytes)) listBytes = gunzipSync(listBytes);
+      const external = decodeRepoExtensionListPb(listBytes);
+      if (external.length > 0) return external.map(e => fromPb(e, repoUrl));
+    } catch {
+      // Fall through to the inline list below.
+    }
   }
   return decoded.extensions.map(e => fromPb(e, repoUrl));
 }

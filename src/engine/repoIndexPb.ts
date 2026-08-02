@@ -5,35 +5,42 @@
  * protobuf index. keiyoushi now serves only a two-entry "Outdated App" stub at
  * the old JSON path, so anything still reading it sees an empty catalogue.
  *
- * There is no published `.proto`, so the schema below was recovered from the
- * wire format of keiyoushi's live index. Field *numbers* and types are exact;
- * the names are ours. Unknown fields are skipped, so additive changes upstream
- * degrade to missing optional data rather than a parse failure.
+ * Field numbers and names below match Mihon's own model
+ * (`mihon.data.extension.model.NetworkExtensionStore`) rather than being
+ * inferred from the wire — worth checking there first before adding anything.
+ * Unknown fields are still skipped, so additive changes upstream degrade to
+ * missing optional data rather than a parse failure.
  *
- *   Index {
+ *   ExtensionStore {
  *     1   string name                    // "Keiyoushi"
- *     2   string shortName               // "KEI"
- *     3   string signingKeyFingerprint
- *     4   Meta   { 1 string website; 2 string support }
- *     101  ExtensionList { repeated Extension extensions = 1 }
- *     102  string extensionListUrl
+ *     2   string badgeLabel              // "KEI"
+ *     3   string signingKey
+ *     4   Contact { 1 string website; 2 string discord }
+ *     101 ExtensionList { repeated Extension extensions = 1 }
+ *     102 string extensionListUrl        // list lives in a separate file
  *   }
  *
  *   Extension {
  *     1   string name
- *     2   string pkg
- *     3   Urls   { 1 string apk; 2 string icon; 501 string jar }
+ *     2   string packageName
+ *     3   Resources { 1 string apkUrl; 2 string iconUrl }
  *     4   string extensionLib            // "1.4" | "1.6"
- *     5   uint32 versionCode
+ *     5   uint64 versionCode
  *     6   string versionName
- *     7   uint32 contentRating           // 1 none, 2 suggestive, 3 nsfw
+ *     7   ContentWarning contentWarning  // 0 unspecified, 1 safe, 2 mixed, 3 nsfw
  *     8   repeated Source
  *   }
  *
- *   Source { 1 uint64 id; 2 string name; 3 string lang; 4 string baseUrl }
+ *   Source {
+ *     1 uint64 id; 2 string name; 3 string language; 4 string homeUrl;
+ *     5 repeated string mirrorUrls; 7 string message
+ *   }
  *
- * `contentRating` is the manifest's `tachiyomix.contentWarning` plus one (proto
- * enums reserve 0 for "unspecified").
+ * `contentWarning` is the manifest's `tachiyomix.contentWarning` plus one, since
+ * the enum reserves 0 for "unspecified".
+ *
+ * Keiyoushi additionally emits a `jar` URL at Resources field 501, which isn't
+ * in Mihon's model — it's decoded here but nothing depends on it.
  */
 
 const WIRE_VARINT = 0;
@@ -41,11 +48,15 @@ const WIRE_I64 = 1;
 const WIRE_LEN = 2;
 const WIRE_I32 = 5;
 
-/** Content rating carried by index v2 entries. */
+/**
+ * `ContentWarning` from Mihon's model. Note Mihon treats `Mixed` and above as
+ * adult; Kagari only flags `Nsfw`, because `Mixed` covers sources that merely
+ * carry some adult titles and marking those 18+ hides most of the catalogue.
+ */
 export enum ContentRating {
   Unspecified = 0,
   Safe = 1,
-  Suggestive = 2,
+  Mixed = 2,
   Nsfw = 3,
 }
 
