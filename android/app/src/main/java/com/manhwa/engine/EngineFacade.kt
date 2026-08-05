@@ -29,6 +29,9 @@ import com.manhwa.engine.dto.MangasPageDto
 import com.manhwa.engine.dto.PageDto
 import com.manhwa.engine.dto.SourceDto
 import com.manhwa.engine.dto.TierListExportDto
+import com.manhwa.engine.backup.ExportRequest
+import com.manhwa.engine.backup.ExportResult
+import com.manhwa.engine.backup.MihonBackupExporter
 import com.manhwa.engine.backup.MihonBackupImporter
 import com.manhwa.engine.backup.MihonImportResult
 import com.manhwa.engine.loader.ExtensionLoader
@@ -53,12 +56,10 @@ import uy.kohesive.injekt.injectLazy
  * The single entry point the RN bridge talks to. Holds loaded sources and
  * exposes a suspend API that returns DTOs.
  *
- * Browse/detail/page calls currently go through the source's RxJava `fetch*`
- * Observable (bridged to suspend via `awaitSingle`). The vendored source-api
- * exposes only those deprecated Rx methods, not extension-lib 1.6's suspend
- * `getPopularManga`/`getPageList`/etc. Most keiyoushi `ParsedHttpSource`
- * extensions override the request/parse methods, so the Rx path works; sources
- * that override *only* the suspend methods will not. See AGENTS.md "Known gaps".
+ * Browse/detail/page calls go through extension-lib 1.6's suspend API. Lib 1.4
+ * extensions don't implement it, but the vendored `HttpSource` bridges each
+ * suspend call down to the deprecated RxJava `fetch*` method they do implement,
+ * so both generations work from one call path.
  */
 class EngineFacade(context: Context) {
 
@@ -112,27 +113,53 @@ class EngineFacade(context: Context) {
         return MihonBackupImporter.parse(appContext, uriString)
     }
 
+    /** Writes a Mihon-compatible `.tachibk` and returns a shareable URI. */
+    fun exportMihonBackup(request: ExportRequest, fileName: String): ExportResult {
+        return MihonBackupExporter.export(appContext, request, fileName)
+    }
+
+    /** Hands an exported backup to the system share sheet. */
+    fun shareBackup(uriString: String, fileName: String) {
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "application/octet-stream"
+            putExtra(Intent.EXTRA_STREAM, Uri.parse(uriString))
+            putExtra(Intent.EXTRA_TITLE, fileName)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        val chooser = Intent.createChooser(send, "Save backup").apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        appContext.startActivity(chooser)
+    }
+
     fun trustSignature(pkg: String, certSha256: String) {
         trust.trust(pkg, certSha256)
         reload()
     }
 
+    // Browse/read always goes through the extension-lib 1.6 suspend API. Lib 1.4
+    // extensions don't implement it, but `HttpSource` bridges each call down to
+    // the Observable `fetch*` method they do implement. Calling `fetch*`
+    // directly would be wrong in the other direction: a 1.6 extension may
+    // implement only the suspend entry point (Weeb Central, for one, ships no
+    // `fetchPopularManga` at all).
+
     suspend fun getPopular(sourceId: String, page: Int): MangasPageDto {
         val source = catalogue(sourceId)
-        val result = source.fetchPopularManga(page).awaitSingle()
+        val result = source.getPopularManga(page)
         return Mappers.mangasPageToDto(source.id, result)
     }
 
     suspend fun getLatest(sourceId: String, page: Int): MangasPageDto {
         val source = catalogue(sourceId)
-        val result = source.fetchLatestUpdates(page).awaitSingle()
+        val result = source.getLatestUpdates(page)
         return Mappers.mangasPageToDto(source.id, result)
     }
 
     suspend fun search(sourceId: String, query: String, page: Int): MangasPageDto {
         val source = catalogue(sourceId)
         val filters: FilterList = source.getFilterList()
-        val result = source.fetchSearchManga(page, query, filters).awaitSingle()
+        val result = source.getSearchManga(page, query, filters)
         return Mappers.mangasPageToDto(source.id, result)
     }
 
@@ -142,7 +169,10 @@ class EngineFacade(context: Context) {
         // `mangaDetailsParse` typically returns a partial SManga without `url`
         // (the app already knows it). Re-attach the known url so the mapper
         // doesn't hit an uninitialized lateinit.
-        val result = source.fetchMangaDetails(stub).awaitSingle().apply { url = mangaUrl }
+        val result = source
+            .getMangaUpdate(stub, emptyList(), fetchDetails = true, fetchChapters = false)
+            .manga
+            .apply { url = mangaUrl }
         return Mappers.mangaToDto(source.id, result)
     }
 
@@ -169,14 +199,16 @@ class EngineFacade(context: Context) {
     suspend fun getChapters(sourceId: String, mangaUrl: String): List<ChapterDto> {
         val source = source(sourceId)
         val stub = SManga.create().apply { url = mangaUrl; title = "" }
-        val result: List<SChapter> = source.fetchChapterList(stub).awaitSingle()
+        val result: List<SChapter> = source
+            .getMangaUpdate(stub, emptyList(), fetchDetails = false, fetchChapters = true)
+            .chapters
         return result.map { Mappers.chapterToDto(source.id, mangaUrl, it) }
     }
 
     suspend fun getPages(sourceId: String, chapterUrl: String): List<PageDto> {
         val source = source(sourceId)
         val stub = SChapter.create().apply { url = chapterUrl; name = "" }
-        val result: List<Page> = source.fetchPageList(stub).awaitSingle()
+        val result: List<Page> = source.getPageList(stub)
         return result.map { Mappers.pageToDto(it) }
     }
 
@@ -189,7 +221,7 @@ class EngineFacade(context: Context) {
         }
         val url = page.imageUrl ?: if (source is HttpSource) {
             val model = Page(page.index, page.url ?: "", page.imageUrl)
-            source.fetchImageUrl(model).awaitSingle()
+            source.getImageUrl(model)
         } else {
             page.url ?: ""
         }
@@ -739,7 +771,7 @@ class EngineFacade(context: Context) {
         if (!existing.isNullOrBlank()) return existing
 
         return try {
-            source.fetchImageUrl(model).awaitSingle()
+            source.getImageUrl(model)
         } catch (error: Throwable) {
             val directPageUrl = page.url?.takeIf { isLikelyImageUrl(it) }
             if (directPageUrl.isNullOrBlank()) {

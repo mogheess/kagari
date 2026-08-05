@@ -2,6 +2,7 @@ package com.manhwa.engine.bridge
 
 import android.app.Activity
 import android.content.Intent
+import android.view.WindowManager
 import com.facebook.react.bridge.ActivityEventListener
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -9,6 +10,7 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.manhwa.engine.EngineException
 import com.manhwa.engine.EngineFacade
+import com.manhwa.engine.backup.ExportRequest
 import com.manhwa.engine.dto.PageDto
 import com.manhwa.engine.dto.TierListExportDto
 import com.manhwa.engine.repo.ApkInstaller
@@ -51,6 +53,7 @@ class ManhwaEngineModule(
     override fun invalidate() {
         reactContext.removeActivityEventListener(this)
         pickPromise = null
+        clearKeepScreenOn()
         scope.cancel()
         super.invalidate()
     }
@@ -60,6 +63,47 @@ class ManhwaEngineModule(
     @ReactMethod
     fun reload(promise: Promise) = resolve(promise) {
         facade.reload()
+        ""
+    }
+
+    /**
+     * Holds the screen awake while reading. The flag lives on the window, so it
+     * must be set on the UI thread and cleared when the reader closes —
+     * otherwise the screen stays on for the rest of the session.
+     */
+    @ReactMethod
+    fun setKeepScreenOn(enabled: Boolean, promise: Promise) {
+        val activity: Activity? = reactContext.currentActivity
+        if (activity == null) {
+            promise.resolve(null)
+            return
+        }
+        activity.runOnUiThread {
+            if (enabled) {
+                activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            } else {
+                activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+            promise.resolve(null)
+        }
+    }
+
+    private fun clearKeepScreenOn() {
+        val activity = reactContext.currentActivity ?: return
+        activity.runOnUiThread {
+            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
+    @ReactMethod
+    fun exportMihonBackup(requestJson: String, fileName: String, promise: Promise) = resolve(promise) {
+        val request = json.decodeFromString(ExportRequest.serializer(), requestJson)
+        json.encodeToString(facade.exportMihonBackup(request, fileName))
+    }
+
+    @ReactMethod
+    fun shareBackup(uri: String, fileName: String, promise: Promise) = resolve(promise) {
+        facade.shareBackup(uri, fileName)
         ""
     }
 

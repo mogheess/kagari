@@ -83,8 +83,8 @@ android {
         applicationId "app.kagari"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 5
-        versionName "0.5"
+        versionCode 6
+        versionName "0.6"
     }
     signingConfigs {
         debug {
@@ -123,6 +123,18 @@ android {
             shrinkResources enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
+    }
+
+    kotlinOptions {
+        // The vendored `eu.kanade.tachiyomi` interfaces give bodies to members
+        // that extensions may not override (notably the extension-lib 1.6
+        // suspend API). Kotlin's default scheme compiles those to a synthetic
+        // `Interface$DefaultImpls` that only classes compiled against it can
+        // reach — an extension APK built elsewhere would hit AbstractMethodError.
+        // `all` emits real JVM default methods so extensions inherit them;
+        // `-compatibility` also keeps DefaultImpls for anything still expecting
+        // the old scheme.
+        freeCompilerArgs += ["-Xjvm-default=all-compatibility"]
     }
 }
 

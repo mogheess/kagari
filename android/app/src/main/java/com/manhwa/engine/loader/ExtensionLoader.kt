@@ -75,15 +75,18 @@ class ExtensionLoader(
         }
         val versionCode = PackageInfoCompat.getLongVersionCode(pkgInfo).toInt()
 
-        // The lib version is the versionName minus its last component, e.g.
-        // "1.4.10" -> "1.4". This is how Mihon derives it.
-        val libVersion = versionName.substringBeforeLast('.').toDoubleOrNull()
+        val metadata = appInfo.metaData
+
+        // Extensions built by the current tachiyomix plugin declare the lib
+        // version outright. Older ones don't, and there the version name minus
+        // its last component is the lib version ("1.4.10" -> "1.4"), which is
+        // how Mihon derives it.
+        val libVersion = declaredLibVersion(metadata)
+            ?: versionName.substringBeforeLast('.').toDoubleOrNull()
         if (libVersion == null || libVersion < LIB_VERSION_MIN || libVersion > LIB_VERSION_MAX) {
             Log.w(TAG, "Skipping ${pkgInfo.packageName}: unsupported lib version $libVersion")
             return null
         }
-
-        val metadata = appInfo.metaData
         val classList = metadata?.getString(METADATA_SOURCE_CLASS)
             ?.split(";")
             ?.map { it.trim() }
@@ -93,7 +96,16 @@ class ExtensionLoader(
             return null
         }
 
-        val isNsfw = metadata.getInt(METADATA_NSFW, 0) == 1
+        // The tachiyomix plugin now sets the legacy `nsfw` flag for anything
+        // merely suggestive, which would mark most of the catalogue 18+. Prefer
+        // the graded `contentWarning` (0 none, 1 suggestive, 2 NSFW) when the
+        // extension carries one.
+        val contentWarning = metadata.getInt(METADATA_CONTENT_WARNING, -1)
+        val isNsfw = if (contentWarning >= 0) {
+            contentWarning >= CONTENT_WARNING_NSFW
+        } else {
+            metadata.getInt(METADATA_NSFW, 0) == 1
+        }
 
         val signatureHash = SignatureTrust.signatureHash(pm, pkgInfo.packageName)
         // This app is sideloaded and the user explicitly installs each extension,
@@ -134,6 +146,24 @@ class ExtensionLoader(
         )
     }
 
+    /**
+     * Reads `tachiyomix.extensionLib`, which the manifest carries as a float.
+     *
+     * Widening that float straight to a double is a trap: `1.4f.toDouble()` is
+     * 1.399999976158142 and `1.6f.toDouble()` is 1.6000000238418579, so both
+     * fall outside the supported window and every extension declaring the
+     * metadata gets skipped. Going through the shortest decimal representation
+     * that round-trips the float ("1.4") gives the intended value exactly.
+     */
+    private fun declaredLibVersion(metadata: android.os.Bundle?): Double? {
+        if (metadata == null) return null
+        // Float first: reading it as a string logs a Bundle type-mismatch stack
+        // trace for every extension, and float is what the plugin emits.
+        val asFloat = metadata.getFloat(METADATA_EXTENSION_LIB, 0f)
+        if (asFloat > 0f) return asFloat.toString().toDoubleOrNull()
+        return metadata.getString(METADATA_EXTENSION_LIB)?.toDoubleOrNull()
+    }
+
     private fun instantiate(classLoader: ClassLoader, className: String): List<Source> {
         return try {
             val obj = Class.forName(className, false, classLoader)
@@ -159,6 +189,11 @@ class ExtensionLoader(
         private const val EXTENSION_FEATURE = "tachiyomi.extension"
         private const val METADATA_SOURCE_CLASS = "tachiyomi.extension.class"
         private const val METADATA_NSFW = "tachiyomi.extension.nsfw"
+
+        // Added by the tachiyomix build plugin (extension-lib 1.6 era).
+        private const val METADATA_EXTENSION_LIB = "tachiyomix.extensionLib"
+        private const val METADATA_CONTENT_WARNING = "tachiyomix.contentWarning"
+        private const val CONTENT_WARNING_NSFW = 2
 
         // Supported extension lib-version window (matches Mihon). Keep the
         // vendored source-api within this range.

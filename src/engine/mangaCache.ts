@@ -68,6 +68,21 @@ export function peekManga(
   return { details: hit?.details, chapters: hit?.chapters };
 }
 
+/**
+ * Seeds the cache without a network round trip. Used where details and chapters
+ * are already in hand — a restored backup, or a test.
+ */
+export function primeMangaCache(
+  sourceId: string,
+  mangaUrl: string,
+  details?: MangaDto,
+  chapters?: ChapterDto[],
+): void {
+  const key = keyFor(sourceId, mangaUrl);
+  cache.set(key, { ...cache.get(key), details, chapters, cachedAt: Date.now() });
+  schedulePersist();
+}
+
 export async function loadMangaDetails(
   sourceId: string,
   mangaUrl: string,

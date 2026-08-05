@@ -272,8 +272,8 @@ export function ExtensionsScreen() {
 
       {repos.length === 0 ? (
         <Text style={[styles.repoHint, { color: theme.colors.textFaint }]}>
-          No repositories yet. Paste a source repository URL above (an index.min.json
-          link) to browse and install extensions.
+          No repositories yet. Paste a source repository URL above (an index.pb or
+          index.min.json link) to browse and install extensions.
         </Text>
       ) : (
         repos.map(r => (

@@ -108,3 +108,57 @@ function subscribe(cb: () => void): () => void {
 export function useReaderMode(sourceId: string, mangaUrl: string): ReaderMode {
   return useSyncExternalStore(subscribe, () => getReaderMode(sourceId, mangaUrl));
 }
+
+/**
+ * Global reader toggles (not per-series — these are habits, not layout
+ * choices). Kept in their own store so a new toggle never has to migrate the
+ * per-series reading-mode state.
+ */
+export interface ReaderToggles {
+  /** Hold the screen awake while the reader is open. */
+  keepScreenOn: boolean;
+}
+
+const DEFAULT_TOGGLES: ReaderToggles = { keepScreenOn: false };
+
+const togglesStore = makePersistence<ReaderToggles>('@kagari/readerToggles/v1');
+
+let toggles: ReaderToggles = DEFAULT_TOGGLES;
+const toggleListeners = new Set<() => void>();
+
+function emitToggles(): void {
+  for (const l of toggleListeners) l();
+}
+
+async function hydrateToggles(): Promise<void> {
+  const stored = await togglesStore.load();
+  if (stored) toggles = { ...DEFAULT_TOGGLES, ...stored };
+  emitToggles();
+}
+
+export function getReaderToggles(): ReaderToggles {
+  return toggles;
+}
+
+export function setReaderToggle<K extends keyof ReaderToggles>(
+  key: K,
+  value: ReaderToggles[K],
+): void {
+  if (toggles[key] === value) return;
+  toggles = { ...toggles, [key]: value };
+  togglesStore.save(toggles);
+  emitToggles();
+}
+
+function subscribeToggles(cb: () => void): () => void {
+  toggleListeners.add(cb);
+  return () => {
+    toggleListeners.delete(cb);
+  };
+}
+
+export function useReaderToggles(): ReaderToggles {
+  return useSyncExternalStore(subscribeToggles, getReaderToggles);
+}
+
+void hydrateToggles();

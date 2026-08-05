@@ -7,6 +7,7 @@
 import { useSyncExternalStore } from 'react';
 import { makePersistence } from '../store/persist';
 import { getEngine } from '../engine';
+import { loadPages } from '../engine/pageCache';
 import type { MangaDto, ChapterDto } from '../engine/types';
 
 export type DownloadStatus = 'queued' | 'downloading' | 'done' | 'error';
@@ -85,7 +86,7 @@ async function pump(): Promise<void> {
   patch(sourceId, chapterUrl, { status: 'downloading', downloaded: 0, error: undefined });
   try {
     const engine = getEngine();
-    const pages = await engine.getPages(sourceId, chapterUrl);
+    const pages = await loadPages(sourceId, chapterUrl);
     if (!entries.some(e => sameChapter(e, sourceId, chapterUrl))) return; // cancelled
     if (pages.length === 0) {
       // A "done" download with zero pages is useless and can't be re-queued
@@ -135,6 +136,51 @@ export function enqueueDownload(manga: MangaDto, chapter: ChapterDto): void {
   void pump();
 }
 
+/**
+ * Queues many chapters at once, skipping any already queued, downloading or
+ * done (a failed one is retried). One store write and one notification for the
+ * batch — [enqueueDownload] in a loop re-serializes the whole queue per
+ * chapter, which stalls the UI when adding a few hundred.
+ *
+ * Returns the number of chapters actually added.
+ */
+export function enqueueDownloads(manga: MangaDto, chapters: readonly ChapterDto[]): number {
+  const skip = new Set(
+    entries
+      .filter(e => e.sourceId === manga.sourceId && e.status !== 'error')
+      .map(e => e.chapterUrl),
+  );
+  const now = Date.now();
+  const added: DownloadEntry[] = [];
+  const seen = new Set<string>();
+  for (const chapter of chapters) {
+    if (skip.has(chapter.url) || seen.has(chapter.url)) continue;
+    seen.add(chapter.url);
+    added.push({
+      sourceId: manga.sourceId,
+      mangaUrl: manga.url,
+      title: manga.title,
+      thumbnailUrl: manga.thumbnailUrl,
+      chapterUrl: chapter.url,
+      chapterName: chapter.name,
+      status: 'queued',
+      pageCount: 0,
+      downloaded: 0,
+      createdAt: now,
+    });
+  }
+  if (added.length === 0) return 0;
+  // Drop any failed entries being requeued, then append in the given order.
+  entries = [
+    ...entries.filter(e => !(e.sourceId === manga.sourceId && seen.has(e.chapterUrl))),
+    ...added,
+  ];
+  emit();
+  persist();
+  void pump();
+  return added.length;
+}
+
 /** Removes a chapter from the queue/library and deletes its files. */
 export function removeDownload(sourceId: string, chapterUrl: string): void {
   entries = entries.filter(e => !sameChapter(e, sourceId, chapterUrl));
@@ -172,6 +218,22 @@ export function useDownloads(): DownloadEntry[] {
 /** True once the persisted queue has been merged into memory. */
 export function useDownloadsHydrated(): boolean {
   return useSyncExternalStore(subscribe, getHydratedSnapshot);
+}
+
+/**
+ * Non-reactive download lookup, for callers outside React (the reader loads
+ * chapters on demand as you scroll, not from a hook).
+ */
+export function getDownloadEntry(
+  sourceId: string,
+  chapterUrl: string,
+): DownloadEntry | undefined {
+  return entries.find(e => sameChapter(e, sourceId, chapterUrl));
+}
+
+/** Whether the persisted queue has been merged into memory yet. */
+export function isDownloadsHydrated(): boolean {
+  return hydrated;
 }
 
 /** Reactive single-chapter download state for a chapter row. */

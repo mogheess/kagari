@@ -146,6 +146,14 @@ export interface AvailableExtensionDto {
   versionName: string;
   versionCode: number;
   isNsfw: boolean;
+  /**
+   * Content rating from an index v2 repo: 1 safe, 2 suggestive, 3 NSFW.
+   * 0 when the repo's index doesn't carry one.
+   */
+  contentRating: number;
+  /** Extension-lib version the APK was built against, e.g. "1.4" or "1.6". */
+  extensionLib: string;
+  iconUrl?: string;
   sources: { name: string; lang: string; id: string; baseUrl?: string }[];
   repoUrl: string;
   installed: boolean;
@@ -294,6 +302,21 @@ export interface Engine {
   saveImageToGallery(uri: string): Promise<string>;
   /** Opens the system share sheet for a local image (file:// uri). */
   shareImage(uri: string): Promise<void>;
+
+  // backup
+  /** Writes a Mihon-compatible `.tachibk`; returns a shareable content URI. */
+  exportMihonBackup(request: unknown, fileName: string): Promise<{
+    uri: string;
+    fileName: string;
+    bytes: number;
+    mangaCount: number;
+  }>;
+  /** Opens the system share sheet for an exported backup. */
+  shareBackup(uri: string, fileName: string): Promise<void>;
+
+  // device
+  /** Holds the screen awake (reader). Best-effort; no-ops without an Activity. */
+  setKeepScreenOn(enabled: boolean): Promise<void>;
 
   // web view
   /**

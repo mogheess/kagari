@@ -40,15 +40,20 @@ export interface Palette {
 }
 
 const dark: Palette = {
-  bg: '#161618',
-  surface: '#1E1E22',
-  elevated: '#26262B',
-  border: 'rgba(255,255,255,0.08)',
-  text: '#F4F4F6',
-  textMuted: '#9A9AA3',
-  textFaint: '#6E6E77',
-  accent: '#F5A623',
-  onAccent: '#2A1705',
+  // Layers step further apart than they used to: at 8-point gaps the canvas,
+  // cards and menus read as one flat sheet, and nothing on screen has weight.
+  bg: '#121316',
+  surface: '#1B1D22',
+  elevated: '#24272E',
+  // Slightly stronger so a hairline still reads once cards carry a shadow.
+  border: 'rgba(255,255,255,0.10)',
+  text: '#F2F3F5',
+  textMuted: '#9BA0AA',
+  textFaint: '#6B7080',
+  // Pulled back from a hot signal-orange to something closer to brass; it sits
+  // beside cover art all day and shouldn't compete with it.
+  accent: '#E0A548',
+  onAccent: '#241703',
   danger: '#FF6B6B',
   glass: 'rgba(28,28,32,0.62)',
   glassHighlight: 'rgba(255,255,255,0.10)',
@@ -57,14 +62,14 @@ const dark: Palette = {
 };
 
 const light: Palette = {
-  bg: '#FAF9F7',
+  bg: '#F7F7F9',
   surface: '#FFFFFF',
   elevated: '#FFFFFF',
-  border: 'rgba(0,0,0,0.07)',
-  text: '#1A1A1D',
-  textMuted: '#6B6B72',
-  textFaint: '#9B9BA2',
-  accent: '#C26A0A',
+  border: 'rgba(16,18,24,0.08)',
+  text: '#16171B',
+  textMuted: '#61656E',
+  textFaint: '#8E939E',
+  accent: '#A96410',
   onAccent: '#FFFFFF',
   danger: '#D92D20',
   glass: 'rgba(250,249,247,0.66)',
@@ -96,6 +101,43 @@ export const radius = {
 } as const;
 
 /**
+ * Elevation.
+ *
+ * The UI was entirely flat: every surface was distinguished only by a hairline
+ * border, so cards, sheets and menus all sat on the same plane. Depth is what
+ * separates them without adding more lines or more colour.
+ *
+ * Values are deliberately soft and near-black — on a dark canvas a visible grey
+ * shadow reads as smudge rather than depth.
+ */
+export const elevation = {
+  /** Cards and rows resting on the canvas. */
+  card: {
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 2,
+  },
+  /** Cover art, which should feel like a physical object. */
+  cover: {
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 5,
+  },
+  /** Sheets and menus lifted above everything. */
+  overlay: {
+    shadowColor: '#000',
+    shadowOpacity: 0.34,
+    shadowRadius: 26,
+    shadowOffset: { width: 0, height: -6 },
+    elevation: 16,
+  },
+} as const;
+
+/**
  * Type scale. Kept restrained and refined (Linear-style). `letterSpacing`
  * is intentionally tight on display sizes and tracked-out on eyebrow labels.
  */
@@ -121,4 +163,5 @@ export const motion = {
 
 export type Spacing = typeof spacing;
 export type Radius = typeof radius;
+export type Elevation = typeof elevation;
 export type Typography = typeof typography;

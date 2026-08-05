@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { BackHandler, StyleSheet, View } from 'react-native';
+import { useIsFocused } from '@react-navigation/native';
 import { GlassTabBar } from './GlassTabBar';
 import { HomeScreen } from '../screens/HomeScreen';
 import { LibraryScreen } from '../screens/LibraryScreen';
@@ -34,14 +35,40 @@ const FAR_FAR_AWAY = 30000;
 export function TabsScreen() {
   const [active, setActive] = useState<TabKey>('home');
   const [mounted, setMounted] = useState<Set<TabKey>>(() => new Set<TabKey>(['home']));
+  const isFocused = useIsFocused();
 
-  const navigateTab = useMemo(
-    () => (key: TabKey) => {
-      setMounted(prev => (prev.has(key) ? prev : new Set(prev).add(key)));
-      setActive(key);
-    },
-    [],
-  );
+  // Tabs are local state rather than routes, so the root stack never grows when
+  // you switch tabs and Android's back press has nothing to pop — it falls
+  // through to the OS and closes the app. Keep a visit history and retrace it,
+  // which is what react-navigation's `history` backBehavior does: each tab
+  // appears at most once, revisiting moves it to the top.
+  const history = useRef<TabKey[]>(['home']);
+
+  const navigateTab = useCallback((key: TabKey) => {
+    setMounted(prev => (prev.has(key) ? prev : new Set(prev).add(key)));
+    setActive(prev => {
+      if (prev === key) return prev;
+      history.current = [...history.current.filter(k => k !== key), key];
+      return key;
+    });
+  }, []);
+
+  const onBackPress = useCallback(() => {
+    // One entry left means we're at the first tab visited: let the OS have the
+    // press so back still exits from the app's start destination.
+    if (history.current.length <= 1) return false;
+    history.current = history.current.slice(0, -1);
+    setActive(history.current[history.current.length - 1]);
+    return true;
+  }, []);
+
+  useEffect(() => {
+    // Only while the tab host is the top route — a stack screen above it
+    // (detail, reader) must keep its own back behaviour.
+    if (!isFocused) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
+  }, [isFocused, onBackPress]);
 
   return (
     <TabNavProvider active={active} navigateTab={navigateTab}>

@@ -131,6 +131,11 @@ function getSnapshot(): Category[] {
   return categories;
 }
 
+/** Non-reactive snapshot, for callers outside React (backup export). */
+export function getCategoriesSnapshot(): Category[] {
+  return categories;
+}
+
 export function useCategories(): Category[] {
   return useSyncExternalStore(subscribe, getSnapshot);
 }

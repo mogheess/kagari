@@ -5,6 +5,8 @@ import { useTheme } from '../theme/ThemeProvider';
 import { TabsScreen } from './TabsScreen';
 import { MangaDetailScreen } from '../screens/MangaDetailScreen';
 import { ReaderScreen } from '../screens/ReaderScreen';
+import { AppearanceScreen } from '../screens/AppearanceScreen';
+import { ChangelogScreen } from '../screens/ChangelogScreen';
 import { CustomizeHomeScreen } from '../screens/CustomizeHomeScreen';
 import { ExtensionsScreen } from '../screens/ExtensionsScreen';
 import { CategoriesScreen } from '../screens/CategoriesScreen';
@@ -45,6 +47,8 @@ export function RootNavigator() {
           component={ReaderScreen}
           options={{ animation: 'fade' }}
         />
+        <Stack.Screen name="Appearance" component={AppearanceScreen} />
+        <Stack.Screen name="Changelog" component={ChangelogScreen} />
         <Stack.Screen name="CustomizeHome" component={CustomizeHomeScreen} />
         <Stack.Screen name="Extensions" component={ExtensionsScreen} />
         <Stack.Screen name="Categories" component={CategoriesScreen} />

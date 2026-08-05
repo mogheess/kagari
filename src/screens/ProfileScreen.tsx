@@ -3,13 +3,16 @@ import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Linki
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useTheme, useThemePreference, type ThemePreference } from '../theme/ThemeProvider';
+import { useTheme, useAppearance } from '../theme/ThemeProvider';
 import { Icon, type IconName } from '../components/Icon';
 import { useAppUpdate, checkForAppUpdate } from '../app/appUpdate';
 import { useExtensionUpdates, checkExtensionUpdates } from '../sources/extensionUpdates';
 import { getEngine } from '../engine';
 import { APP_VERSION } from '../app/version';
+import { DISCORD_INVITE_URL, hasCommunityLinks } from '../app/community';
+import { themeById } from '../theme/themes';
 import { pickAndImportMihonBackup } from '../library/mihonImport';
+import { exportMihonBackup } from '../library/mihonExport';
 import type { RootStackParamList } from '../navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -19,15 +22,10 @@ export function ProfileScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
-  const { preference, setPreference } = useThemePreference();
+  const { appearance } = useAppearance();
   const appUpdate = useAppUpdate();
   const extUpdates = useExtensionUpdates();
 
-  const modes: { key: ThemePreference; label: string; icon: IconName }[] = [
-    { key: 'system', label: 'Auto', icon: 'settings' },
-    { key: 'light', label: 'Light', icon: 'sun' },
-    { key: 'dark', label: 'Dark', icon: 'moon' },
-  ];
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
@@ -44,36 +42,12 @@ export function ProfileScreen() {
         </Text>
 
         <Text style={[styles.sectionLabel, { color: theme.colors.textFaint }]}>APPEARANCE</Text>
-        <View style={[styles.segment, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-          {modes.map(m => {
-            const active = m.key === preference;
-            return (
-              <Pressable
-                key={m.key}
-                onPress={() => setPreference(m.key)}
-                style={[
-                  styles.segmentItem,
-                  active && { backgroundColor: theme.colors.accent },
-                ]}
-              >
-                <Icon
-                  name={m.icon}
-                  size={16}
-                  color={active ? theme.colors.onAccent : theme.colors.textMuted}
-                />
-                <Text
-                  style={{
-                    color: active ? theme.colors.onAccent : theme.colors.textMuted,
-                    fontWeight: '600',
-                    fontSize: 13,
-                  }}
-                >
-                  {m.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        <Row
+          icon="sun"
+          label="Theme"
+          hint={themeById(appearance.themeId).name}
+          onPress={() => navigation.navigate('Appearance')}
+        />
 
         <Text style={[styles.sectionLabel, { color: theme.colors.textFaint, marginTop: 28 }]}>
           SOURCES
@@ -94,10 +68,35 @@ export function ProfileScreen() {
           DATA
         </Text>
         <MihonImportRow />
+        <BackupExportRow />
+
+        {/* Only rendered once an invite is configured in `app/community.ts`, so
+            an unset link never ships as a dead row. */}
+        {hasCommunityLinks() ? (
+          <>
+            <Text style={[styles.sectionLabel, { color: theme.colors.textFaint, marginTop: 28 }]}>
+              COMMUNITY
+            </Text>
+            {DISCORD_INVITE_URL ? (
+              <Row
+                icon="globe"
+                label="Discord"
+                hint="Join the server"
+                onPress={() => Linking.openURL(DISCORD_INVITE_URL)}
+              />
+            ) : null}
+          </>
+        ) : null}
 
         <Text style={[styles.sectionLabel, { color: theme.colors.textFaint, marginTop: 28 }]}>
           ABOUT
         </Text>
+        <Row
+          icon="book"
+          label="What's new"
+          hint={`v${APP_VERSION}`}
+          onPress={() => navigation.navigate('Changelog')}
+        />
         {appUpdate.available && appUpdate.latest ? (
           <View style={[styles.updateCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.accent }]}>
             <View style={[styles.updateIcon, { backgroundColor: theme.colors.elevated }]}>
@@ -181,6 +180,7 @@ function Row({
       onPress={onPress}
       style={({ pressed }) => [
         styles.row,
+        theme.elevation.card,
         {
           backgroundColor: pressed ? theme.colors.elevated : theme.colors.surface,
           borderColor: theme.colors.border,
@@ -199,6 +199,66 @@ function Row({
         <Text style={{ color: theme.colors.textFaint, fontSize: 12 }}>{hint}</Text>
       ) : null}
       <Icon name="chevronRight" size={18} color={theme.colors.textFaint} />
+    </Pressable>
+  );
+}
+
+/**
+ * Writes a Mihon-compatible `.tachibk` and opens the share sheet so the user
+ * picks where it lands. Compatible on purpose: the backup restores into Mihon
+ * as well as Kagari.
+ */
+function BackupExportRow() {
+  const theme = useTheme();
+  const [state, setState] = useState<ImportState>({ status: 'idle' });
+  const working = state.status === 'working';
+
+  const run = async () => {
+    if (working) return;
+    setState({ status: 'working' });
+    try {
+      const result = await exportMihonBackup();
+      const incomplete = result.mangaMissingChapters;
+      setState({
+        status: 'done',
+        message: incomplete
+          ? `${result.mangaCount} title${result.mangaCount === 1 ? '' : 's'} exported; ${incomplete} missing chapter progress`
+          : `${result.mangaCount} title${result.mangaCount === 1 ? '' : 's'} exported`,
+      });
+    } catch (e) {
+      setState({ status: 'error', message: e instanceof Error ? e.message : 'Export failed' });
+    }
+  };
+
+  return (
+    <Pressable
+      onPress={run}
+      disabled={working}
+      style={({ pressed }) => [
+        styles.row,
+        theme.elevation.card,
+        {
+          backgroundColor: pressed ? theme.colors.elevated : theme.colors.surface,
+          borderColor: theme.colors.border,
+        },
+      ]}
+    >
+      <Icon name="share" size={20} color={theme.colors.textMuted} />
+      <View style={{ flex: 1 }}>
+        <Text style={[theme.typography.body, { color: theme.colors.text }]}>Export backup</Text>
+        <Text style={{ color: theme.colors.textFaint, fontSize: 12, marginTop: 2 }}>
+          {state.status === 'done'
+            ? state.message
+            : state.status === 'error'
+              ? state.message
+              : 'Save a .tachibk that Mihon can also restore'}
+        </Text>
+      </View>
+      {working ? (
+        <ActivityIndicator size="small" color={theme.colors.textMuted} />
+      ) : (
+        <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 12.5 }}>Export</Text>
+      )}
     </Pressable>
   );
 }

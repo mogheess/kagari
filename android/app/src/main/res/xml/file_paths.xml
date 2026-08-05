@@ -4,4 +4,6 @@
     <cache-path name="extensions" path="extensions/" />
     <!-- Reader pages staged for the system share sheet live in cacheDir/shared. -->
     <cache-path name="shared" path="shared/" />
+    <!-- Exported .tachibk backups staged for the share sheet. -->
+    <cache-path name="backups" path="backups/" />
 </paths>

@@ -17,6 +17,7 @@ import { checkExtensionUpdates } from './src/sources/extensionUpdates';
 import { checkLibraryUpdates } from './src/library/libraryUpdates';
 import { initWhatsNew } from './src/app/whatsNew';
 import { WhatsNewSheet } from './src/components/WhatsNewSheet';
+import { UpdateAvailableSheet } from './src/components/UpdateAvailableSheet';
 
 function ThemedStatusBar() {
   const theme = useTheme();
@@ -63,7 +64,10 @@ function App() {
             <ThemedStatusBar />
             <UpdateBootstrap />
             <RootNavigator />
+            {/* Order matters only for readability — UpdateAvailableSheet keeps
+                itself hidden while release notes are pending. */}
             <WhatsNewSheet />
+            <UpdateAvailableSheet />
           </HomeConfigProvider>
         </ThemeProvider>
       </SafeAreaProvider>

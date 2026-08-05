@@ -12,6 +12,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.6',
+    date: '2026-08-01',
+    highlights: [
+      'Extensions work again. Keiyoushi moved its catalogue to a new format and left the old address serving a placeholder, which is why the list had gone empty — Kagari now reads the new one, so all 1,300+ extensions are browsable and installable again.',
+      'Added support for the newer extension API, so the latest extensions (Asura Scans, MangaFire, MANGA Plus, VIZ and others) load and run instead of failing silently.',
+      'Bulk downloads: grab a whole series, or only the chapters you have not read yet.',
+      'Select chapters with a long press, then mark them read or unread, or queue them for download. Long-press again to extend the selection over a run of chapters.',
+      'Keep reading without leaving the page: scrolling past the end of a chapter moves to the next one, and scrolling back past the start returns to the previous one.',
+      'Long chapter lists get a draggable scrollbar, so a few thousand chapters is one gesture instead of a minute of swiping.',
+      'The back button now steps back through tabs instead of closing the app.',
+      'Fixed "next chapter" going backwards on sources that do not number their chapters.',
+      'Adult-content labels are accurate again, instead of flagging most of the catalogue.',
+      'New versions now announce themselves: when an update is available you get a prompt on opening the app, with that release\'s notes, once per version rather than every launch.',
+      'Browse release notes any time from Settings.',
+    ],
+  },
+  {
     version: '0.5',
     date: '2026-07-19',
     highlights: [

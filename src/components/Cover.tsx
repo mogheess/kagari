@@ -43,6 +43,9 @@ export function Cover({ manga, width, subtitle, progress, badge, inLibrary, onPr
       <View
         style={[
           styles.art,
+          // Cover art carries the app; giving it real depth is what stops the
+          // grids reading as flat coloured rectangles on a flat canvas.
+          theme.elevation.cover,
           {
             width,
             height,
