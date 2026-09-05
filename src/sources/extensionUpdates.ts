@@ -58,6 +58,11 @@ export function computeExtensionUpdates(
   return out;
 }
 
+/** Current update list, for callers outside React. */
+export function getExtensionUpdates(): ExtensionUpdate[] {
+  return updates;
+}
+
 /** Replaces the tracked update list (e.g. after the Extensions screen refreshes). */
 export function setExtensionUpdates(list: ExtensionUpdate[]): void {
   updates = list;

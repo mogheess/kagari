@@ -14,7 +14,12 @@ import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeProvider';
 import { getEngine } from '../engine';
 import { Icon } from '../components/Icon';
-import { computeExtensionUpdates, setExtensionUpdates } from '../sources/extensionUpdates';
+import {
+  computeExtensionUpdates,
+  getExtensionUpdates,
+  markExtensionUpdated,
+  setExtensionUpdates,
+} from '../sources/extensionUpdates';
 import type { AvailableExtensionDto, ExtensionDto, RepoDto } from '../engine/types';
 
 type Tab = 'browse' | 'installed';
@@ -45,7 +50,13 @@ export function ExtensionsScreen() {
   const navigation = useNavigation();
   const engine = getEngine();
 
-  const [tab, setTab] = useState<Tab>('browse');
+  const [tab, setTab] = useState<Tab>(() =>
+    getExtensionUpdates().length > 0 ? 'installed' : 'browse',
+  );
+  // Progress of an "Update all" run; null when idle.
+  const [batch, setBatch] = useState<{ done: number; total: number; current: string } | null>(
+    null,
+  );
   const [repos, setRepos] = useState<RepoDto[]>([]);
   const [available, setAvailable] = useState<AvailableExtensionDto[]>([]);
   const [installedExts, setInstalledExts] = useState<ExtensionDto[]>([]);
@@ -111,6 +122,7 @@ export function ExtensionsScreen() {
     const url = repoInput.trim();
     if (!url) return;
     await engine.addRepo(url);
+    setRepoInput('');
     await refreshRepos();
     await refreshAvailable();
   };
@@ -148,6 +160,56 @@ export function ExtensionsScreen() {
     }
   };
 
+  /**
+   * Updates every outdated extension in turn.
+   *
+   * Android won't let a sideloaded app install silently, so each APK still
+   * opens the system confirmation — the win is not having to find each one in
+   * the list. `installExtension` returns when that dialog is *launched*, not
+   * when the package changes, so this polls the installed set until the new
+   * version shows up before moving on. If it never does, the user dismissed the
+   * dialog; stop there rather than stacking more prompts behind it.
+   */
+  const onUpdateAll = async () => {
+    const queue = [...extUpdates];
+    if (queue.length === 0 || batch) return;
+    let done = 0;
+    for (const u of queue) {
+      setBatch({ done, total: queue.length, current: u.name });
+      setBusyPkg(u.pkg);
+      clearFailed(u.pkg);
+      try {
+        await engine.installExtension(u.ext);
+        const deadline = Date.now() + 90_000;
+        let landed = false;
+        while (Date.now() < deadline) {
+          await new Promise<void>(r => setTimeout(() => r(), 1500));
+          await engine.reload();
+          const list = await engine.listExtensions();
+          setInstalledExts(list);
+          const installed = list.find(e => e.pkg === u.pkg);
+          if (installed && installed.versionCode >= u.ext.versionCode) {
+            landed = true;
+            break;
+          }
+        }
+        if (!landed) break;
+        markExtensionUpdated(u.pkg);
+        done += 1;
+      } catch (e) {
+        setFailedPkgs(prev => ({
+          ...prev,
+          [u.pkg]: e instanceof Error ? e.message : 'Update failed',
+        }));
+        break;
+      } finally {
+        setBusyPkg(null);
+      }
+    }
+    setBatch(null);
+    await refreshAvailable();
+  };
+
   const onUninstall = async (pkg: string) => {
     setBusyPkg(pkg);
     try {
@@ -178,6 +240,16 @@ export function ExtensionsScreen() {
   useEffect(() => {
     setExtensionUpdates(extUpdates);
   }, [extUpdates]);
+
+  const installedSorted = useMemo(
+    () =>
+      [...installedExts].sort((a, b) => {
+        const ua = updatesByPkg.has(a.pkg) ? 0 : 1;
+        const ub = updatesByPkg.has(b.pkg) ? 0 : 1;
+        return ua - ub || a.name.localeCompare(b.name);
+      }),
+    [installedExts, updatesByPkg],
+  );
 
   // Drives FlatList row re-renders when install state or in-flight pkg changes.
   const listExtra = useMemo(
@@ -241,10 +313,28 @@ export function ExtensionsScreen() {
               {extUpdates.length} update{extUpdates.length === 1 ? '' : 's'} available
             </Text>
             <Text style={{ color: theme.colors.textMuted, fontSize: 12, marginTop: 2 }}>
-              {tab === 'installed' ? 'Update your extensions below' : 'Tap to review in Installed'}
+              {batch
+                ? `Updating ${batch.current}\u2026 (${batch.done + 1} of ${batch.total})`
+                : tab === 'installed'
+                  ? 'Outdated extensions are listed first'
+                  : 'Tap to review in Installed'}
             </Text>
           </View>
-          {tab === 'browse' ? <Icon name="chevronRight" size={18} color={theme.colors.textFaint} /> : null}
+          {tab === 'browse' ? (
+            <Icon name="chevronRight" size={18} color={theme.colors.textFaint} />
+          ) : batch ? (
+            <ActivityIndicator size="small" color={theme.colors.accent} />
+          ) : (
+            <Pressable
+              onPress={onUpdateAll}
+              style={[styles.updatePill, { backgroundColor: theme.colors.accent }]}
+            >
+              <Icon name="download" size={13} color={theme.colors.onAccent} />
+              <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 12.5 }}>
+                Update all
+              </Text>
+            </Pressable>
+          )}
         </Pressable>
       ) : null}
 
@@ -473,7 +563,12 @@ export function ExtensionsScreen() {
           </Text>
           {update ? (
             <Text style={{ color: theme.colors.accent, fontSize: 11.5, marginTop: 2, fontWeight: '600' }}>
-              {`v${ext.versionName} \u2192 v${update.availableVersionName}`}
+              {update.availableVersionName === ext.versionName
+                ? // Same source, rebuilt with a higher versionCode (keiyoushi now
+                  // folds the lib version into it). Mihon treats this as an
+                  // update too; "1.4.11 → 1.4.11" just needs a better label.
+                  `v${ext.versionName} \u00B7 new build available`
+                : `v${ext.versionName} \u2192 v${update.availableVersionName}`}
             </Text>
           ) : (
             <Text style={{ color: theme.colors.textFaint, fontSize: 11.5, marginTop: 2 }}>
@@ -530,7 +625,7 @@ export function ExtensionsScreen() {
         />
       ) : (
         <FlatList
-          data={installedExts}
+          data={installedSorted}
           keyExtractor={e => e.pkg}
           extraData={listExtra}
           ListHeaderComponent={renderHeader()}
