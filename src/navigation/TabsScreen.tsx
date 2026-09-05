@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BackHandler, StyleSheet, View } from 'react-native';
-import { useIsFocused } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
 import { GlassTabBar } from './GlassTabBar';
 import { HomeScreen } from '../screens/HomeScreen';
 import { LibraryScreen } from '../screens/LibraryScreen';
@@ -10,13 +10,7 @@ import { ProfileScreen } from '../screens/ProfileScreen';
 import { TabNavProvider } from './TabNav';
 import type { TabKey } from './types';
 
-const TABS: { key: TabKey; render: () => React.ReactNode }[] = [
-  { key: 'home', render: () => <HomeScreen /> },
-  { key: 'library', render: () => <LibraryScreen /> },
-  { key: 'discover', render: () => <DiscoverScreen /> },
-  { key: 'updates', render: () => <UpdatesScreen /> },
-  { key: 'profile', render: () => <ProfileScreen /> },
-];
+const TAB_ORDER: TabKey[] = ['home', 'library', 'discover', 'updates', 'profile'];
 
 /**
  * Hosts the five tabs and overlays the floating glass nav. Each tab is mounted
@@ -29,13 +23,35 @@ const TABS: { key: TabKey; render: () => React.ReactNode }[] = [
  * (like react-navigation's ResourceSavingView) every tab stays laid out inside
  * an absolute, clipped wrapper and inactive ones are shoved far off-screen, so
  * activating a tab is just a cheap position change.
+ *
+ * Because every visited tab stays mounted, a re-render of this component is a
+ * re-render of up to five full screens. Two things keep that from happening on
+ * navigation: the tab elements are created once and reused (React skips a
+ * subtree handed the identical element), and focus is tracked in a ref via
+ * navigation events rather than `useIsFocused`, which would re-render the host
+ * on every push and pop of a stack screen — right in the middle of the
+ * transition animation, which showed up as a flash.
  */
 const FAR_FAR_AWAY = 30000;
 
 export function TabsScreen() {
+  const navigation = useNavigation();
   const [active, setActive] = useState<TabKey>('home');
   const [mounted, setMounted] = useState<Set<TabKey>>(() => new Set<TabKey>(['home']));
-  const isFocused = useIsFocused();
+
+  // Created once. Rendering the same element reference each time lets React
+  // bail out of the whole subtree, so switching tabs re-lays-out the wrappers
+  // without re-rendering the screens inside them.
+  const elements = useMemo<Record<TabKey, React.ReactNode>>(
+    () => ({
+      home: <HomeScreen />,
+      library: <LibraryScreen />,
+      discover: <DiscoverScreen />,
+      updates: <UpdatesScreen />,
+      profile: <ProfileScreen />,
+    }),
+    [],
+  );
 
   // Tabs are local state rather than routes, so the root stack never grows when
   // you switch tabs and Android's back press has nothing to pop — it falls
@@ -53,38 +69,52 @@ export function TabsScreen() {
     });
   }, []);
 
-  const onBackPress = useCallback(() => {
-    // One entry left means we're at the first tab visited: let the OS have the
-    // press so back still exits from the app's start destination.
-    if (history.current.length <= 1) return false;
-    history.current = history.current.slice(0, -1);
-    setActive(history.current[history.current.length - 1]);
-    return true;
-  }, []);
+  // Whether the tab host is the top route. A ref, deliberately: reading this
+  // through a hook would re-render the host — and every mounted tab — each
+  // time a detail or reader screen is pushed or popped.
+  const focused = useRef(true);
+  useEffect(() => {
+    const onFocus = navigation.addListener('focus', () => {
+      focused.current = true;
+    });
+    const onBlur = navigation.addListener('blur', () => {
+      focused.current = false;
+    });
+    return () => {
+      onFocus();
+      onBlur();
+    };
+  }, [navigation]);
 
   useEffect(() => {
-    // Only while the tab host is the top route — a stack screen above it
-    // (detail, reader) must keep its own back behaviour.
-    if (!isFocused) return;
-    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      // A stack screen above us (detail, reader) owns back while it's showing.
+      if (!focused.current) return false;
+      // One entry left means we're at the first tab visited: let the OS have the
+      // press so back still exits from the app's start destination.
+      if (history.current.length <= 1) return false;
+      history.current = history.current.slice(0, -1);
+      setActive(history.current[history.current.length - 1]);
+      return true;
+    });
     return () => sub.remove();
-  }, [isFocused, onBackPress]);
+  }, []);
 
   return (
     <TabNavProvider active={active} navigateTab={navigateTab}>
       <View style={{ flex: 1 }}>
         <View style={{ flex: 1 }}>
-          {TABS.map(tab => {
-            if (!mounted.has(tab.key)) return null;
-            const focused = tab.key === active;
+          {TAB_ORDER.map(key => {
+            if (!mounted.has(key)) return null;
+            const isActive = key === active;
             return (
               <View
-                key={tab.key}
+                key={key}
                 style={styles.page}
                 collapsable={false}
-                pointerEvents={focused ? 'auto' : 'none'}
+                pointerEvents={isActive ? 'auto' : 'none'}
               >
-                <View style={focused ? styles.attached : styles.detached}>{tab.render()}</View>
+                <View style={isActive ? styles.attached : styles.detached}>{elements[key]}</View>
               </View>
             );
           })}

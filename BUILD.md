@@ -49,6 +49,13 @@ loads Tachiyomi/Mihon-compatible extension APKs.
 npm install
 ```
 
+`npm install` also runs `patch-package` (postinstall) to apply the fixes under
+`patches/` to `node_modules`. Currently that is one Android fix for
+`react-native-screens` (a dismissed screen was drawn for one frame after its
+exit animation, showing as a flash on back). After editing a file under
+`node_modules/<pkg>`, regenerate with `npx patch-package <pkg>`; when bumping a
+patched package, re-check that the patch still applies.
+
 Notable native dependency: **`@react-native-async-storage/async-storage`** (local
 library/categories/home persistence). Adding/updating it requires a native
 rebuild, not just Fast Refresh.

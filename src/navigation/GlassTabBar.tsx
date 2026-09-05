@@ -26,10 +26,19 @@ interface GlassTabBarProps {
 }
 
 /**
- * Floating frosted-glass bottom navigation. Real backdrop blur via BlurView,
- * with a translucent fill + hairline top highlight as the premium "glass" cue.
- * Falls back gracefully to the translucent fill if blur is unavailable.
+ * Floating bottom navigation. On iOS it is frosted glass: a real backdrop blur
+ * with a translucent fill and a hairline top highlight.
+ *
+ * On Android the blur is deliberately off. There is no compositor-level blur
+ * for a view; the BlurView library emulates one by redrawing the *entire*
+ * activity content into a bitmap on every pre-draw, so every scrolled or
+ * animated frame is rendered twice or more. That is a constant cost on every
+ * screen for one small bar, and the extra draw pass also collided with the
+ * fragment framework's dismissal animation, painting a just-popped screen for
+ * one frame ("the app blinks when I press back"). A solid elevated surface is
+ * cheaper and reads the same.
  */
+const USE_BLUR = Platform.OS === 'ios';
 export function GlassTabBar({ active, onChange }: GlassTabBarProps) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -42,17 +51,19 @@ export function GlassTabBar({ active, onChange }: GlassTabBarProps) {
           styles.bar,
           {
             borderRadius: theme.radius.xxl,
-            borderColor: theme.colors.glassHighlight,
-            backgroundColor: theme.colors.glass,
+            borderColor: USE_BLUR ? theme.colors.glassHighlight : theme.colors.border,
+            backgroundColor: USE_BLUR ? theme.colors.glass : theme.colors.elevated,
           },
         ]}
       >
-        <BlurView
-          style={StyleSheet.absoluteFill}
-          blurType={theme.scheme === 'dark' ? 'dark' : 'light'}
-          blurAmount={20}
-          reducedTransparencyFallbackColor={theme.colors.surface}
-        />
+        {USE_BLUR ? (
+          <BlurView
+            style={StyleSheet.absoluteFill}
+            blurType={theme.scheme === 'dark' ? 'dark' : 'light'}
+            blurAmount={20}
+            reducedTransparencyFallbackColor={theme.colors.surface}
+          />
+        ) : null}
         <View style={styles.row}>
           {TABS.map(tab => (
             <TabButton

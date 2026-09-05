@@ -1,0 +1,22 @@
+diff --git a/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenStack.kt b/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenStack.kt
+index bffd9c7..5691d1d 100644
+--- a/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenStack.kt
++++ b/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenStack.kt
+@@ -392,6 +392,17 @@ class ScreenStack(
+         child: View,
+         drawingTime: Long,
+     ): Boolean {
++        // A screen being popped keeps being drawn as a disappearing child after its exit
++        // animation has finished: the fragment framework's EndViewTransitionAnimation reports
++        // "still running" without writing a transformation until a pre-draw listener ends the
++        // view transition. Android resets the shared child transformation between draws, so any
++        // additional draw pass in that window (e.g. a BlurView snapshotting the hierarchy) paints
++        // the dismissed screen at its resting position for one frame — a visible flash of the
++        // screen that was just left. Its final animation frame has already been rendered, so
++        // skipping further draws changes nothing visible.
++        if (child is ScreensCoordinatorLayout && child.fragment.isRemoving && child.animation?.hasEnded() == true) {
++            return true
++        }
+         drawingOps.add(
+             obtainDrawingOp().apply {
+                 this.canvas = canvas
