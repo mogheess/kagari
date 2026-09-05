@@ -12,6 +12,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.6.1',
+    date: '2026-09-05',
+    highlights: [
+      'Fixed the screen flashing when pressing back on Android. The screen you had just left was drawn for one extra frame after the transition finished.',
+      'Home sections no longer vanish when their source fails or is slow: they stay in place, say which source is having trouble, and offer a Retry.',
+      'Extensions: one "Update all" button installs every pending update in turn, outdated extensions are listed first, and the Installed tab opens by default when updates are waiting.',
+      'Covers show a shimmer while they load instead of a blank box.',
+      'Smoother scrolling and transitions: the bottom bar no longer redraws the whole screen every frame for its blur effect.',
+    ],
+  },
+  {
     version: '0.6',
     date: '2026-08-01',
     highlights: [
