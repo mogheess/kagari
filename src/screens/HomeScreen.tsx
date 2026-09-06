@@ -3,18 +3,17 @@ import { View, Text, ScrollView, Pressable, StyleSheet, RefreshControl } from 'r
 import { BlurView } from '@react-native-community/blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
+import { useSources, useSourcesLoaded, refreshSources } from '../sources/sourcesStore';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme } from '../theme/ThemeProvider';
 import { useHomeConfig } from '../home/HomeConfig';
 import { useTabNav } from '../navigation/TabNav';
 import { HomeBlockView } from '../components/HomeBlockView';
 import { Icon } from '../components/Icon';
-import { useAsync } from '../hooks/useAsync';
-import { getEngine } from '../engine';
 import { useAppUpdate } from '../app/appUpdate';
 import { useExtensionUpdates } from '../sources/extensionUpdates';
 import type { RootStackParamList } from '../navigation/types';
-import type { MangaDto, SourceDto } from '../engine/types';
+import type { MangaDto } from '../engine/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -26,13 +25,13 @@ export function HomeScreen() {
   const navigation = useNavigation<Nav>();
   const { blocks } = useHomeConfig();
   const { navigateTab } = useTabNav();
-  const engine = getEngine();
 
   const openManga = (m: MangaDto) =>
     navigation.navigate('MangaDetail', { sourceId: m.sourceId, mangaUrl: m.url, preview: m });
 
   const enabled = blocks.filter(b => b.enabled);
-  const { data: sources, loading, reload } = useAsync<SourceDto[]>(() => engine.listSources(), []);
+  const sources = useSources();
+  const loading = !useSourcesLoaded();
   const hasSources = (sources?.length ?? 0) > 0;
 
   const appUpdate = useAppUpdate();
@@ -47,10 +46,10 @@ export function HomeScreen() {
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     setRefreshKey(k => k + 1);
-    reload();
+    void refreshSources();
     // Rails reload independently; give them a beat, then release the spinner.
     setTimeout(() => setRefreshing(false), 900);
-  }, [reload]);
+  }, []);
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>

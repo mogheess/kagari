@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeProvider';
 import { getEngine } from '../engine';
+import { refreshSources } from '../sources/sourcesStore';
 import { Icon } from '../components/Icon';
 import {
   computeExtensionUpdates,
@@ -99,7 +100,7 @@ export function ExtensionsScreen() {
 
   const reloadAndRefresh = useCallback(async () => {
     await engine.reload();
-    await Promise.all([refreshRepos(), refreshInstalled(), refreshAvailable()]);
+    await Promise.all([refreshRepos(), refreshInstalled(), refreshAvailable(), refreshSources()]);
   }, [engine, refreshRepos, refreshInstalled, refreshAvailable]);
 
   useEffect(() => {
@@ -241,20 +242,30 @@ export function ExtensionsScreen() {
     setExtensionUpdates(extUpdates);
   }, [extUpdates]);
 
+  // Installed extensions no longer offered by any repo — Mihon calls these
+  // "orphaned". The site usually died or the extension was pulled; it will get
+  // no updates and tends to stop working. Only judged once a repo has actually
+  // answered, so an empty repo list never flags everything.
+  const orphanedPkgs = useMemo(() => {
+    if (available.length === 0) return new Set<string>();
+    const offered = new Set(available.map(a => a.pkg));
+    return new Set(installedExts.filter(e => !offered.has(e.pkg)).map(e => e.pkg));
+  }, [installedExts, available]);
+
   const installedSorted = useMemo(
     () =>
       [...installedExts].sort((a, b) => {
-        const ua = updatesByPkg.has(a.pkg) ? 0 : 1;
-        const ub = updatesByPkg.has(b.pkg) ? 0 : 1;
-        return ua - ub || a.name.localeCompare(b.name);
+        const rank = (e: ExtensionDto) =>
+          updatesByPkg.has(e.pkg) ? 0 : orphanedPkgs.has(e.pkg) ? 1 : 2;
+        return rank(a) - rank(b) || a.name.localeCompare(b.name);
       }),
-    [installedExts, updatesByPkg],
+    [installedExts, updatesByPkg, orphanedPkgs],
   );
 
   // Drives FlatList row re-renders when install state or in-flight pkg changes.
   const listExtra = useMemo(
-    () => ({ installedPkgs, busyPkg, failedPkgs, updatesByPkg }),
-    [installedPkgs, busyPkg, failedPkgs, updatesByPkg],
+    () => ({ installedPkgs, busyPkg, failedPkgs, updatesByPkg, orphanedPkgs }),
+    [installedPkgs, busyPkg, failedPkgs, updatesByPkg, orphanedPkgs],
   );
 
   // Language chips, most common first.
@@ -550,6 +561,7 @@ export function ExtensionsScreen() {
   const renderInstalledRow = (ext: ExtensionDto) => {
     const busy = busyPkg === ext.pkg;
     const update = updatesByPkg.get(ext.pkg);
+    const orphaned = !update && orphanedPkgs.has(ext.pkg);
     return (
       <View
         style={[styles.extRow, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
@@ -569,6 +581,10 @@ export function ExtensionsScreen() {
                   // update too; "1.4.11 → 1.4.11" just needs a better label.
                   `v${ext.versionName} \u00B7 new build available`
                 : `v${ext.versionName} \u2192 v${update.availableVersionName}`}
+            </Text>
+          ) : orphaned ? (
+            <Text style={{ color: theme.colors.danger, fontSize: 11.5, marginTop: 2, fontWeight: '600' }}>
+              {`v${ext.versionName} \u00B7 Orphaned \u2014 not in any of your repos, so no updates and it may stop working`}
             </Text>
           ) : (
             <Text style={{ color: theme.colors.textFaint, fontSize: 11.5, marginTop: 2 }}>
