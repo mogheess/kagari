@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSources, useSourcesLoaded } from '../sources/sourcesStore';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme } from '../theme/ThemeProvider';
@@ -53,7 +54,7 @@ import {
 } from '../library/downloads';
 import { FastScroller, type FastScrollerHandle } from '../components/FastScroller';
 import type { RootStackParamList } from '../navigation/types';
-import type { MangaDto, ChapterDto, SourceDto } from '../engine/types';
+import type { MangaDto, ChapterDto } from '../engine/types';
 
 function notify(message: string): void {
   ToastAndroid.show(message, ToastAndroid.SHORT);
@@ -149,7 +150,7 @@ export function MangaDetailScreen() {
 
   const cached = peekManga(params.sourceId, params.mangaUrl);
   const { data: details, reload: reloadDetails } = useAsync<MangaDto>(
-    () => loadMangaDetails(params.sourceId, params.mangaUrl),
+    () => loadMangaDetails(params.sourceId, params.mangaUrl, params.preview?.memo),
     [params.sourceId, params.mangaUrl],
     cached.details,
   );
@@ -159,7 +160,7 @@ export function MangaDetailScreen() {
     error: chaptersError,
     reload: reloadChapters,
   } = useAsync<ChapterDto[]>(
-    () => loadChapters(params.sourceId, params.mangaUrl),
+    () => loadChapters(params.sourceId, params.mangaUrl, params.preview?.memo),
     [params.sourceId, params.mangaUrl],
     cached.chapters,
   );
@@ -197,7 +198,9 @@ export function MangaDetailScreen() {
     .filter(c => favorite?.categoryIds.includes(c.id))
     .map(c => c.name);
 
-  const { data: sources } = useAsync<SourceDto[]>(() => getEngine().listSources(), []);
+  const allSources = useSources();
+  const sourcesLoaded = useSourcesLoaded();
+  const sources = sourcesLoaded ? allSources : undefined;
   const sourceName = sources?.find(s => s.id === params.sourceId)?.name;
   // Once the source list has loaded, a missing id means the extension that owns
   // this title isn't installed — the usual reason an imported manga shows a cover

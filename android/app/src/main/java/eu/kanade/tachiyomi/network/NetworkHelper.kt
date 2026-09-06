@@ -13,6 +13,7 @@ package eu.kanade.tachiyomi.network
 import android.content.Context
 import android.webkit.WebSettings
 import eu.kanade.tachiyomi.network.interceptor.CloudflareInterceptor
+import eu.kanade.tachiyomi.network.interceptor.UncaughtExceptionInterceptor
 import eu.kanade.tachiyomi.network.interceptor.UserAgentInterceptor
 import okhttp3.Cache
 import okhttp3.OkHttpClient
@@ -47,6 +48,12 @@ class NetworkHelper(context: Context) {
      * [cloudflareClient]) so any source hitting a challenge can recover, even if
      * it doesn't explicitly opt into the Cloudflare client. The interceptor is a
      * no-op for non-challenge responses.
+     *
+     * The interceptor set is part of the extension contract, not a detail:
+     * keiyoushi's `KeiSource` base class checks this client, by simple class
+     * name, for `UncaughtExceptionInterceptor`, `UserAgentInterceptor` and
+     * `CloudflareInterceptor` and throws before its first request if any is
+     * missing. Renaming or dropping one breaks every extension built on it.
      */
     val client: OkHttpClient = OkHttpClient.Builder()
         .cookieJar(cookieJar)
@@ -54,6 +61,7 @@ class NetworkHelper(context: Context) {
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .callTimeout(2, TimeUnit.MINUTES)
+        .addInterceptor(UncaughtExceptionInterceptor())
         .addInterceptor(UserAgentInterceptor(::defaultUserAgentProvider))
         .addInterceptor(CloudflareInterceptor(context, cookieJar, ::defaultUserAgentProvider))
         .build()

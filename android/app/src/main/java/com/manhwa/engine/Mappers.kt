@@ -1,5 +1,7 @@
 package com.manhwa.engine
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import com.manhwa.engine.dto.ChapterDto
 import com.manhwa.engine.dto.MangaDto
 import com.manhwa.engine.dto.MangasPageDto
@@ -41,6 +43,7 @@ object Mappers {
             ?: emptyList(),
         status = statusToString(manga.status),
         initialized = manga.initialized,
+        memo = memoToJson(manga.memo),
     )
 
     fun mangasPageToDto(sourceId: Long, page: MangasPage): MangasPageDto = MangasPageDto(
@@ -56,6 +59,7 @@ object Mappers {
         chapterNumber = chapter.chapter_number,
         scanlator = chapter.scanlator,
         dateUpload = chapter.date_upload,
+        memo = memoToJson(chapter.memo),
     )
 
     fun pageToDto(page: Page): PageDto = PageDto(
@@ -65,6 +69,20 @@ object Mappers {
     )
 
     /** Reads a possibly-uninitialized lateinit field without crashing the call. */
+    /** Empty memos are the norm; only ship the JSON when a source actually stored something. */
+    private fun memoToJson(memo: JsonObject): String? =
+        safe { memo }?.takeIf { it.isNotEmpty() }?.toString()
+
+    /** Inverse of [memoToJson]; malformed or missing text yields an empty memo. */
+    fun memoFromJson(json: String?): JsonObject {
+        if (json.isNullOrBlank()) return JsonObject(emptyMap())
+        return try {
+            Json.parseToJsonElement(json) as? JsonObject ?: JsonObject(emptyMap())
+        } catch (_: Exception) {
+            JsonObject(emptyMap())
+        }
+    }
+
     private inline fun <T> safe(block: () -> T): T? = try {
         block()
     } catch (_: UninitializedPropertyAccessException) {

@@ -48,6 +48,13 @@ data class MangaDto(
     val genres: List<String> = emptyList(),
     val status: String = "unknown",
     val initialized: Boolean = false,
+    /**
+     * Source-private state as JSON text (`SManga.memo`, extensions-lib 1.6+).
+     * Opaque to the app; stored with the manga and handed back on every call
+     * that takes this manga, because some sources need it to fetch details or
+     * chapters at all.
+     */
+    val memo: String? = null,
 )
 
 @Serializable
@@ -65,6 +72,8 @@ data class ChapterDto(
     val chapterNumber: Float = -1f,
     val scanlator: String? = null,
     val dateUpload: Long = 0,
+    /** Source-private state as JSON text (`SChapter.memo`); see [MangaDto.memo]. */
+    val memo: String? = null,
 )
 
 @Serializable
@@ -124,4 +133,21 @@ data class TierListExportItemDto(
 data class RepoDto(
     val url: String,
     val name: String,
+)
+
+/** Names needed to place a download under the user's storage location (Mihon layout). */
+@Serializable
+data class DownloadMetaDto(
+    val mangaTitle: String,
+    val chapterName: String,
+    val scanlator: String? = null,
+)
+
+@Serializable
+data class StorageLocationDto(
+    val uri: String,
+    /** Human-readable, e.g. "Internal storage/Kagari". */
+    val displayPath: String,
+    /** False when the grant was lost or the folder was removed. */
+    val writable: Boolean,
 )

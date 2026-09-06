@@ -23,6 +23,8 @@ export interface FavoriteManga {
   addedAt: number;
   /** Category ids this manga belongs to (empty = uncategorized). */
   categoryIds: string[];
+  /** Source-private state (`MangaDto.memo`), needed to refresh some titles. */
+  memo?: string;
 }
 
 const store = makePersistence<FavoriteManga[]>('@kagari/favorites/v1');
@@ -164,6 +166,7 @@ export function toggleFavorite(m: MangaDto, categoryIds: string[] = []): boolean
         author: m.author,
         addedAt: Date.now(),
         categoryIds,
+        memo: m.memo,
       },
       ...favorites,
     ];

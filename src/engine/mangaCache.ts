@@ -83,14 +83,23 @@ export function primeMangaCache(
   schedulePersist();
 }
 
+/**
+ * The memo to hand a source: whatever the caller knows (a browse result, a
+ * favourite) or, failing that, what an earlier details fetch stored.
+ */
+function memoFor(key: string, given?: string): string | undefined {
+  return given ?? cache.get(key)?.details?.memo;
+}
+
 export async function loadMangaDetails(
   sourceId: string,
   mangaUrl: string,
+  memo?: string,
 ): Promise<MangaDto> {
   const key = keyFor(sourceId, mangaUrl);
   const hit = cache.get(key);
   if (hit?.details) return hit.details;
-  const details = await getEngine().getMangaDetails(sourceId, mangaUrl);
+  const details = await getEngine().getMangaDetails(sourceId, mangaUrl, memoFor(key, memo));
   cache.set(key, { ...cache.get(key), details, cachedAt: Date.now() });
   schedulePersist();
   return details;
@@ -99,11 +108,12 @@ export async function loadMangaDetails(
 export async function loadChapters(
   sourceId: string,
   mangaUrl: string,
+  memo?: string,
 ): Promise<ChapterDto[]> {
   const key = keyFor(sourceId, mangaUrl);
   const hit = cache.get(key);
   if (hit?.chapters) return hit.chapters;
-  const chapters = await getEngine().getChapters(sourceId, mangaUrl);
+  const chapters = await getEngine().getChapters(sourceId, mangaUrl, memoFor(key, memo));
   cache.set(key, { ...cache.get(key), chapters, cachedAt: Date.now() });
   schedulePersist();
   return chapters;

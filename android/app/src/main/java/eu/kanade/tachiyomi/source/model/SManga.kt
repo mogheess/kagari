@@ -7,6 +7,7 @@
 package eu.kanade.tachiyomi.source.model
 
 import java.io.Serializable
+import kotlinx.serialization.json.JsonObject
 
 interface SManga : Serializable {
     var url: String
@@ -18,6 +19,12 @@ interface SManga : Serializable {
     var status: Int
     var thumbnail_url: String?
     var update_strategy: UpdateStrategy
+    /**
+     * Free-form state a source keeps alongside a manga (extensions-lib 1.6+),
+     * e.g. an internal id it needs again when fetching details or chapters.
+     * Opaque to the app: carried through the DTOs and handed back untouched.
+     */
+    var memo: JsonObject
     var initialized: Boolean
 
     companion object {
@@ -43,5 +50,6 @@ class SMangaImpl : SManga {
     override var status: Int = 0
     override var thumbnail_url: String? = null
     override var update_strategy: UpdateStrategy = UpdateStrategy.ALWAYS_UPDATE
+    override var memo: JsonObject = JsonObject(emptyMap())
     override var initialized: Boolean = false
 }

@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import androidx.documentfile.provider.DocumentFile
 import android.graphics.BitmapRegionDecoder
 import android.graphics.Canvas
 import android.graphics.Color
@@ -21,12 +22,16 @@ import androidx.annotation.RequiresApi
 import androidx.core.content.FileProvider
 import com.manhwa.engine.dto.ChapterDto
 import com.manhwa.engine.dto.ExtensionDto
+import com.manhwa.engine.dto.DownloadMetaDto
 import com.manhwa.engine.dto.ImageFileDto
 import com.manhwa.engine.dto.ImageTileDto
 import com.manhwa.engine.dto.ImageRequestDto
 import com.manhwa.engine.dto.MangaDto
 import com.manhwa.engine.dto.MangasPageDto
 import com.manhwa.engine.dto.PageDto
+import com.manhwa.engine.dto.StorageLocationDto
+import com.manhwa.engine.storage.DownloadNaming
+import com.manhwa.engine.storage.StorageManager
 import com.manhwa.engine.dto.SourceDto
 import com.manhwa.engine.dto.TierListExportDto
 import com.manhwa.engine.backup.ExportRequest
@@ -47,6 +52,9 @@ import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
 import java.io.File
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
@@ -115,7 +123,23 @@ class EngineFacade(context: Context) {
 
     /** Writes a Mihon-compatible `.tachibk` and returns a shareable URI. */
     fun exportMihonBackup(request: ExportRequest, fileName: String): ExportResult {
-        return MihonBackupExporter.export(appContext, request, fileName)
+        val result = MihonBackupExporter.export(appContext, request, fileName)
+        // With a storage location picked, keep a copy in <root>/backups like
+        // Mihon does, so the backup outlives the app even if the share sheet is
+        // dismissed.
+        val backups = storage.backupsDir(create = true) ?: return result
+        val copy = try {
+            backups.findFile(fileName)?.delete()
+            val doc = backups.createFile("application/octet-stream", fileName) ?: return result
+            appContext.contentResolver.openOutputStream(doc.uri, "w")?.use { sink ->
+                appContext.contentResolver.openInputStream(Uri.parse(result.uri))?.use { it.copyTo(sink) }
+            }
+            doc
+        } catch (_: Exception) {
+            return result
+        }
+        val where = storage.describe()?.displayPath ?: return result
+        return result.copy(savedTo = "$where/${DownloadNaming.BACKUPS_DIR}/${copy.name ?: fileName}")
     }
 
     /** Hands an exported backup to the system share sheet. */
@@ -163,16 +187,35 @@ class EngineFacade(context: Context) {
         return Mappers.mangasPageToDto(source.id, result)
     }
 
-    suspend fun getMangaDetails(sourceId: String, mangaUrl: String): MangaDto {
+    /**
+     * One `getMangaUpdate` at a time per manga. The app asks for details and
+     * chapters as two calls in parallel; keiyoushi's KeiSource base class
+     * rejects overlapping updates for the same manga url with
+     * "getMangaUpdate must not be called concurrently for same manga".
+     */
+    private val mangaUpdateLocks = ConcurrentHashMap<String, Mutex>()
+
+    private suspend fun <T> withMangaLock(sourceId: String, mangaUrl: String, block: suspend () -> T): T {
+        val lock = mangaUpdateLocks.getOrPut("$sourceId|$mangaUrl") { Mutex() }
+        return lock.withLock { block() }
+    }
+
+    suspend fun getMangaDetails(sourceId: String, mangaUrl: String, memoJson: String? = null): MangaDto {
         val source = source(sourceId)
-        val stub = SManga.create().apply { url = mangaUrl; title = "" }
+        val known = Mappers.memoFromJson(memoJson)
+        val stub = SManga.create().apply { url = mangaUrl; title = ""; memo = known }
         // `mangaDetailsParse` typically returns a partial SManga without `url`
         // (the app already knows it). Re-attach the known url so the mapper
-        // doesn't hit an uninitialized lateinit.
-        val result = source
-            .getMangaUpdate(stub, emptyList(), fetchDetails = true, fetchChapters = false)
+        // doesn't hit an uninitialized lateinit. Likewise keep the memo we were
+        // given unless the source wrote a new one.
+        val result = withMangaLock(sourceId, mangaUrl) {
+            source.getMangaUpdate(stub, emptyList(), fetchDetails = true, fetchChapters = false)
+        }
             .manga
-            .apply { url = mangaUrl }
+            .apply {
+                url = mangaUrl
+                if (memo.isEmpty()) memo = known
+            }
         return Mappers.mangaToDto(source.id, result)
     }
 
@@ -196,18 +239,18 @@ class EngineFacade(context: Context) {
     /** UA shared with the Cloudflare WebView solver so cleared cookies stay valid. */
     fun userAgent(): String = network.defaultUserAgentProvider()
 
-    suspend fun getChapters(sourceId: String, mangaUrl: String): List<ChapterDto> {
+    suspend fun getChapters(sourceId: String, mangaUrl: String, memoJson: String? = null): List<ChapterDto> {
         val source = source(sourceId)
-        val stub = SManga.create().apply { url = mangaUrl; title = "" }
-        val result: List<SChapter> = source
-            .getMangaUpdate(stub, emptyList(), fetchDetails = false, fetchChapters = true)
-            .chapters
+        val stub = SManga.create().apply { url = mangaUrl; title = ""; memo = Mappers.memoFromJson(memoJson) }
+        val result: List<SChapter> = withMangaLock(sourceId, mangaUrl) {
+            source.getMangaUpdate(stub, emptyList(), fetchDetails = false, fetchChapters = true)
+        }.chapters
         return result.map { Mappers.chapterToDto(source.id, mangaUrl, it) }
     }
 
-    suspend fun getPages(sourceId: String, chapterUrl: String): List<PageDto> {
+    suspend fun getPages(sourceId: String, chapterUrl: String, memoJson: String? = null): List<PageDto> {
         val source = source(sourceId)
-        val stub = SChapter.create().apply { url = chapterUrl; name = "" }
+        val stub = SChapter.create().apply { url = chapterUrl; name = ""; memo = Mappers.memoFromJson(memoJson) }
         val result: List<Page> = source.getPageList(stub)
         return result.map { Mappers.pageToDto(it) }
     }
@@ -376,14 +419,19 @@ class EngineFacade(context: Context) {
     }
 
     // --- offline downloads -------------------------------------------------
-    // Downloaded pages live in filesDir (persistent, not evicted like the reader
-    // cache). They're keyed by chapter + page index so the reader can find them
-    // offline without re-resolving image URLs (which would need the network).
+    // Two homes. With no storage location picked, pages live in filesDir
+    // (persistent, not evicted like the reader cache), keyed by chapter hash +
+    // page index. With a location picked, new downloads go under it in Mihon's
+    // folder layout (see DownloadNaming) so a file manager — or Mihon — can read
+    // them. Reads check the picked location first and fall back to filesDir, so
+    // picking a folder never hides what was downloaded before.
+
+    internal val storage = StorageManager(appContext)
 
     private val downloadsRoot: File
         get() = File(appContext.filesDir, "downloads")
 
-    private fun chapterDir(sourceId: String, chapterUrl: String): File =
+    private fun internalChapterDir(sourceId: String, chapterUrl: String): File =
         File(downloadsRoot, "$sourceId/${hashKey(chapterUrl)}")
 
     private fun hashKey(value: String): String =
@@ -391,47 +439,141 @@ class EngineFacade(context: Context) {
             .digest(value.toByteArray())
             .joinToString("") { "%02x".format(it) }
 
-    /** Downloads one page to persistent storage; returns its file:// uri. Idempotent. */
-    suspend fun downloadPage(sourceId: String, chapterUrl: String, page: PageDto): String {
+    fun storageLocation(): StorageLocationDto? = storage.describe()
+
+    fun setStorageLocation(uri: Uri): StorageLocationDto? {
+        storage.setTreeUri(uri)
+        return storage.describe()
+    }
+
+    fun clearStorageLocation() = storage.clearTreeUri()
+
+    private fun externalChapterDir(
+        sourceId: String,
+        chapterUrl: String,
+        meta: DownloadMetaDto?,
+        create: Boolean,
+    ): DocumentFile? {
+        storage.rememberedChapterDir(sourceId, chapterUrl)?.let { return it }
+        if (meta == null) return null
+        val src = sourceOrNull(sourceId) ?: return null
+        // Mihon names the folder after HttpSource.toString(): "<name> (<LANG>)".
+        val lang = (src as? CatalogueSource)?.lang ?: ""
+        return storage.chapterDir(sourceId, src.name, lang, chapterUrl, meta, create)
+    }
+
+    /**
+     * Downloads one page to persistent storage; returns its uri (`file://` in
+     * app storage, `content://` under a picked folder). Idempotent.
+     */
+    suspend fun downloadPage(
+        sourceId: String,
+        chapterUrl: String,
+        page: PageDto,
+        meta: DownloadMetaDto?,
+    ): String {
         val source = source(sourceId)
         if (source !is HttpSource) {
             throw EngineException("parse", "Source $sourceId does not support HTTP image fetching")
         }
-        val dir = chapterDir(sourceId, chapterUrl).apply { mkdirs() }
-        val existing = dir.listFiles()?.firstOrNull {
-            it.name.startsWith("${page.index}.") && !it.name.endsWith(".tmp") && it.length() > 0L
-        }
-        if (existing != null && imageSize(existing) != null) {
-            return Uri.fromFile(existing).toString()
+        val external = externalChapterDir(sourceId, chapterUrl, meta, create = true)
+        if (external != null) {
+            storage.pages(external)[page.index]?.let { existing ->
+                if (imageSize(existing.uri) != null) return existing.uri.toString()
+            }
+        } else {
+            val dir = internalChapterDir(sourceId, chapterUrl)
+            val existing = dir.listFiles()?.firstOrNull {
+                it.name.startsWith("${page.index}.") && !it.name.endsWith(".tmp") && it.length() > 0L
+            }
+            if (existing != null && imageSize(existing) != null) {
+                return Uri.fromFile(existing).toString()
+            }
         }
 
         val model = Page(page.index, page.url ?: "", page.imageUrl)
         val imageUrl = resolveNativeImageUrl(sourceId, source, page, model)
         model.imageUrl = imageUrl
 
-        val temp = File(dir, "${page.index}.tmp")
+        // Always fetch into a private temp file first: the image is verified
+        // before it is committed, and SAF has no atomic rename to lean on.
+        val scratch = if (external != null) File(appContext.cacheDir, "download_tmp").apply { mkdirs() }
+                      else internalChapterDir(sourceId, chapterUrl).apply { mkdirs() }
+        val temp = File(scratch, "${hashKey("$sourceId|$chapterUrl")}_${page.index}.tmp")
         val contentType = try {
             source.fetchImage(model).awaitSingle().use { response -> writeImageResponse(response, temp) }
         } catch (error: Throwable) {
             temp.delete()
             directImageResponse(source, imageUrl).use { response -> writeImageResponse(response, temp) }
         }
-        val finalFile = File(dir, "${page.index}.${extensionFor(imageUrl, contentType)}")
+        if (imageSize(temp) == null) {
+            temp.delete()
+            throw EngineException("network", "Downloaded image was incomplete; please retry")
+        }
+        val extension = extensionFor(imageUrl, contentType)
+
+        if (external != null) {
+            val name = DownloadNaming.pageFileName(page.index, extension)
+            external.findFile(name)?.delete()
+            val doc = external.createFile(mimeFor(extension), name)
+                ?: run {
+                    temp.delete()
+                    throw EngineException("storage", "Could not create $name in the storage location")
+                }
+            try {
+                appContext.contentResolver.openOutputStream(doc.uri, "w")?.use { sink ->
+                    temp.inputStream().use { it.copyTo(sink) }
+                } ?: throw EngineException("storage", "Could not write $name to the storage location")
+            } finally {
+                temp.delete()
+            }
+            storage.invalidate(external)
+            return doc.uri.toString()
+        }
+
+        val finalFile = File(scratch, "${page.index}.$extension")
         finalFile.delete()
         if (!temp.renameTo(finalFile)) {
             temp.copyTo(finalFile, overwrite = true)
             temp.delete()
-        }
-        if (imageSize(finalFile) == null) {
-            finalFile.delete()
-            throw EngineException("network", "Downloaded image was incomplete; please retry")
         }
         return Uri.fromFile(finalFile).toString()
     }
 
     /** Reads a previously downloaded page (no network), tiling tall webtoon images. */
     fun fetchDownloadedImage(sourceId: String, chapterUrl: String, pageIndex: Int): ImageFileDto {
-        val dir = chapterDir(sourceId, chapterUrl)
+        val external = externalChapterDir(sourceId, chapterUrl, meta = null, create = false)
+        val doc = external?.let { storage.pages(it)[pageIndex] }
+        if (doc != null) {
+            val size = imageSize(doc.uri)
+                ?: throw EngineException("parse", "Downloaded page $pageIndex is unreadable")
+            val tiles = if (size.second > MAX_TILE_HEIGHT) {
+                // The region decoder wants a file path; stage a private copy.
+                val tileCache = File(appContext.cacheDir, "reader_images/$sourceId").apply { mkdirs() }
+                val key = hashKey("dl|$chapterUrl|$pageIndex")
+                val staged = File(tileCache, "$key.src")
+                if (!staged.exists() || staged.length() != doc.length()) {
+                    appContext.contentResolver.openInputStream(doc.uri)?.use { input ->
+                        staged.outputStream().use { input.copyTo(it) }
+                    } ?: throw EngineException("not_found", "Page $pageIndex is not readable")
+                }
+                imageTiles(staged, tileCache, key, size.first, size.second)
+            } else {
+                emptyList()
+            }
+            return ImageFileDto(
+                uri = doc.uri.toString(),
+                sourceUrl = null,
+                bytes = doc.length(),
+                cached = true,
+                width = size.first,
+                height = size.second,
+                contentType = null,
+                tiles = tiles,
+            )
+        }
+
+        val dir = internalChapterDir(sourceId, chapterUrl)
         val file = dir.listFiles()?.firstOrNull {
             it.name.startsWith("$pageIndex.") && !it.name.endsWith(".tmp") && it.length() > 0L
         } ?: throw EngineException("not_found", "Page $pageIndex is not downloaded")
@@ -455,9 +597,63 @@ class EngineFacade(context: Context) {
         )
     }
 
-    /** Removes all downloaded pages for a chapter. */
+    /** Removes all downloaded pages for a chapter, wherever they live. */
     fun deleteDownloadedChapter(sourceId: String, chapterUrl: String) {
-        chapterDir(sourceId, chapterUrl).deleteRecursively()
+        externalChapterDir(sourceId, chapterUrl, meta = null, create = false)?.let { dir ->
+            storage.invalidate(dir)
+            dir.delete()
+            storage.forgetChapterDir(sourceId, chapterUrl)
+        }
+        internalChapterDir(sourceId, chapterUrl).deleteRecursively()
+    }
+
+    /**
+     * Moves a chapter downloaded into app storage to the picked folder, renaming
+     * pages into Mihon's `001.jpg` scheme. Returns the number of pages moved
+     * (0 when there was nothing in app storage, or no location is set).
+     */
+    fun migrateDownloadedChapter(sourceId: String, chapterUrl: String, meta: DownloadMetaDto): Int {
+        val internal = internalChapterDir(sourceId, chapterUrl)
+        val files = internal.listFiles()
+            ?.filter { it.isFile && !it.name.endsWith(".tmp") && it.length() > 0L }
+            ?.takeIf { it.isNotEmpty() }
+            ?: return 0
+        val external = externalChapterDir(sourceId, chapterUrl, meta, create = true) ?: return 0
+        var moved = 0
+        for (file in files) {
+            val index = file.name.substringBefore('.').toIntOrNull() ?: continue
+            val extension = file.name.substringAfter('.', "jpg")
+            val name = DownloadNaming.pageFileName(index, extension)
+            external.findFile(name)?.delete()
+            val doc = external.createFile(mimeFor(extension), name) ?: continue
+            appContext.contentResolver.openOutputStream(doc.uri, "w")?.use { sink ->
+                file.inputStream().use { it.copyTo(sink) }
+            } ?: continue
+            moved += 1
+        }
+        storage.invalidate(external)
+        if (moved == files.size) internal.deleteRecursively()
+        return moved
+    }
+
+    private fun mimeFor(extension: String): String = when (extension.lowercase()) {
+        "png" -> "image/png"
+        "webp" -> "image/webp"
+        "gif" -> "image/gif"
+        else -> "image/jpeg"
+    }
+
+    private fun imageSize(uri: Uri): Pair<Int, Int>? {
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        try {
+            // With inJustDecodeBounds the decoder returns no bitmap by design;
+            // only a missing stream is a failure. The bounds land in `options`.
+            val stream = appContext.contentResolver.openInputStream(uri) ?: return null
+            stream.use { BitmapFactory.decodeStream(it, null, options) }
+        } catch (_: Exception) {
+            return null
+        }
+        return if (options.outWidth > 0 && options.outHeight > 0) options.outWidth to options.outHeight else null
     }
 
     // --- save / share -----------------------------------------------------

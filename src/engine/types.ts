@@ -59,11 +59,32 @@ export interface MangaDto {
   status: MangaStatus;
   /** Whether full details have been fetched (vs. a browse stub). */
   initialized: boolean;
+  /**
+   * Source-private state as JSON text (extensions-lib 1.6+ `memo`). Opaque:
+   * keep it with the manga and pass it back on details/chapter calls.
+   */
+  memo?: string;
 }
 
 export interface MangasPageDto {
   manga: MangaDto[];
   hasNextPage: boolean;
+}
+
+/** Names a download needs to land in Mihon's folder layout under a picked storage location. */
+export interface DownloadMeta {
+  mangaTitle: string;
+  chapterName: string;
+  scanlator?: string;
+}
+
+/** A user-picked storage folder (Storage Access Framework tree). */
+export interface StorageLocation {
+  uri: string;
+  /** Human-readable, e.g. "Internal storage/Kagari". */
+  displayPath: string;
+  /** False when the grant was lost or the folder was removed. */
+  writable: boolean;
 }
 
 export interface ChapterDto {
@@ -76,6 +97,8 @@ export interface ChapterDto {
   scanlator?: string;
   /** Epoch millis, 0 when unknown. */
   dateUpload: number;
+  /** Source-private state as JSON text; see `MangaDto.memo`. */
+  memo?: string;
 }
 
 export interface PageDto {
@@ -261,11 +284,15 @@ export interface Engine {
   getFilters(sourceId: string): Promise<FilterDto[]>;
 
   // detail / reading
-  getMangaDetails(sourceId: string, mangaUrl: string): Promise<MangaDto>;
+  /**
+   * `memo` is the source-private state the manga arrived with (`MangaDto.memo`);
+   * some sources cannot resolve details or chapters without it.
+   */
+  getMangaDetails(sourceId: string, mangaUrl: string, memo?: string): Promise<MangaDto>;
   /** Absolute, browser-openable URL for a manga (source baseUrl + path). */
   getMangaWebUrl(sourceId: string, mangaUrl: string): Promise<string>;
-  getChapters(sourceId: string, mangaUrl: string): Promise<ChapterDto[]>;
-  getPages(sourceId: string, chapterUrl: string): Promise<PageDto[]>;
+  getChapters(sourceId: string, mangaUrl: string, memo?: string): Promise<ChapterDto[]>;
+  getPages(sourceId: string, chapterUrl: string, memo?: string): Promise<PageDto[]>;
   resolveImage(sourceId: string, page: PageDto): Promise<ImageRequestDto>;
   fetchImage(sourceId: string, page: PageDto, forceRefresh?: boolean): Promise<ImageFileDto>;
   /**
@@ -277,8 +304,22 @@ export interface Engine {
   fetchCover(sourceId: string, url: string): Promise<string>;
 
   // offline downloads
-  /** Downloads one page to persistent storage; resolves with its file:// uri. */
-  downloadPage(sourceId: string, chapterUrl: string, page: PageDto): Promise<string>;
+  /**
+   * Downloads one page to persistent storage; resolves with its uri (`file://`
+   * in app storage, `content://` under a user-picked folder). `meta` names the
+   * Mihon-style folder when a storage location is set.
+   */
+  downloadPage(
+    sourceId: string,
+    chapterUrl: string,
+    page: PageDto,
+    meta?: DownloadMeta,
+  ): Promise<string>;
+  /**
+   * Moves a chapter downloaded into app storage to the picked folder. Resolves
+   * with the number of pages moved (0 when nothing to move or no folder set).
+   */
+  migrateDownloadedChapter(sourceId: string, chapterUrl: string, meta: DownloadMeta): Promise<number>;
   /** Reads a previously downloaded page (offline, no network). */
   fetchDownloadedImage(
     sourceId: string,
@@ -295,6 +336,14 @@ export interface Engine {
   /** Decodes a Mihon/Tachiyomi backup at the given content URI. */
   importMihonBackup(uri: string): Promise<MihonBackupDto>;
 
+  // storage location (Mihon-style user-picked folder)
+  /** The picked folder, or null when downloads live in app storage. */
+  getStorageLocation(): Promise<StorageLocation | null>;
+  /** Opens the system folder picker; resolves with the new location, or null if cancelled. */
+  pickStorageLocation(): Promise<StorageLocation | null>;
+  /** Back to app storage. Files already in the folder stay readable. */
+  clearStorageLocation(): Promise<void>;
+
   // save / share
   /** Renders a high-resolution tier-list image and returns a local file:// uri. */
   renderTierListImage(exportData: TierListExportDto): Promise<string>;
@@ -310,6 +359,8 @@ export interface Engine {
     fileName: string;
     bytes: number;
     mangaCount: number;
+    /** Display path of the copy kept under the storage location, when one is set. */
+    savedTo?: string | null;
   }>;
   /** Opens the system share sheet for an exported backup. */
   shareBackup(uri: string, fileName: string): Promise<void>;

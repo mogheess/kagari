@@ -198,7 +198,7 @@ export function ReaderScreen() {
         const pages =
           offlineCount > 0
             ? Array.from({ length: offlineCount }, (_, i) => ({ index: i }))
-            : await loadPages(params.sourceId, url);
+            : await loadPages(params.sourceId, url, chapter.memo);
         setLoadedChapters(prev =>
           insertChapter(
             prev,
@@ -956,7 +956,7 @@ function ChapterTransition({
       <Text numberOfLines={2} style={styles.transitionName}>
         {to.name}
       </Text>
-      <Text style={styles.transitionHint}>Loading\u2026</Text>
+      <Text style={styles.transitionHint}>Loading…</Text>
     </Pressable>
   );
 }
