@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Linking } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Linking, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -13,6 +13,13 @@ import { DISCORD_INVITE_URL, hasCommunityLinks } from '../app/community';
 import { themeById } from '../theme/themes';
 import { pickAndImportMihonBackup } from '../library/mihonImport';
 import { exportMihonBackup } from '../library/mihonExport';
+import {
+  useStorageLocation,
+  pickStorageLocation,
+  clearStorageLocation,
+  describeStorageLocation,
+} from '../library/storageLocation';
+import { countMigratableDownloads, migrateDownloadsToStorage } from '../library/downloads';
 import type { RootStackParamList } from '../navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -67,6 +74,7 @@ export function ProfileScreen() {
         <Text style={[styles.sectionLabel, { color: theme.colors.textFaint, marginTop: 28 }]}>
           DATA
         </Text>
+        <StorageLocationRow />
         <MihonImportRow />
         <BackupExportRow />
 
@@ -219,11 +227,12 @@ function BackupExportRow() {
     try {
       const result = await exportMihonBackup();
       const incomplete = result.mangaMissingChapters;
+      const summary = incomplete
+        ? `${result.mangaCount} title${result.mangaCount === 1 ? '' : 's'} exported; ${incomplete} missing chapter progress`
+        : `${result.mangaCount} title${result.mangaCount === 1 ? '' : 's'} exported`;
       setState({
         status: 'done',
-        message: incomplete
-          ? `${result.mangaCount} title${result.mangaCount === 1 ? '' : 's'} exported; ${incomplete} missing chapter progress`
-          : `${result.mangaCount} title${result.mangaCount === 1 ? '' : 's'} exported`,
+        message: result.savedTo ? `${summary} · copy in ${result.savedTo}` : summary,
       });
     } catch (e) {
       setState({ status: 'error', message: e instanceof Error ? e.message : 'Export failed' });
@@ -258,6 +267,110 @@ function BackupExportRow() {
         <ActivityIndicator size="small" color={theme.colors.textMuted} />
       ) : (
         <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 12.5 }}>Export</Text>
+      )}
+    </Pressable>
+  );
+}
+
+type MigrationState = { status: 'idle' } | { status: 'moving'; done: number; total: number };
+
+/**
+ * Where downloads and backups go. Mihon's model: one folder the user picks with
+ * the system picker, `downloads/` and `backups/` underneath, in Mihon's own
+ * layout so either app can read it. Optional — app storage stays the default.
+ */
+function StorageLocationRow() {
+  const theme = useTheme();
+  const location = useStorageLocation();
+  const [migration, setMigration] = useState<MigrationState>({ status: 'idle' });
+  const [error, setError] = useState<string | null>(null);
+  const busy = migration.status === 'moving';
+
+  const offerMigration = () => {
+    const count = countMigratableDownloads();
+    if (count === 0) return;
+    // The count is every finished download; ones already in a picked folder are
+    // skipped by the move itself, so phrase it as an upper bound.
+    Alert.alert(
+      'Move existing downloads?',
+      `Move up to ${count} downloaded chapter${count === 1 ? '' : 's'} from app storage into the new folder? Chapters already there are skipped, and everything stays readable either way.`,
+      [
+        { text: 'Not now', style: 'cancel' },
+        {
+          text: 'Move',
+          onPress: async () => {
+            setMigration({ status: 'moving', done: 0, total: count });
+            const result = await migrateDownloadsToStorage((done, total) =>
+              setMigration({ status: 'moving', done, total }),
+            );
+            setMigration({ status: 'idle' });
+            if (result.failed > 0) {
+              setError(`${result.failed} chapter${result.failed === 1 ? '' : 's'} could not be moved and stayed in app storage`);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const choose = async () => {
+    setError(null);
+    try {
+      const picked = await pickStorageLocation();
+      if (picked) offerMigration();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not open the folder picker');
+    }
+  };
+
+  const onPress = () => {
+    if (busy) return;
+    if (!location) {
+      void choose();
+      return;
+    }
+    Alert.alert('Storage location', location.displayPath, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Use app storage', onPress: () => void clearStorageLocation() },
+      { text: 'Choose folder', onPress: () => void choose() },
+    ]);
+  };
+
+  const subtitle = error
+    ? error
+    : migration.status === 'moving'
+      ? `Moving ${migration.done} of ${migration.total}…`
+      : describeStorageLocation(location);
+
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={busy}
+      style={({ pressed }) => [
+        styles.row,
+        theme.elevation.card,
+        {
+          backgroundColor: pressed ? theme.colors.elevated : theme.colors.surface,
+          borderColor: error || (location && !location.writable) ? theme.colors.danger : theme.colors.border,
+        },
+      ]}
+    >
+      <Icon name="folder" size={20} color={theme.colors.textMuted} />
+      <View style={{ flex: 1 }}>
+        <Text style={[theme.typography.body, { color: theme.colors.text }]}>Storage location</Text>
+        <Text
+          numberOfLines={2}
+          style={{ color: error ? theme.colors.danger : theme.colors.textFaint, fontSize: 12, marginTop: 2 }}
+        >
+          {subtitle}
+        </Text>
+      </View>
+      {busy ? (
+        <ActivityIndicator size="small" color={theme.colors.textMuted} />
+      ) : (
+        <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 12.5 }}>
+          {location ? 'Change' : 'Choose'}
+        </Text>
       )}
     </Pressable>
   );

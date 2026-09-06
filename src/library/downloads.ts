@@ -8,7 +8,7 @@ import { useSyncExternalStore } from 'react';
 import { makePersistence } from '../store/persist';
 import { getEngine } from '../engine';
 import { loadPages } from '../engine/pageCache';
-import type { MangaDto, ChapterDto } from '../engine/types';
+import type { MangaDto, ChapterDto, DownloadMeta } from '../engine/types';
 
 export type DownloadStatus = 'queued' | 'downloading' | 'done' | 'error';
 
@@ -19,6 +19,10 @@ export interface DownloadEntry {
   thumbnailUrl?: string;
   chapterUrl: string;
   chapterName: string;
+  /** Part of the folder name under a picked storage location (Mihon layout). */
+  scanlator?: string;
+  /** Source-private chapter state (`ChapterDto.memo`), passed back when fetching pages. */
+  memo?: string;
   status: DownloadStatus;
   /** Total pages, known once the page list is fetched. */
   pageCount: number;
@@ -76,6 +80,40 @@ async function hydrate(): Promise<void> {
   void pump();
 }
 
+function downloadMeta(entry: DownloadEntry): DownloadMeta {
+  return { mangaTitle: entry.title, chapterName: entry.chapterName, scanlator: entry.scanlator };
+}
+
+/** Completed downloads still sitting in app storage can be moved to a picked folder. */
+export function countMigratableDownloads(): number {
+  return entries.filter(e => e.status === 'done').length;
+}
+
+/**
+ * Moves finished downloads from app storage into the picked storage location,
+ * one chapter at a time. Nothing is lost on failure: a chapter that could not
+ * be moved stays where it was and remains readable from there.
+ */
+export async function migrateDownloadsToStorage(
+  onProgress?: (done: number, total: number) => void,
+): Promise<{ moved: number; failed: number }> {
+  const engine = getEngine();
+  const done = entries.filter(e => e.status === 'done');
+  let moved = 0;
+  let failed = 0;
+  for (let i = 0; i < done.length; i += 1) {
+    const e = done[i];
+    try {
+      await engine.migrateDownloadedChapter(e.sourceId, e.chapterUrl, downloadMeta(e));
+      moved += 1;
+    } catch {
+      failed += 1;
+    }
+    onProgress?.(i + 1, done.length);
+  }
+  return { moved, failed };
+}
+
 /** Processes queued chapters one at a time. */
 async function pump(): Promise<void> {
   if (running || !hydrated) return;
@@ -86,7 +124,7 @@ async function pump(): Promise<void> {
   patch(sourceId, chapterUrl, { status: 'downloading', downloaded: 0, error: undefined });
   try {
     const engine = getEngine();
-    const pages = await loadPages(sourceId, chapterUrl);
+    const pages = await loadPages(sourceId, chapterUrl, next.memo);
     if (!entries.some(e => sameChapter(e, sourceId, chapterUrl))) return; // cancelled
     if (pages.length === 0) {
       // A "done" download with zero pages is useless and can't be re-queued
@@ -97,7 +135,7 @@ async function pump(): Promise<void> {
     patch(sourceId, chapterUrl, { pageCount: pages.length });
     for (let i = 0; i < pages.length; i += 1) {
       if (!entries.some(e => sameChapter(e, sourceId, chapterUrl))) return; // cancelled mid-run
-      await engine.downloadPage(sourceId, chapterUrl, pages[i]);
+      await engine.downloadPage(sourceId, chapterUrl, pages[i], downloadMeta(next));
       patch(sourceId, chapterUrl, { downloaded: i + 1 });
     }
     if (entries.some(e => sameChapter(e, sourceId, chapterUrl))) {
@@ -125,6 +163,8 @@ export function enqueueDownload(manga: MangaDto, chapter: ChapterDto): void {
     thumbnailUrl: manga.thumbnailUrl,
     chapterUrl: chapter.url,
     chapterName: chapter.name,
+    scanlator: chapter.scanlator,
+    memo: chapter.memo,
     status: 'queued',
     pageCount: 0,
     downloaded: 0,
@@ -163,6 +203,8 @@ export function enqueueDownloads(manga: MangaDto, chapters: readonly ChapterDto[
       thumbnailUrl: manga.thumbnailUrl,
       chapterUrl: chapter.url,
       chapterName: chapter.name,
+      scanlator: chapter.scanlator,
+      memo: chapter.memo,
       status: 'queued',
       pageCount: 0,
       downloaded: 0,
