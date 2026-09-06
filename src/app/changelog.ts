@@ -20,6 +20,10 @@ export const CHANGELOG: ChangelogEntry[] = [
       'Extensions: one "Update all" button installs every pending update in turn, outdated extensions are listed first, and the Installed tab opens by default when updates are waiting.',
       'Covers show a shimmer while they load instead of a blank box.',
       'Smoother scrolling and transitions: the bottom bar no longer redraws the whole screen every frame for its blur effect.',
+      'Storage location (Settings → Data): pick a folder and downloads and backups are saved there in Mihon\'s own layout — browsable in any file manager, kept when the app is uninstalled, and readable by Mihon from the same folder. Existing downloads can be moved over. App storage stays the default.',
+      'Extensions built against the newest keiyoushi toolchain (August 2026 onward) load again. They check the app for several network components and refuse to run without them; Kagari now provides all of them.',
+      'A newly installed extension shows up in Discover immediately instead of after a restart.',
+      'Installed extensions that no longer exist in any of your repos are marked Orphaned, so it is clear why they get no updates and may stop working.',
     ],
   },
   {

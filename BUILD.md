@@ -60,6 +60,20 @@ Notable native dependency: **`@react-native-async-storage/async-storage`** (loca
 library/categories/home persistence). Adding/updating it requires a native
 rebuild, not just Fast Refresh.
 
+## Emulator tip
+
+A debug APK with every ABI is ~230 MB and the default emulator image is short on
+storage, so an install can fail with `INSTALL_FAILED_INSUFFICIENT_STORAGE` (or
+report "Success" while the old build stays installed — check `dumpsys package
+app.kagari | grep lastUpdateTime`). Build only the emulator's ABI instead:
+
+```sh
+cd android && ./gradlew :app:assembleDebug -PreactNativeArchitectures=arm64-v8a
+```
+
+(`arm64-v8a` on Apple Silicon, `x86_64` on Intel — check `adb shell getprop
+ro.product.cpu.abilist`.)
+
 ## Run (development)
 
 Start Metro in one terminal (only ever **one** instance):
