@@ -122,10 +122,31 @@ class CloudflareInterceptor(
     private fun hasClearance(url: HttpUrl): Boolean =
         cookieManager.get(url).any { it.name == "cf_clearance" }
 
+    /**
+     * What counts as "Cloudflare is challenging us", not merely "Cloudflare said no".
+     *
+     * A challenge page always carries `cf-mitigated: challenge` — the header
+     * Cloudflare documents for exactly this purpose and the only signal Mihon
+     * uses. A bare 403/503 from a Cloudflare-fronted origin is a WAF block or a
+     * rate limit: no WebView will ever turn it into a cookie, and treating it as
+     * a challenge cost 20–40 s of WebView work per request before the same 403
+     * came back. Those now return immediately as ordinary errors.
+     *
+     * The one exception is image requests. Some image CDNs gate on the client's
+     * TLS fingerprint and 403 OkHttp without any challenge; the WebView is served
+     * the bytes directly, so for those we still fall through to the byte-fetch.
+     */
     private fun Response.isChallenge(): Boolean {
         val fromCloudflare = header("Server") in SERVER_CHECK
-        val managedChallenge = header("cf-mitigated").equals("challenge", ignoreCase = true)
-        return code in ERROR_CODES && (fromCloudflare || managedChallenge)
+        if (!fromCloudflare) return false
+        if (header("cf-mitigated").equals("challenge", ignoreCase = true)) return true
+        return code in ERROR_CODES && request.isImageRequest()
+    }
+
+    private fun Request.isImageRequest(): Boolean {
+        if (header("Accept")?.startsWith("image/") == true) return true
+        val path = url.encodedPath.lowercase()
+        return IMAGE_EXTENSIONS.any { path.endsWith(it) }
     }
 
     /**
@@ -323,6 +344,7 @@ class CloudflareInterceptor(
         private val ERROR_CODES = listOf(403, 503)
         private val SERVER_CHECK = listOf("cloudflare-nginx", "cloudflare")
         private val COOKIE_NAMES = listOf("cf_clearance")
+        private val IMAGE_EXTENSIONS = listOf(".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif")
 
         /** True when the loaded document looks like a Cloudflare challenge page. */
         private const val CHALLENGE_PROBE_JS =

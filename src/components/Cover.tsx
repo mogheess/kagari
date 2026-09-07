@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { useTheme } from '../theme/ThemeProvider';
 import { RemoteImage } from './RemoteImage';
+import { Skeleton } from './Skeleton';
 import { Icon } from './Icon';
 import type { MangaDto } from '../engine/types';
 
@@ -55,6 +56,14 @@ export function Cover({ manga, width, subtitle, progress, badge, inLibrary, onPr
           },
         ]}
       >
+        {!loaded ? (
+          <Skeleton
+            width={width}
+            height={height}
+            radius={theme.radius.md}
+            style={{ position: 'absolute', top: 0, left: 0 }}
+          />
+        ) : null}
         {manga.thumbnailUrl ? (
           <RemoteImage
             uri={manga.thumbnailUrl}
@@ -93,7 +102,6 @@ export function Cover({ manga, width, subtitle, progress, badge, inLibrary, onPr
             />
           </View>
         ) : null}
-        {!loaded ? null : null}
       </View>
 
       <Text

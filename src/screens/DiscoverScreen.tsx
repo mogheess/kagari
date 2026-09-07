@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -29,6 +29,7 @@ import { usePinnedSources } from '../sources/pinned';
 import { useSourceHealth, unhealthyIds, recordSourceResult } from '../sources/sourceHealth';
 import { useDiscoverIntent, type BrowseMode } from '../sources/discoverIntent';
 import { langLabel } from '../utils/lang';
+import { useSources } from '../sources/sourcesStore';
 import { pickDefaultSource, sortSourcesForPicker } from '../utils/sourceSelect';
 import type { RootStackParamList } from '../navigation/types';
 import type { MangaDto, MangasPageDto, SourceDto } from '../engine/types';
@@ -57,10 +58,7 @@ export function DiscoverScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
-  const engine = getEngine();
-
   const [mode, setMode] = useState<DiscoverMode>('source');
-  const [sources, setSources] = useState<SourceDto[]>([]);
   const [sourceId, setSourceId] = useState('');
   const [browse, setBrowse] = useState<BrowseMode>('popular');
   const [query, setQuery] = useState('');
@@ -70,16 +68,13 @@ export function DiscoverScreen() {
   const [restored, setRestored] = useState(false);
   const [fetching, setFetching] = useState(false);
 
+  const allSources = useSources();
+  const sources = useMemo(() => sortSourcesForPicker(allSources), [allSources]);
   const pinned = usePinnedSources();
   const health = useSourceHealth();
   const userPicked = useRef(false);
   const intent = useDiscoverIntent();
   const appliedIntent = useRef(0);
-
-  useEffect(() => {
-    engine.listSources().then(s => setSources(sortSourcesForPicker(s)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Restore the saved source/browse before the default-picker runs, so Discover
   // reopens on the user's last choice instead of resetting to a smart default.

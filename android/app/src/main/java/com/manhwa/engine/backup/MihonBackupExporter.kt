@@ -58,6 +58,8 @@ data class ExportResult(
     val fileName: String,
     val bytes: Long,
     val mangaCount: Int,
+    /** Display path of the copy kept in the storage location, when one is set. */
+    val savedTo: String? = null,
 )
 
 object MihonBackupExporter {

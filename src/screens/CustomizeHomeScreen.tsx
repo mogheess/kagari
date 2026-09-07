@@ -1,15 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, ScrollView, Switch } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSources } from '../sources/sourcesStore';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeProvider';
 import { useHomeConfig, blockLabel, isBrowseBlock } from '../home/HomeConfig';
 import { Icon } from '../components/Icon';
 import { SourcePickerSheet } from '../components/SourcePickerSheet';
-import { getEngine } from '../engine';
 import { sortSourcesForPicker, pickDefaultSource } from '../utils/sourceSelect';
 import { langLabel } from '../utils/lang';
-import type { SourceDto } from '../engine/types';
 
 const UNIVERSAL = '__universal__';
 
@@ -29,15 +28,9 @@ export function CustomizeHomeScreen() {
     setUniversalSource,
   } = useHomeConfig();
 
-  const [sources, setSources] = useState<SourceDto[]>([]);
+  const allSources = useSources();
+  const sources = useMemo(() => sortSourcesForPicker(allSources), [allSources]);
   const [pickerFor, setPickerFor] = useState<string | null>(null);
-
-  useEffect(() => {
-    getEngine()
-      .listSources()
-      .then(s => setSources(sortSourcesForPicker(s)))
-      .catch(() => setSources([]));
-  }, []);
 
   const pickerBlock = blocks.find(b => b.id === pickerFor);
   const universalSource = sources.find(s => s.id === universalSourceId);

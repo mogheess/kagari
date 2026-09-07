@@ -83,8 +83,8 @@ android {
         applicationId "app.kagari"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 6
-        versionName "0.6"
+        versionCode 7
+        versionName "0.6.1"
     }
     signingConfigs {
         debug {
@@ -175,13 +175,20 @@ dependencies {
     // Versions mirror keiyoushi/extensions-source's version catalog so the
     // extension bytecode links against compatible classes.
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    // Extensions are compiled with a newer serialization plugin whose generated
+    // serializers rely on `GeneratedSerializer.typeParametersSerializers()` being a
+    // JVM default method. 1.7.x still declares it abstract, so every @Serializable
+    // parse in a current extension died with AbstractMethodError. 1.8.1 is the
+    // first release with the default and the last built with Kotlin 2.1, which is
+    // what this app compiles with (a runtime built with a newer Kotlin than the
+    // compiler can read is rejected at build time).
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
     // Okio integration for kotlinx-serialization. Extensions parse JSON bodies
     // via `Json.decodeFromBufferedSource(...)` (class
     // `kotlinx.serialization.json.okio.OkioStreamsKt`); without this the source
     // throws NoClassDefFoundError at parse time.
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json-okio:1.7.3")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-protobuf:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json-okio:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-protobuf:1.8.1")
     // OkHttp/Okio must match keiyoushi/extensions-source's catalog: modern
     // extensions are compiled against OkHttp 5.x and reference classes that only
     // exist there (e.g. `okhttp3.internal._UtilCommonKt`). Shipping OkHttp 4.x on
@@ -195,8 +202,18 @@ dependencies {
     // 5.x internals that are actually present (otherwise loading uncached covers
     // crashes with NoClassDefFoundError: okhttp3/internal/Util).
     implementation("com.squareup.okhttp3:okhttp-urlconnection:5.3.2")
+    // keiyoushi's `core` module (every current extension inherits its KeiSource
+    // base class) compiles against these as app-provided, exactly like Mihon
+    // ships them. KeiSource touches Brotli/Zstd while building its client and
+    // the first request throws NoClassDefFoundError without them; quickjs is
+    // used by sources that evaluate site scripts. Versions follow
+    // keiyoushi/extensions-source/gradle/libs.versions.toml.
+    implementation("com.squareup.okhttp3:okhttp-brotli:5.3.2")
+    implementation("com.squareup.okhttp3:okhttp-zstd:5.3.2")
+    implementation("com.squareup.zstd:zstd-kmp-okio:0.4.0")
+    implementation("com.github.zhanghai.quickjs-java:quickjs-android:547f5b1597")
     implementation("com.squareup.okio:okio:3.16.4")
-    implementation("org.jsoup:jsoup:1.17.2")
+    implementation("org.jsoup:jsoup:1.22.2") // keiyoushi compiles against this line
     // RxJava 1 is required by extensions that implement the fetch* Observable
     // methods (Tachiyomi's primary source API).
     implementation("io.reactivex:rxjava:1.3.8")
@@ -207,4 +224,6 @@ dependencies {
     // Extensions implementing ConfigurableSource reference androidx.preference
     // classes (PreferenceScreen, EditTextPreference, ...) at runtime.
     implementation("androidx.preference:preference-ktx:1.2.1")
+    // Storage Access Framework access to the user-chosen download folder.
+    implementation("androidx.documentfile:documentfile:1.0.1")
 }

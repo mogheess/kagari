@@ -49,9 +49,30 @@ loads Tachiyomi/Mihon-compatible extension APKs.
 npm install
 ```
 
+`npm install` also runs `patch-package` (postinstall) to apply the fixes under
+`patches/` to `node_modules`. Currently that is one Android fix for
+`react-native-screens` (a dismissed screen was drawn for one frame after its
+exit animation, showing as a flash on back). After editing a file under
+`node_modules/<pkg>`, regenerate with `npx patch-package <pkg>`; when bumping a
+patched package, re-check that the patch still applies.
+
 Notable native dependency: **`@react-native-async-storage/async-storage`** (local
 library/categories/home persistence). Adding/updating it requires a native
 rebuild, not just Fast Refresh.
+
+## Emulator tip
+
+A debug APK with every ABI is ~230 MB and the default emulator image is short on
+storage, so an install can fail with `INSTALL_FAILED_INSUFFICIENT_STORAGE` (or
+report "Success" while the old build stays installed — check `dumpsys package
+app.kagari | grep lastUpdateTime`). Build only the emulator's ABI instead:
+
+```sh
+cd android && ./gradlew :app:assembleDebug -PreactNativeArchitectures=arm64-v8a
+```
+
+(`arm64-v8a` on Apple Silicon, `x86_64` on Intel — check `adb shell getprop
+ro.product.cpu.abilist`.)
 
 ## Run (development)
 

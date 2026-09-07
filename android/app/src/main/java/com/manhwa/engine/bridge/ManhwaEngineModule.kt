@@ -11,7 +11,9 @@ import com.facebook.react.bridge.ReactMethod
 import com.manhwa.engine.EngineException
 import com.manhwa.engine.EngineFacade
 import com.manhwa.engine.backup.ExportRequest
+import com.manhwa.engine.dto.DownloadMetaDto
 import com.manhwa.engine.dto.PageDto
+import com.manhwa.engine.dto.StorageLocationDto
 import com.manhwa.engine.dto.TierListExportDto
 import com.manhwa.engine.repo.ApkInstaller
 import com.manhwa.engine.repo.RepoManager
@@ -44,6 +46,9 @@ class ManhwaEngineModule(
     /** Resolved by [onActivityResult] when the backup-file picker returns. */
     private var pickPromise: Promise? = null
 
+    /** Resolved by [onActivityResult] when the storage-folder picker returns. */
+    private var pickStoragePromise: Promise? = null
+
     init {
         reactContext.addActivityEventListener(this)
     }
@@ -53,6 +58,7 @@ class ManhwaEngineModule(
     override fun invalidate() {
         reactContext.removeActivityEventListener(this)
         pickPromise = null
+        pickStoragePromise = null
         clearKeepScreenOn()
         scope.cancel()
         super.invalidate()
@@ -186,8 +192,8 @@ class ManhwaEngineModule(
     // --- detail / reading ---
 
     @ReactMethod
-    fun getMangaDetails(sourceId: String, mangaUrl: String, promise: Promise) = resolve(promise) {
-        json.encodeToString(facade.getMangaDetails(sourceId, mangaUrl))
+    fun getMangaDetails(sourceId: String, mangaUrl: String, memoJson: String?, promise: Promise) = resolve(promise) {
+        json.encodeToString(facade.getMangaDetails(sourceId, mangaUrl, memoJson))
     }
 
     @ReactMethod
@@ -196,13 +202,13 @@ class ManhwaEngineModule(
     }
 
     @ReactMethod
-    fun getChapters(sourceId: String, mangaUrl: String, promise: Promise) = resolve(promise) {
-        json.encodeToString(facade.getChapters(sourceId, mangaUrl))
+    fun getChapters(sourceId: String, mangaUrl: String, memoJson: String?, promise: Promise) = resolve(promise) {
+        json.encodeToString(facade.getChapters(sourceId, mangaUrl, memoJson))
     }
 
     @ReactMethod
-    fun getPages(sourceId: String, chapterUrl: String, promise: Promise) = resolve(promise) {
-        json.encodeToString(facade.getPages(sourceId, chapterUrl))
+    fun getPages(sourceId: String, chapterUrl: String, memoJson: String?, promise: Promise) = resolve(promise) {
+        json.encodeToString(facade.getPages(sourceId, chapterUrl, memoJson))
     }
 
     @ReactMethod
@@ -227,11 +233,71 @@ class ManhwaEngineModule(
     // --- offline downloads ---
 
     @ReactMethod
-    fun downloadPage(sourceId: String, chapterUrl: String, pageJson: String, promise: Promise) =
+    fun downloadPage(
+        sourceId: String,
+        chapterUrl: String,
+        pageJson: String,
+        metaJson: String?,
+        promise: Promise,
+    ) = resolve(promise) {
+        val page = json.decodeFromString<PageDto>(pageJson)
+        val meta = metaJson?.takeIf { it.isNotBlank() }?.let { json.decodeFromString<DownloadMetaDto>(it) }
+        facade.downloadPage(sourceId, chapterUrl, page, meta)
+    }
+
+    @ReactMethod
+    fun migrateDownloadedChapter(sourceId: String, chapterUrl: String, metaJson: String, promise: Promise) =
         resolve(promise) {
-            val page = json.decodeFromString<PageDto>(pageJson)
-            facade.downloadPage(sourceId, chapterUrl, page)
+            facade.migrateDownloadedChapter(sourceId, chapterUrl, json.decodeFromString<DownloadMetaDto>(metaJson))
+                .toString()
         }
+
+    // --- storage location (Mihon-style user-picked folder) ---
+
+    @ReactMethod
+    fun getStorageLocation(promise: Promise) = resolve(promise) {
+        // Encodes as the JSON literal `null` when no folder is picked.
+        json.encodeToString<StorageLocationDto?>(facade.storageLocation())
+    }
+
+    @ReactMethod
+    fun clearStorageLocation(promise: Promise) = resolve(promise) {
+        facade.clearStorageLocation()
+        ""
+    }
+
+    /**
+     * Opens the system folder picker. Resolves with the location (JSON), or
+     * null if the user backed out. The grant is persisted so it survives
+     * restarts; see StorageManager.
+     */
+    @ReactMethod
+    fun pickStorageLocation(promise: Promise) {
+        val activity = reactContext.currentActivity
+        if (activity == null) {
+            promise.reject("no_activity", "The app must be in the foreground to pick a folder")
+            return
+        }
+        if (pickPromise != null || pickStoragePromise != null) {
+            promise.reject("busy", "A picker is already open")
+            return
+        }
+        pickStoragePromise = promise
+        try {
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+                addFlags(
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                        Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION,
+                )
+            }
+            activity.startActivityForResult(intent, PICK_STORAGE_REQUEST)
+        } catch (e: Exception) {
+            // A few devices ship without a working document picker.
+            pickStoragePromise = null
+            promise.reject("pick_failed", e.message ?: "Could not open the folder picker", e)
+        }
+    }
 
     @ReactMethod
     fun fetchDownloadedImage(
@@ -284,11 +350,31 @@ class ManhwaEngineModule(
     }
 
     override fun onActivityResult(activity: Activity, requestCode: Int, resultCode: Int, data: Intent?) {
-        if (requestCode != PICK_BACKUP_REQUEST) return
-        val promise = pickPromise ?: return
-        pickPromise = null
-        val uri = if (resultCode == Activity.RESULT_OK) data?.data else null
-        promise.resolve(uri?.toString())
+        when (requestCode) {
+            PICK_BACKUP_REQUEST -> {
+                val promise = pickPromise ?: return
+                pickPromise = null
+                val uri = if (resultCode == Activity.RESULT_OK) data?.data else null
+                promise.resolve(uri?.toString())
+            }
+            PICK_STORAGE_REQUEST -> {
+                val promise = pickStoragePromise ?: return
+                pickStoragePromise = null
+                val uri = if (resultCode == Activity.RESULT_OK) data?.data else null
+                if (uri == null) {
+                    promise.resolve(null)
+                    return
+                }
+                scope.launch {
+                    try {
+                        val location = facade.setStorageLocation(uri)
+                        promise.resolve(location?.let { json.encodeToString(it) })
+                    } catch (e: Exception) {
+                        promise.reject("storage", e.message ?: "Could not use that folder", e)
+                    }
+                }
+            }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -356,5 +442,6 @@ class ManhwaEngineModule(
     companion object {
         const val NAME = "ManhwaEngine"
         private const val PICK_BACKUP_REQUEST = 0xBAC0
+        private const val PICK_STORAGE_REQUEST = 0xBAC1
     }
 }

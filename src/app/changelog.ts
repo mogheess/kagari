@@ -12,6 +12,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.6.1',
+    date: '2026-09-05',
+    highlights: [
+      'Fixed the screen flashing when pressing back on Android. The screen you had just left was drawn for one extra frame after the transition finished.',
+      'Home sections no longer vanish when their source fails or is slow: they stay in place, say which source is having trouble, and offer a Retry.',
+      'Extensions: one "Update all" button installs every pending update in turn, outdated extensions are listed first, and the Installed tab opens by default when updates are waiting.',
+      'Covers show a shimmer while they load instead of a blank box.',
+      'Smoother scrolling and transitions: the bottom bar no longer redraws the whole screen every frame for its blur effect.',
+      'Storage location (Settings → Data): pick a folder and downloads and backups are saved there in Mihon\'s own layout — browsable in any file manager, kept when the app is uninstalled, and readable by Mihon from the same folder. Existing downloads can be moved over. App storage stays the default.',
+      'Extensions built against the newest keiyoushi toolchain (August 2026 onward) work again. They check the app for several network components and refuse to run without them, and their parsers need a newer serialization runtime than the app shipped — every list came back empty or never finished. Kagari now provides all of it.',
+      'A source that fails while parsing now shows an error with Retry instead of loading forever.',
+      'Cloudflare handling follows Cloudflare\'s own challenge header, like Mihon: a plain block or rate limit fails fast instead of spending up to 40 seconds trying to solve a challenge that is not there.',
+      'A newly installed extension shows up in Discover immediately instead of after a restart.',
+      'Installed extensions that no longer exist in any of your repos are marked Orphaned, so it is clear why they get no updates and may stop working.',
+    ],
+  },
+  {
     version: '0.6',
     date: '2026-08-01',
     highlights: [

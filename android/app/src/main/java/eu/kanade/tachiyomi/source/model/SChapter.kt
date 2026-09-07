@@ -8,6 +8,7 @@
 package eu.kanade.tachiyomi.source.model
 
 import java.io.Serializable
+import kotlinx.serialization.json.JsonObject
 
 interface SChapter : Serializable {
     var url: String
@@ -15,6 +16,8 @@ interface SChapter : Serializable {
     var date_upload: Long
     var chapter_number: Float
     var scanlator: String?
+    /** Source-private state (extensions-lib 1.6+); see [SManga.memo]. */
+    var memo: JsonObject
 
     companion object {
         fun create(): SChapter = SChapterImpl()
@@ -27,4 +30,5 @@ class SChapterImpl : SChapter {
     override var date_upload: Long = 0
     override var chapter_number: Float = -1f
     override var scanlator: String? = null
+    override var memo: JsonObject = JsonObject(emptyMap())
 }

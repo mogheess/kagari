@@ -10,6 +10,7 @@ export type IconName =
   | 'search'
   | 'settings'
   | 'download'
+  | 'folder'
   | 'check'
   | 'chevronRight'
   | 'chevronDown'
@@ -141,6 +142,8 @@ function renderPaths(
           <Path {...c} d="M5 20h14" />
         </>
       );
+    case 'folder':
+      return <Path {...c} d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />;
     case 'check':
       return <Polyline {...c} points="5,12 10,17 19,7" />;
     case 'chevronRight':

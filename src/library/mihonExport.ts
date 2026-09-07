@@ -23,6 +23,8 @@ export interface BackupExportResult {
   mangaCount: number;
   /** Titles whose chapter state could not be included because their source failed. */
   mangaMissingChapters: number;
+  /** Display path of the copy kept under the storage location, when one is set. */
+  savedTo?: string | null;
 }
 
 export interface BackupChapter {
@@ -149,7 +151,7 @@ async function refreshMissingChapterLists(): Promise<void> {
       const fav = missing[cursor++];
       if (!fav) return;
       try {
-        await loadChapters(fav.sourceId, fav.url);
+        await loadChapters(fav.sourceId, fav.url, fav.memo);
       } catch {
         // The final missing count makes partial exports explicit.
       }

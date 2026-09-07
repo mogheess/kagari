@@ -201,7 +201,7 @@ export async function checkLibraryUpdates(engine: Engine, opts?: { force?: boole
       const key = keyOf(f.sourceId, f.url);
       let chapters: ChapterDto[] | null = null;
       try {
-        chapters = await engine.getChapters(f.sourceId, f.url);
+        chapters = await engine.getChapters(f.sourceId, f.url, f.memo);
         anySuccess = true;
       } catch {
         chapters = null; // source down / not installed

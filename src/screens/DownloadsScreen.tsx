@@ -7,6 +7,7 @@ import { useTheme } from '../theme/ThemeProvider';
 import { Icon } from '../components/Icon';
 import { RemoteImage } from '../components/RemoteImage';
 import { useDownloads, removeDownload, type DownloadEntry } from '../library/downloads';
+import { useStorageLocation, describeStorageLocation } from '../library/storageLocation';
 import type { RootStackParamList } from '../navigation/types';
 import type { MangaDto, MangaStatus } from '../engine/types';
 
@@ -61,6 +62,7 @@ export function DownloadsScreen() {
   const navigation = useNavigation<Nav>();
   const downloads = useDownloads();
   const groups = groupByManga(downloads);
+  const location = useStorageLocation();
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
@@ -76,6 +78,16 @@ export function DownloadsScreen() {
         data={groups}
         keyExtractor={g => `${g.sourceId}:${g.mangaUrl}`}
         contentContainerStyle={{ padding: theme.spacing.lg, paddingTop: 12 }}
+        ListHeaderComponent={
+          groups.length > 0 ? (
+            <Text
+              numberOfLines={1}
+              style={{ color: theme.colors.textFaint, fontSize: 12, marginBottom: 12 }}
+            >
+              {`Saved to ${describeStorageLocation(location)}`}
+            </Text>
+          ) : null
+        }
         ListEmptyComponent={
           <View style={styles.empty}>
             <View style={[styles.emptyIcon, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>

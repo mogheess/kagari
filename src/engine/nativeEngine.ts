@@ -21,6 +21,8 @@ import type {
   RepoDto,
   AvailableExtensionDto,
   MihonBackupDto,
+  DownloadMeta,
+  StorageLocation,
 } from './types';
 import { fetchAllRepos } from './repoClient';
 
@@ -39,14 +41,18 @@ interface ManhwaEngineNative {
   getLatest(sourceId: string, page: number): Promise<string>;
   search(sourceId: string, query: string, page: number, filtersJson: string): Promise<string>;
   getFilters(sourceId: string): Promise<string>;
-  getMangaDetails(sourceId: string, mangaUrl: string): Promise<string>;
+  getMangaDetails(sourceId: string, mangaUrl: string, memoJson: string | null): Promise<string>;
   getMangaWebUrl(sourceId: string, mangaUrl: string): Promise<string>;
-  getChapters(sourceId: string, mangaUrl: string): Promise<string>;
-  getPages(sourceId: string, chapterUrl: string): Promise<string>;
+  getChapters(sourceId: string, mangaUrl: string, memoJson: string | null): Promise<string>;
+  getPages(sourceId: string, chapterUrl: string, memoJson: string | null): Promise<string>;
   resolveImage(sourceId: string, pageJson: string): Promise<string>;
   fetchImage(sourceId: string, pageJson: string, forceRefresh: boolean): Promise<string>;
   fetchCover(sourceId: string, url: string): Promise<string>;
-  downloadPage(sourceId: string, chapterUrl: string, pageJson: string): Promise<string>;
+  downloadPage(sourceId: string, chapterUrl: string, pageJson: string, metaJson: string | null): Promise<string>;
+  migrateDownloadedChapter?(sourceId: string, chapterUrl: string, metaJson: string): Promise<string>;
+  getStorageLocation?(): Promise<string>;
+  pickStorageLocation?(): Promise<string | null>;
+  clearStorageLocation?(): Promise<void>;
   fetchDownloadedImage(sourceId: string, chapterUrl: string, pageIndex: number): Promise<string>;
   deleteDownloadedChapter(sourceId: string, chapterUrl: string): Promise<void>;
   pickMihonBackup(): Promise<string | null>;
@@ -130,18 +136,18 @@ export function createNativeEngine(): Engine | null {
     async getFilters(sourceId) {
       return parse<FilterDto[]>(await Native.getFilters(sourceId));
     },
-    async getMangaDetails(sourceId, mangaUrl) {
-      return parse<MangaDto>(await Native.getMangaDetails(sourceId, mangaUrl));
+    async getMangaDetails(sourceId, mangaUrl, memo?: string) {
+      return parse<MangaDto>(await Native.getMangaDetails(sourceId, mangaUrl, memo ?? null));
     },
     async getMangaWebUrl(sourceId, mangaUrl) {
       if (typeof Native.getMangaWebUrl !== 'function') return '';
       return await Native.getMangaWebUrl(sourceId, mangaUrl);
     },
-    async getChapters(sourceId, mangaUrl) {
-      return parse<ChapterDto[]>(await Native.getChapters(sourceId, mangaUrl));
+    async getChapters(sourceId, mangaUrl, memo?: string) {
+      return parse<ChapterDto[]>(await Native.getChapters(sourceId, mangaUrl, memo ?? null));
     },
-    async getPages(sourceId, chapterUrl) {
-      return parse<PageDto[]>(await Native.getPages(sourceId, chapterUrl));
+    async getPages(sourceId, chapterUrl, memo?: string) {
+      return parse<PageDto[]>(await Native.getPages(sourceId, chapterUrl, memo ?? null));
     },
     async resolveImage(sourceId, page: PageDto) {
       return parse<ImageRequestDto>(
@@ -161,11 +167,34 @@ export function createNativeEngine(): Engine | null {
       if (typeof Native.fetchCover !== 'function') return url;
       return await Native.fetchCover(sourceId, url);
     },
-    async downloadPage(sourceId, chapterUrl, page: PageDto) {
+    async downloadPage(sourceId, chapterUrl, page: PageDto, meta?: DownloadMeta) {
       if (typeof Native.downloadPage !== 'function') {
         throw new Error('Downloads are unavailable on this build.');
       }
-      return Native.downloadPage(sourceId, chapterUrl, JSON.stringify(page));
+      return Native.downloadPage(
+        sourceId,
+        chapterUrl,
+        JSON.stringify(page),
+        meta ? JSON.stringify(meta) : null,
+      );
+    },
+    async migrateDownloadedChapter(sourceId, chapterUrl, meta) {
+      if (typeof Native.migrateDownloadedChapter !== 'function') return 0;
+      const moved = await Native.migrateDownloadedChapter(sourceId, chapterUrl, JSON.stringify(meta));
+      return Number.parseInt(moved, 10) || 0;
+    },
+    async getStorageLocation() {
+      if (typeof Native.getStorageLocation !== 'function') return null;
+      return parse<StorageLocation | null>(await Native.getStorageLocation());
+    },
+    async pickStorageLocation() {
+      if (typeof Native.pickStorageLocation !== 'function') return null;
+      const raw = await Native.pickStorageLocation();
+      return raw ? parse<StorageLocation>(raw) : null;
+    },
+    async clearStorageLocation() {
+      if (typeof Native.clearStorageLocation !== 'function') return;
+      await Native.clearStorageLocation();
     },
     async fetchDownloadedImage(sourceId, chapterUrl, pageIndex) {
       if (typeof Native.fetchDownloadedImage !== 'function') {
