@@ -18,6 +18,7 @@ import com.manhwa.engine.dto.TierListExportDto
 import com.manhwa.engine.repo.ApkInstaller
 import com.manhwa.engine.repo.RepoManager
 import com.manhwa.engine.web.SourceWebViewActivity
+import eu.kanade.tachiyomi.network.interceptor.CloudflareBypassException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -433,6 +434,16 @@ class ManhwaEngineModule(
                 android.util.Log.w(NAME, "engine error (${e.kind}): ${e.message}", e)
                 promise.reject(e.kind, e.message, e)
             } catch (e: Throwable) {
+                // A Cloudflare human check can hide anywhere in the chain (OkHttp
+                // wraps it, RxJava re-wraps it). Surface it under its own code so
+                // the UI can lead with "open in WebView" instead of a generic retry.
+                val cloudflare = generateSequence(e) { it.cause }.take(8)
+                    .filterIsInstance<CloudflareBypassException>().firstOrNull()
+                if (cloudflare != null) {
+                    android.util.Log.w(NAME, "cloudflare (${if (cloudflare.interactive) "interactive" else "unsolved"}): ${cloudflare.message}")
+                    promise.reject(if (cloudflare.interactive) "cloudflare_interactive" else "cloudflare", cloudflare.message, e)
+                    return@launch
+                }
                 android.util.Log.e(NAME, "engine call failed: ${e.message}", e)
                 promise.reject("unknown", e.message, e)
             }
