@@ -24,6 +24,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       'Extensions built against the newest keiyoushi toolchain (August 2026 onward) work again. They check the app for several network components and refuse to run without them, and their parsers need a newer serialization runtime than the app shipped — every list came back empty or never finished. Kagari now provides all of it.',
       'A source that fails while parsing now shows an error with Retry instead of loading forever.',
       'Cloudflare handling follows Cloudflare\'s own challenge header, like Mihon: a plain block or rate limit fails fast instead of spending up to 40 seconds trying to solve a challenge that is not there.',
+      'When Cloudflare asks for a human check, the app now says so within a second and offers to open the site in the WebView, instead of spinning for 40 seconds and reporting "didn\'t respond". An outdated Android System WebView is called out too.',
       'A newly installed extension shows up in Discover immediately instead of after a restart.',
       'Installed extensions that no longer exist in any of your repos are marked Orphaned, so it is clear why they get no updates and may stop working.',
     ],
