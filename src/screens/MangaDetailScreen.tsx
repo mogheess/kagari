@@ -16,6 +16,7 @@ import {
 import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSources, useSourcesLoaded } from '../sources/sourcesStore';
+import { needsHumanCheck } from '../engine/errors';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme } from '../theme/ThemeProvider';
@@ -1398,20 +1399,27 @@ function ChaptersNotice({
   onMigrate: () => void;
 }) {
   const theme = useTheme();
+  const humanCheck = needsHumanCheck(error);
   const title = sourceMissing
     ? 'Source not installed'
-    : error
-      ? "Couldn't load chapters"
-      : 'No chapters found';
+    : humanCheck
+      ? 'Cloudflare wants a quick check'
+      : error
+        ? "Couldn't load chapters"
+        : 'No chapters found';
   const message = sourceMissing
     ? "The extension this title came from isn't installed, so its chapters can't load. Install that extension, or migrate the title to a source you already have."
-    : error
-      ? 'The source blocked or failed the request. If it shows a Cloudflare check, open it in the browser to clear it, then retry — or migrate to another source.'
-      : 'This source returned no chapters. Try again, open it in the browser, or migrate the title to another source.';
+    : humanCheck
+      ? 'The source is asking visitors to prove they are human, which only you can do. Open it in the browser, pass the check, then retry — the app keeps the result.'
+      : error
+        ? 'The source blocked or failed the request. If it shows a Cloudflare check, open it in the browser to clear it, then retry — or migrate to another source.'
+        : 'This source returned no chapters. Try again, open it in the browser, or migrate the title to another source.';
 
+  // The action that can actually fix the problem goes first.
+  const retryButton = { key: 'retry', label: 'Retry', icon: 'refresh' as const, onPress: onRetry, show: true };
+  const browseButton = { key: 'browse', label: 'Open in browser', icon: 'globe' as const, onPress: onBrowse, show: canBrowse };
   const buttons: { key: string; label: string; icon: 'refresh' | 'globe' | 'arrowRight'; onPress: () => void; show: boolean }[] = [
-    { key: 'retry', label: 'Retry', icon: 'refresh', onPress: onRetry, show: true },
-    { key: 'browse', label: 'Open in browser', icon: 'globe', onPress: onBrowse, show: canBrowse },
+    ...(humanCheck ? [browseButton, retryButton] : [retryButton, browseButton]),
     { key: 'migrate', label: 'Migrate', icon: 'arrowRight', onPress: onMigrate, show: canMigrate },
   ];
 

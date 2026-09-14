@@ -29,6 +29,7 @@ import { usePinnedSources } from '../sources/pinned';
 import { useSourceHealth, unhealthyIds, recordSourceResult } from '../sources/sourceHealth';
 import { useDiscoverIntent, type BrowseMode } from '../sources/discoverIntent';
 import { langLabel } from '../utils/lang';
+import { needsHumanCheck } from '../engine/errors';
 import { useSources } from '../sources/sourcesStore';
 import { pickDefaultSource, sortSourcesForPicker } from '../utils/sourceSelect';
 import type { RootStackParamList } from '../navigation/types';
@@ -412,6 +413,7 @@ function SourceBrowse({
     fetchPage,
     [sourceId, q, wantsLatest],
   );
+  const humanCheck = needsHumanCheck(error);
 
   useEffect(() => {
     onFetchingChange?.(loading);
@@ -487,22 +489,39 @@ function SourceBrowse({
             <View style={[styles.emptyCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
               <Icon name={error ? 'globe' : 'search'} size={26} color={theme.colors.textMuted} />
               <Text style={[theme.typography.heading, { color: theme.colors.text, marginTop: 12 }]}>
-                {error ? "This source didn't respond" : q ? 'No results' : 'Nothing to show'}
+                {humanCheck
+                  ? 'Cloudflare wants a quick check'
+                  : error
+                    ? "This source didn't respond"
+                    : q
+                      ? 'No results'
+                      : 'Nothing to show'}
               </Text>
               <Text style={emptyText(theme)}>
-                {error
-                  ? `${source?.name ?? 'The source'} returned an error${
-                      /\b(\d{3})\b/.test(error.message) ? ` (${error.message})` : ''
-                    }. It may be blocked by Cloudflare or temporarily down.`
-                  : q
-                    ? `No manga matched "${q}" on ${source?.name ?? 'this source'}.`
-                    : 'Pick a source above to start browsing.'}
+                {humanCheck
+                  ? `${source?.name ?? 'This source'} is asking visitors to prove they are human. Open it in the WebView, pass the check, and come back — the app keeps the result.`
+                  : error
+                    ? `${source?.name ?? 'The source'} returned an error${
+                        /\b(\d{3})\b/.test(error.message) ? ` (${error.message})` : ''
+                      }. It may be blocked by Cloudflare or temporarily down.`
+                    : q
+                      ? `No manga matched "${q}" on ${source?.name ?? 'this source'}.`
+                      : 'Pick a source above to start browsing.'}
               </Text>
               {error ? (
+                // The action that can actually fix the problem gets the accent.
                 <View style={styles.errorActions}>
-                  <Pressable onPress={reload} style={[styles.emptyBtn, { backgroundColor: theme.colors.accent }]}>
-                    <Icon name="refresh" size={16} color={theme.colors.onAccent} />
-                    <Text style={{ color: theme.colors.onAccent, fontWeight: '700' }}>Retry</Text>
+                  <Pressable
+                    onPress={reload}
+                    style={[
+                      styles.emptyBtn,
+                      humanCheck
+                        ? { backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border }
+                        : { backgroundColor: theme.colors.accent },
+                    ]}
+                  >
+                    <Icon name="refresh" size={16} color={humanCheck ? theme.colors.text : theme.colors.onAccent} />
+                    <Text style={{ color: humanCheck ? theme.colors.text : theme.colors.onAccent, fontWeight: '700' }}>Retry</Text>
                   </Pressable>
                   <Pressable
                     onPress={async () => {
@@ -513,10 +532,15 @@ function SourceBrowse({
                         reload();
                       } catch {}
                     }}
-                    style={[styles.emptyBtn, { backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border }]}
+                    style={[
+                      styles.emptyBtn,
+                      humanCheck
+                        ? { backgroundColor: theme.colors.accent }
+                        : { backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border },
+                    ]}
                   >
-                    <Icon name="globe" size={16} color={theme.colors.text} />
-                    <Text style={{ color: theme.colors.text, fontWeight: '700' }}>Open in WebView</Text>
+                    <Icon name="globe" size={16} color={humanCheck ? theme.colors.onAccent : theme.colors.text} />
+                    <Text style={{ color: humanCheck ? theme.colors.onAccent : theme.colors.text, fontWeight: '700' }}>Open in WebView</Text>
                   </Pressable>
                 </View>
               ) : null}
