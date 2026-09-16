@@ -74,6 +74,18 @@ cd android && ./gradlew :app:assembleDebug -PreactNativeArchitectures=arm64-v8a
 (`arm64-v8a` on Apple Silicon, `x86_64` on Intel — check `adb shell getprop
 ro.product.cpu.abilist`.)
 
+## On-device tests
+
+`android/app/src/androidTest` holds instrumented tests that need a real
+WebView (the Cloudflare interceptor against a local mock server). With an
+emulator booted:
+
+```sh
+cd android && ./gradlew :app:connectedDebugAndroidTest -PreactNativeArchitectures=arm64-v8a
+```
+
+Results land in `android/app/build/outputs/androidTest-results/connected/`.
+
 ## Run (development)
 
 Start Metro in one terminal (only ever **one** instance):

@@ -34,8 +34,11 @@ import android.util.Log
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Toast
 import eu.kanade.tachiyomi.network.AndroidCookieJar
 import okhttp3.HttpUrl
 import okhttp3.Interceptor
@@ -98,11 +101,17 @@ class CloudflareInterceptor(
             if (!recentlyTried) {
                 lastSolvedHost = host
                 lastSolvedAt = now
-                if (solveClearance(request)) {
-                    val retry = chain.proceed(request)
-                    if (!retry.isChallenge()) return retry
-                    retry.close()
-                    // Cookie obtained but the host still blocks OkHttp → fingerprint.
+                when (solveClearance(request)) {
+                    SolveOutcome.SOLVED -> {
+                        val retry = chain.proceed(request)
+                        if (!retry.isChallenge()) return retry
+                        retry.close()
+                        // Cookie obtained but the host still blocks OkHttp → fingerprint.
+                    }
+                    // A human is needed. The byte-fetch below would only sit in
+                    // front of the same widget for another timeout.
+                    SolveOutcome.INTERACTIVE -> throw interactiveError(request)
+                    SolveOutcome.NOT_A_CHALLENGE, SolveOutcome.TIMEOUT -> Unit
                 }
             }
 
@@ -117,7 +126,20 @@ class CloudflareInterceptor(
     }
 
     private fun cloudflareError(request: Request): IOException =
-        IOException("Failed to bypass Cloudflare for ${request.url.host}")
+        CloudflareBypassException("Failed to bypass Cloudflare for ${request.url.host}", interactive = false)
+
+    /**
+     * Cloudflare asked for a human: the page posted `interactiveBegin`, which
+     * means a checkbox or Turnstile widget that a hidden WebView will never
+     * complete. Give up at once rather than waiting out the timeout; the app can
+     * open the site in a visible WebView where the user solves it in seconds,
+     * and the resulting cookie is shared with OkHttp.
+     */
+    private fun interactiveError(request: Request): IOException =
+        CloudflareBypassException(
+            "Cloudflare wants a human check for ${request.url.host}; open the site in the WebView to pass it",
+            interactive = true,
+        )
 
     private fun hasClearance(url: HttpUrl): Boolean =
         cookieManager.get(url).any { it.name == "cf_clearance" }
@@ -154,15 +176,17 @@ class CloudflareInterceptor(
      * once solved, issues a host-scoped cf_clearance. Bails fast if the root is
      * not actually a challenge page (e.g. a bare 403 from an image-only CDN).
      */
+    /** Why the WebView solve stopped, when it did not produce a cookie. */
+    private enum class SolveOutcome { SOLVED, NOT_A_CHALLENGE, INTERACTIVE, TIMEOUT }
+
     @SuppressLint("SetJavaScriptEnabled")
-    private fun solveClearance(request: Request): Boolean {
+    private fun solveClearance(request: Request): SolveOutcome {
         // latch.countDown() happens-before await() returns, so plain vars written
         // on the main thread are visible here afterward.
         val latch = CountDownLatch(1)
         var webView: WebView? = null
-        var solved = false
-        var bailed = false
-
+        var outcome = SolveOutcome.TIMEOUT
+        var challengeFound = false
         val rootUrl = request.url.newBuilder()
             .encodedPath("/")
             .query(null)
@@ -176,51 +200,85 @@ class CloudflareInterceptor(
         Log.i(TAG, "Solving Cloudflare clearance via $rootUrl")
 
         fun isBypassed(): Boolean = cookieManager.get(cookieUrl).any { it.name == "cf_clearance" }
+        fun finish(result: SolveOutcome) {
+            outcome = result
+            latch.countDown()
+        }
 
         val poller = object : Runnable {
             override fun run() {
-                when {
-                    isBypassed() -> {
-                        solved = true
-                        latch.countDown()
-                    }
-                    !bailed -> handler.postDelayed(this, POLL_MS)
+                if (isBypassed()) {
+                    finish(SolveOutcome.SOLVED)
+                } else if (latch.count > 0) {
+                    handler.postDelayed(this, POLL_MS)
                 }
             }
         }
-
         handler.post {
             val view = newWebView(userAgent)
             webView = view
+            // Cloudflare's challenge script posts a message the moment it decides
+            // it needs the user (checkbox / Turnstile). The JS interface callback
+            // runs on a binder thread; latch.countDown() publishes the write.
+            view.addJavascriptInterface(
+                object {
+                    @JavascriptInterface
+                    fun interactiveDetected() {
+                        Log.i(TAG, "Cloudflare challenge for ${request.url.host} needs interaction")
+                        finish(SolveOutcome.INTERACTIVE)
+                    }
+                },
+                "kagari",
+            )
             view.webViewClient = object : WebViewClient() {
+                override fun onReceivedHttpError(
+                    view: WebView,
+                    req: WebResourceRequest,
+                    errorResponse: WebResourceResponse,
+                ) {
+                    if (!req.isForMainFrame) return
+                    // A challenge page is an HTTP error carrying `cf-mitigated: challenge`
+                    // — Cloudflare's documented signal. Any other main-frame error
+                    // means the root is just blocked: no cookie will ever appear.
+                    val mitigated = errorResponse.responseHeaders
+                        ?.entries
+                        ?.firstOrNull { it.key.equals("cf-mitigated", ignoreCase = true) }
+                        ?.value
+                    if (mitigated.equals("challenge", ignoreCase = true)) {
+                        challengeFound = true
+                    } else if (!challengeFound) {
+                        finish(SolveOutcome.NOT_A_CHALLENGE)
+                    }
+                }
+
                 override fun onPageFinished(view: WebView, url: String) {
                     if (isBypassed()) {
-                        solved = true
-                        latch.countDown()
+                        finish(SolveOutcome.SOLVED)
                         return
                     }
-                    // If this isn't a Cloudflare challenge page, no cookie will
-                    // ever appear here — stop waiting and let the caller fall back.
-                    view.evaluateJavascript(CHALLENGE_PROBE_JS) { result ->
-                        if (result != "true" && !isBypassed()) {
-                            bailed = true
-                            latch.countDown()
-                        }
+                    if (!challengeFound) {
+                        // Loaded cleanly without a challenge and without a cookie:
+                        // the block is not something a WebView can clear.
+                        finish(SolveOutcome.NOT_A_CHALLENGE)
+                        return
                     }
+                    view.evaluateJavascript(INTERACTIVE_LISTENER_JS, null)
                 }
             }
             view.loadUrl(rootUrl, mapOf("User-Agent" to userAgent))
             handler.postDelayed(poller, POLL_MS)
         }
-
         latch.await(TIMEOUT_SEC, TimeUnit.SECONDS)
+        // Cookie may have landed between the last poll and the timeout.
+        if (outcome == SolveOutcome.TIMEOUT && isBypassed()) outcome = SolveOutcome.SOLVED
         destroyOnMain(webView) { handler.removeCallbacks(poller) }
-
-        if (solved) {
+        if (outcome == SolveOutcome.SOLVED) {
             CookieManager.getInstance().flush()
             Log.i(TAG, "Cloudflare clearance obtained for ${request.url.host}")
+        } else {
+            Log.i(TAG, "Cloudflare solve for ${request.url.host} ended: $outcome")
         }
-        return solved
+        return outcome
     }
 
     /**
@@ -299,8 +357,32 @@ class CloudflareInterceptor(
             .build()
     }
 
+    /**
+     * Cloudflare's challenge script drops old Chromium builds outright, so an
+     * outdated Android System WebView solves nothing, forever. Say so once
+     * instead of leaving the user with "didn't respond" on every source.
+     */
+    private fun warnIfWebViewOutdated() {
+        if (warnedOutdated) return
+        val version = WebView.getCurrentWebViewPackage()?.versionName ?: return
+        val major = version.substringBefore('.').toIntOrNull() ?: return
+        if (major >= MINIMUM_WEBVIEW_VERSION) return
+        warnedOutdated = true
+        handler.post {
+            Toast.makeText(
+                context,
+                "Android System WebView $version is too old to pass Cloudflare checks. Update it from the Play Store.",
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+    }
+
+    @Volatile
+    private var warnedOutdated = false
+
     @SuppressLint("SetJavaScriptEnabled")
     private fun newWebView(userAgent: String): WebView {
+        warnIfWebViewOutdated()
         // Prefer the live Activity as context and attach to its window so the
         // challenge JS actually runs; fall back to app context when backgrounded.
         val activity = WebViewActivityHolder.get()
@@ -331,6 +413,7 @@ class CloudflareInterceptor(
                 (it.parent as? ViewGroup)?.removeView(it)
                 it.stopLoading()
                 it.removeJavascriptInterface("ImgFetch")
+                it.removeJavascriptInterface("kagari")
                 it.destroy()
             }
         }
@@ -346,19 +429,39 @@ class CloudflareInterceptor(
         private val COOKIE_NAMES = listOf("cf_clearance")
         private val IMAGE_EXTENSIONS = listOf(".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif")
 
-        /** True when the loaded document looks like a Cloudflare challenge page. */
-        private const val CHALLENGE_PROBE_JS =
-            "(function(){try{return /just a moment|attention required|cf-chl|" +
-                "challenge-platform|__cf_chl|turnstile/i.test(" +
-                "document.documentElement.outerHTML)||!!window._cf_chl_opt}" +
-                "catch(e){return false}})()"
+        /** Mihon's floor; older Chromium is rejected by the challenge script itself. */
+        private const val MINIMUM_WEBVIEW_VERSION = 118
 
-        /** Reads the current document's bytes (same-origin) as a data URL. */
+        /**
+         * Cloudflare's challenge page announces an interactive step by posting
+         * `{source: "cloudflare-challenge", event: "interactiveBegin"}` to the
+         * window. Same hook Mihon uses.
+         */
+        private const val INTERACTIVE_LISTENER_JS =
+            "addEventListener('message',function(e){var d=e.data;" +
+                "if(d&&d.source==='cloudflare-challenge'&&d.event==='interactiveBegin'){" +
+                "kagari.interactiveDetected()}})"
+
+        /**
+         * Reads the current document's bytes (same-origin) as a data URL. Only a
+         * successful response counts: the WebView may itself have been served the
+         * block page, and handing that back as a 200 would put an HTML error page
+         * where the app expects an image.
+         */
         private const val BYTE_FETCH_JS =
-            "fetch(location.href).then(function(r){return r.blob()})" +
-                ".then(function(b){var f=new FileReader();" +
+            "fetch(location.href).then(function(r){" +
+                "if(!r.ok){ImgFetch.onError('http '+r.status);return null}" +
+                "return r.blob()})" +
+                ".then(function(b){if(!b)return;var f=new FileReader();" +
                 "f.onload=function(){ImgFetch.onData(f.result)};" +
                 "f.onerror=function(){ImgFetch.onError('read')};" +
                 "f.readAsDataURL(b)}).catch(function(e){ImgFetch.onError(''+e)})"
     }
 }
+
+/**
+ * A Cloudflare challenge the hidden WebView could not clear. [interactive] is
+ * true when Cloudflare explicitly asked for a human, which the app turns into
+ * an "open in WebView" prompt rather than a generic "didn't respond".
+ */
+class CloudflareBypassException(message: String, val interactive: Boolean) : IOException(message)

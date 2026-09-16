@@ -85,6 +85,7 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 7
         versionName "0.6.1"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
         debug {
@@ -224,6 +225,14 @@ dependencies {
     // Extensions implementing ConfigurableSource reference androidx.preference
     // classes (PreferenceScreen, EditTextPreference, ...) at runtime.
     implementation("androidx.preference:preference-ktx:1.2.1")
+
+    // On-device tests for the Cloudflare interceptor: a real WebView against a
+    // local mock server, since no source can be relied on to challenge the
+    // emulator's network on demand.
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:rules:1.6.1")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("com.squareup.okhttp3:mockwebserver3:5.3.2")
     // Storage Access Framework access to the user-chosen download folder.
     implementation("androidx.documentfile:documentfile:1.0.1")
 }
