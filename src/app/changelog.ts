@@ -13,7 +13,7 @@ export interface ChangelogEntry {
 export const CHANGELOG: ChangelogEntry[] = [
   {
     version: '0.6.1',
-    date: '2026-09-05',
+    date: '2026-09-16',
     highlights: [
       'Fixed the screen flashing when pressing back on Android. The screen you had just left was drawn for one extra frame after the transition finished.',
       'Home sections no longer vanish when their source fails or is slow: they stay in place, say which source is having trouble, and offer a Retry.',
