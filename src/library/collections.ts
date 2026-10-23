@@ -15,7 +15,7 @@ import { makePersistence } from '../store/persist';
 import { useFavorites, type FavoriteManga } from './favorites';
 import { useCategories, type Category } from './categories';
 
-export type CollectionKind = 'all' | 'category' | 'uncategorized';
+export type CollectionKind = 'all' | 'category' | 'uncategorized' | 'downloaded';
 
 export interface LibraryCollection {
   id: string;

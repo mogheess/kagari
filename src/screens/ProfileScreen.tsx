@@ -30,7 +30,11 @@ import {
   clearStorageLocation,
   describeStorageLocation,
 } from '../library/storageLocation';
-import { countMigratableDownloads, migrateDownloadsToStorage } from '../library/downloads';
+import {
+  countMigratableDownloads,
+  migrateDownloadsToStorage,
+  useQueueCounts,
+} from '../library/downloads';
 import type { RootStackParamList } from '../navigation/types';
 import {
   BACKGROUND_INTERVALS,
@@ -49,6 +53,7 @@ export function ProfileScreen() {
   const { appearance } = useAppearance();
   const appUpdate = useAppUpdate();
   const extUpdates = useExtensionUpdates();
+  const queue = useQueueCounts();
 
 
   return (
@@ -86,7 +91,16 @@ export function ProfileScreen() {
         <Row icon="grid" label="Customize Home" onPress={() => navigation.navigate('CustomizeHome')} />
         <Row icon="bookmark" label="Categories" onPress={() => navigation.navigate('Categories')} />
         <Row icon="columns" label="Tier Lists" onPress={() => navigation.navigate('TierLists')} />
-        <Row icon="download" label="Downloads" onPress={() => navigation.navigate('Downloads')} />
+        <Row
+          icon="download"
+          label="Download queue"
+          hint={
+            [queue.active > 0 ? `${queue.active} waiting` : null, queue.failed > 0 ? `${queue.failed} failed` : null]
+              .filter(Boolean)
+              .join(' \u00B7 ') || undefined
+          }
+          onPress={() => navigation.navigate('DownloadQueue')}
+        />
 
         <Text style={[styles.sectionLabel, { color: theme.colors.textFaint, marginTop: 28 }]}>
           NEW CHAPTERS

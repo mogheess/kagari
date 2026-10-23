@@ -5,7 +5,7 @@
  * There is no demo data \u2014 all content comes from installed extensions.
  */
 import React, { useEffect } from 'react';
-import { AppState, StatusBar } from 'react-native';
+import { AppState, StatusBar, ToastAndroid } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ThemeProvider, useTheme } from './src/theme/ThemeProvider';
@@ -19,6 +19,7 @@ import { getBackgroundUpdateSettings, initBackgroundUpdates } from './src/librar
 import { favoritesHydrated, getFavorites, subscribeFavorites } from './src/library/favorites';
 import { requestNotificationPermission } from './src/app/notificationPermission';
 import { initWhatsNew } from './src/app/whatsNew';
+import { adoptDownloadedTitles } from './src/library/downloadsLibrary';
 import { WhatsNewSheet } from './src/components/WhatsNewSheet';
 import { UpdateAvailableSheet } from './src/components/UpdateAvailableSheet';
 
@@ -38,6 +39,17 @@ function UpdateBootstrap() {
     void initWhatsNew();
     // Keep the closed-app new-chapters check scheduled to the saved setting.
     initBackgroundUpdates();
+    // Downloads now live with their titles in the library (once): bring in
+    // titles that were only reachable from the old Downloads screen.
+    adoptDownloadedTitles()
+      .then(added => {
+        if (added === 0) return;
+        ToastAndroid.show(
+          `Added ${added} downloaded ${added === 1 ? 'title' : 'titles'} to your library`,
+          ToastAndroid.LONG,
+        );
+      })
+      .catch(() => {});
     const run = () => {
       void checkForAppUpdate();
       void checkExtensionUpdates(getEngine());

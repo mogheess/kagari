@@ -3,8 +3,12 @@
  * single-worker queue that pulls a chapter's pages through the native engine
  * into persistent storage. The reader reads those local files when a chapter is
  * downloaded, so reading works fully offline.
+ *
+ * Downloads have no screen of their own, as in Mihon: they show on their
+ * titles in the Library and on the title page, and only what's still queued
+ * or failed shows in the download queue.
  */
-import { useSyncExternalStore } from 'react';
+import { useMemo, useSyncExternalStore } from 'react';
 import { makePersistence } from '../store/persist';
 import { getEngine } from '../engine';
 import { loadPages } from '../engine/pageCache';
@@ -19,6 +23,9 @@ export interface DownloadEntry {
   thumbnailUrl?: string;
   chapterUrl: string;
   chapterName: string;
+  /** Kept so a title's downloads can be read in order without its source. */
+  chapterNumber?: number;
+  dateUpload?: number;
   /** Part of the folder name under a picked storage location (Mihon layout). */
   scanlator?: string;
   /** Source-private chapter state (`ChapterDto.memo`), passed back when fetching pages. */
@@ -173,6 +180,8 @@ export function enqueueDownload(manga: MangaDto, chapter: ChapterDto): void {
     thumbnailUrl: manga.thumbnailUrl,
     chapterUrl: chapter.url,
     chapterName: chapter.name,
+    chapterNumber: chapter.chapterNumber,
+    dateUpload: chapter.dateUpload,
     scanlator: chapter.scanlator,
     memo: chapter.memo,
     status: 'queued',
@@ -213,6 +222,8 @@ export function enqueueDownloads(manga: MangaDto, chapters: readonly ChapterDto[
       thumbnailUrl: manga.thumbnailUrl,
       chapterUrl: chapter.url,
       chapterName: chapter.name,
+      chapterNumber: chapter.chapterNumber,
+      dateUpload: chapter.dateUpload,
       scanlator: chapter.scanlator,
       memo: chapter.memo,
       status: 'queued',
@@ -353,6 +364,94 @@ export function useDownloadEntry(
 ): DownloadEntry | undefined {
   const all = useSyncExternalStore(subscribe, getSnapshot);
   return all.find(e => sameChapter(e, sourceId, chapterUrl));
+}
+
+/** Identity of a title in the maps below. */
+export function downloadTitleKey(sourceId: string, mangaUrl: string): string {
+  return `${sourceId}\u0000${mangaUrl}`;
+}
+
+/** Finished chapters per title, keyed by downloadTitleKey. */
+export function useDownloadCounts(): ReadonlyMap<string, number> {
+  const all = useDownloads();
+  return useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const e of all) {
+      if (e.status !== 'done') continue;
+      const key = downloadTitleKey(e.sourceId, e.mangaUrl);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  }, [all]);
+}
+
+/** What the download queue holds: chapters waiting or downloading, and failed ones. */
+export function useQueueCounts(): { active: number; failed: number } {
+  const all = useDownloads();
+  return useMemo(() => {
+    let active = 0;
+    let failed = 0;
+    for (const e of all) {
+      if (e.status === 'queued' || e.status === 'downloading') active += 1;
+      else if (e.status === 'error') failed += 1;
+    }
+    return { active, failed };
+  }, [all]);
+}
+
+/**
+ * Best guess at a chapter number from its name, for downloads saved before
+ * the number was kept: "Chapter 152 - Season 5" and "Ch. 223.9" both work.
+ */
+export function chapterNumberFromName(name: string): number {
+  const labelled = /\b(?:ch(?:apter)?|ep(?:isode)?)\.?\s*(\d+(?:\.\d+)?)/i.exec(name);
+  const match = labelled ?? /(\d+(?:\.\d+)?)/.exec(name);
+  return match ? Number(match[1]) : -1;
+}
+
+/**
+ * A title's finished downloads as a chapter list, newest first like a
+ * source's. Lets the title page and reader work without the source.
+ */
+export function downloadedChapterList(
+  all: readonly DownloadEntry[],
+  sourceId: string,
+  mangaUrl: string,
+): ChapterDto[] {
+  return all
+    .filter(e => e.status === 'done' && e.sourceId === sourceId && e.mangaUrl === mangaUrl)
+    .map(e => ({
+      sourceId: e.sourceId,
+      mangaUrl: e.mangaUrl,
+      url: e.chapterUrl,
+      name: e.chapterName,
+      chapterNumber:
+        e.chapterNumber != null && e.chapterNumber >= 0
+          ? e.chapterNumber
+          : chapterNumberFromName(e.chapterName),
+      scanlator: e.scanlator,
+      dateUpload: e.dateUpload ?? 0,
+      memo: e.memo,
+    }))
+    .sort((a, b) => b.chapterNumber - a.chapterNumber || b.dateUpload - a.dateUpload);
+}
+
+/** Resolves once the persisted downloads have loaded. */
+export function whenDownloadsHydrated(): Promise<void> {
+  if (hydrated) return Promise.resolve();
+  return new Promise(resolve => {
+    const check = () => {
+      if (!hydrated) return;
+      listeners.delete(check);
+      resolve();
+    };
+    listeners.add(check);
+  });
+}
+
+/** Snapshot of every download, for callers outside React. */
+export function getDownloads(): readonly DownloadEntry[] {
+  return entries;
 }
 
 void hydrate();

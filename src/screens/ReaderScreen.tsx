@@ -51,6 +51,7 @@ import {
   enqueueDownload,
   type DownloadStatus,
 } from '../library/downloads';
+import { offerToAddToLibrary } from '../library/downloadsLibrary';
 import { Icon, type IconName } from '../components/Icon';
 import { PageSlider } from '../components/PageSlider';
 import { useTheme } from '../theme/ThemeProvider';
@@ -409,6 +410,7 @@ export function ReaderScreen() {
     };
     enqueueDownload(manga, activeChapter);
     notify('Chapter queued for download');
+    offerToAddToLibrary(manga);
   }, [params, activeChapter]);
 
   // Track the FURTHEST visible page, not the topmost: at the bottom of a
