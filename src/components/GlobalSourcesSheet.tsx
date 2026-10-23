@@ -164,7 +164,9 @@ export function GlobalSourcesSheet({ visible, sources, onClose }: GlobalSourcesS
                     },
                   ]}
                 >
-                  {checked ? <Icon name="check" size={14} color={theme.colors.onAccent} /> : null}
+                  {checked ? (
+                    <Icon name="check" size={14} color={theme.colors.onAccent} strokeWidth={3} />
+                  ) : null}
                 </View>
               </Pressable>
             );

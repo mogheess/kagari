@@ -1676,7 +1676,7 @@ const ChapterRow = React.memo(function ChapterRow({
               : { borderColor: theme.colors.textFaint },
           ]}
         >
-          {picked ? <Icon name="check" size={12} color={theme.colors.onAccent} /> : null}
+          {picked ? <Icon name="check" size={14} color={theme.colors.onAccent} strokeWidth={3} /> : null}
         </View>
       ) : null}
       <View style={[styles.chapterText, { opacity: prog?.read ? 0.45 : 1 }]}>
@@ -1750,7 +1750,7 @@ function ChapterDownloadButton({
   if (status === 'done') {
     content = (
       <View style={[styles.dlDone, { backgroundColor: theme.colors.accent }]}>
-        <Icon name="check" size={12} color={theme.colors.bg} />
+        <Icon name="check" size={14} color={theme.colors.onAccent} strokeWidth={3} />
       </View>
     );
   } else if (status === 'downloading') {
