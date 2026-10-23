@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, View, Text, Pressable, StyleSheet, Platform } from 'react-native';
+import { Animated, Image, View, Text, Pressable, StyleSheet, Platform } from 'react-native';
 import { BlurView } from '@react-native-community/blur';
+import LinearGradient from 'react-native-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useTheme } from '../theme/ThemeProvider';
+import { useBackdrop, useTheme } from '../theme/ThemeProvider';
 import { withAlpha } from '../utils/color';
 import { Icon, type IconName } from '../components/Icon';
 import { useUnseenUpdateCount } from '../library/libraryUpdates';
@@ -16,9 +17,16 @@ const TABS: { key: TabKey; label: string; icon: IconName }[] = [
   { key: 'profile', label: 'Profile', icon: 'profile' },
 ];
 
+interface Size {
+  width: number;
+  height: number;
+}
+
 interface GlassTabBarProps {
   active: TabKey;
   onChange: (key: TabKey) => void;
+  /** Size of the area the backdrop wallpaper covers (the tabs' container). */
+  stage?: Size;
 }
 
 /**
@@ -31,8 +39,12 @@ interface GlassTabBarProps {
  * animated frame is rendered twice or more. That is a constant cost on every
  * screen for one small bar, and the extra draw pass also collided with the
  * fragment framework's dismissal animation, painting a just-popped screen for
- * one frame ("the app blinks when I press back"). A solid elevated surface is
- * cheaper and reads the same.
+ * one frame ("the app blinks when I press back").
+ *
+ * So Android fakes the glass instead (see AndroidGlass): the backdrop
+ * wallpaper never moves, so a blurred copy of it, cut to exactly where the bar
+ * sits, looks like the bar is frosting what's behind it, for a one-time
+ * cost. Without a backdrop it's a translucent frosted panel.
  */
 const USE_BLUR = Platform.OS === 'ios';
 
@@ -48,7 +60,7 @@ const SPRING = { damping: 18, stiffness: 220, mass: 0.7 };
  */
 const useNativeDriver = true;
 
-export function GlassTabBar({ active, onChange }: GlassTabBarProps) {
+export function GlassTabBar({ active, onChange, stage }: GlassTabBarProps) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const unseenUpdates = useUnseenUpdateCount();
@@ -70,15 +82,47 @@ export function GlassTabBar({ active, onChange }: GlassTabBarProps) {
     outputRange: [firstX, firstX + (TABS.length - 1) * tabWidth],
   });
 
+  // Like a drop of liquid, the pill stretches as it travels and settles back
+  // round when it lands; further jumps stretch it more.
+  const stretch = useRef(new Animated.Value(1)).current;
+  const previousIndex = useRef(activeIndex);
+  useEffect(() => {
+    const distance = Math.abs(activeIndex - previousIndex.current);
+    previousIndex.current = activeIndex;
+    if (distance === 0) return;
+    const pull = Animated.sequence([
+      Animated.timing(stretch, {
+        toValue: Math.min(1.25 + 0.12 * distance, 1.7),
+        duration: 120,
+        useNativeDriver,
+      }),
+      Animated.spring(stretch, { toValue: 1, damping: 9, stiffness: 180, mass: 0.6, useNativeDriver }),
+    ]);
+    pull.start();
+    return () => pull.stop();
+  }, [activeIndex, stretch]);
+  const dark = theme.scheme === 'dark';
+  const barFill = USE_BLUR ? theme.colors.glass : 'transparent';
+
+  // Where the bar sits within the stage, to line the frosted wallpaper slice up.
+  const [wrapY, setWrapY] = useState(0);
+  const [barOrigin, setBarOrigin] = useState<{ x: number; y: number } | null>(null);
+
   return (
-    <View style={[styles.wrap, { paddingBottom: Math.max(insets.bottom, 10) }]} pointerEvents="box-none">
+    <View
+      style={[styles.wrap, { paddingBottom: Math.max(insets.bottom, 10) }]}
+      pointerEvents="box-none"
+      onLayout={e => setWrapY(e.nativeEvent.layout.y)}
+    >
       <View
+        onLayout={e => setBarOrigin({ x: e.nativeEvent.layout.x, y: e.nativeEvent.layout.y })}
         style={[
           styles.bar,
+          styles.barEdge,
           {
             borderRadius: theme.radius.xxl,
-            borderColor: USE_BLUR ? theme.colors.glassHighlight : theme.colors.border,
-            backgroundColor: USE_BLUR ? theme.colors.glass : theme.colors.elevated,
+            borderColor: theme.colors.glassHighlight,
+            backgroundColor: barFill,
           },
         ]}
       >
@@ -89,7 +133,28 @@ export function GlassTabBar({ active, onChange }: GlassTabBarProps) {
             blurAmount={20}
             reducedTransparencyFallbackColor={theme.colors.surface}
           />
-        ) : null}
+        ) : (
+          <AndroidGlass
+            stage={stage}
+            origin={barOrigin ? { x: barOrigin.x, y: wrapY + barOrigin.y } : null}
+          />
+        )}
+        {/* Thickness: the lower edge of the glass catches less light. */}
+        <LinearGradient
+          colors={dark ? ['rgba(0,0,0,0)', 'rgba(0,0,0,0.22)'] : ['rgba(0,0,0,0)', 'rgba(0,0,0,0.05)']}
+          style={styles.depth}
+        />
+        {/* A specular streak along the top rim. */}
+        <LinearGradient
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          colors={
+            dark
+              ? ['rgba(255,255,255,0)', 'rgba(255,255,255,0.45)', 'rgba(255,255,255,0)']
+              : ['rgba(255,255,255,0)', 'rgba(255,255,255,1)', 'rgba(255,255,255,0)']
+          }
+          style={styles.rim}
+        />
         <View style={styles.row} onLayout={e => setRowWidth(e.nativeEvent.layout.width)}>
           {rowWidth > 0 ? (
             <Animated.View
@@ -97,11 +162,22 @@ export function GlassTabBar({ active, onChange }: GlassTabBarProps) {
               style={[
                 styles.indicator,
                 {
-                  backgroundColor: withAlpha(theme.colors.accent, theme.scheme === 'dark' ? 0.2 : 0.16),
-                  transform: [{ translateX }],
+                  backgroundColor: withAlpha(theme.colors.accent, dark ? 0.2 : 0.16),
+                  borderColor: withAlpha(theme.colors.accent, dark ? 0.35 : 0.3),
+                  transform: [{ translateX }, { scaleX: stretch }],
                 },
               ]}
-            />
+            >
+              {/* The drop's own highlight. */}
+              <LinearGradient
+                colors={
+                  dark
+                    ? ['rgba(255,255,255,0.18)', 'rgba(255,255,255,0)']
+                    : ['rgba(255,255,255,0.75)', 'rgba(255,255,255,0)']
+                }
+                style={styles.dropShine}
+              />
+            </Animated.View>
           ) : null}
           {TABS.map(tab => (
             <TabButton
@@ -114,6 +190,71 @@ export function GlassTabBar({ active, onChange }: GlassTabBarProps) {
           ))}
         </View>
       </View>
+    </View>
+  );
+}
+
+/** Frosted glass without a live blur; see the note on GlassTabBar. */
+function AndroidGlass({
+  stage,
+  origin,
+}: {
+  stage?: Size;
+  origin: { x: number; y: number } | null;
+}) {
+  const theme = useTheme();
+  const backdrop = useBackdrop();
+  const dark = theme.scheme === 'dark';
+  const frosted = backdrop && stage && origin;
+  return (
+    // Over a backdrop, not quite opaque, so what scrolls underneath shows
+    // through faintly. Without one there's nothing worth seeing through, and
+    // unblurred covers behind the bar just look busy.
+    <View style={[styles.fill, frosted ? styles.glassBody : null]}>
+      {frosted ? (
+        <>
+          {/* The thumbnail is plenty once blurred, and far cheaper to decode. */}
+          <Image
+            source={backdrop.thumb}
+            blurRadius={8}
+            resizeMode="cover"
+            fadeDuration={0}
+            style={[
+              styles.slice,
+              { left: -origin.x, top: -origin.y, width: stage.width, height: stage.height },
+            ]}
+          />
+          {/* A lighter dim than the wallpaper's, so the art glows through the glass. */}
+          <View
+            style={[
+              styles.fill,
+              { backgroundColor: withAlpha(theme.colors.bg, dark ? 0.3 : 0.72) },
+            ]}
+          />
+        </>
+      ) : null}
+      {/* Frosting: lifts the bar off what's behind it. */}
+      <View
+        style={[
+          styles.fill,
+          {
+            backgroundColor: frosted
+              ? dark
+                ? 'rgba(255,255,255,0.09)'
+                : 'rgba(255,255,255,0.45)'
+              : withAlpha(theme.colors.elevated, 0.96),
+          },
+        ]}
+      />
+      {/* Light catching the top of the glass. */}
+      <LinearGradient
+        colors={
+          dark
+            ? ['rgba(255,255,255,0.16)', 'rgba(255,255,255,0)']
+            : ['rgba(255,255,255,0.8)', 'rgba(255,255,255,0)']
+        }
+        style={styles.sheen}
+      />
     </View>
   );
 }
@@ -174,6 +315,29 @@ function TabButton({
 }
 
 const styles = StyleSheet.create({
+  fill: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  slice: {
+    position: 'absolute',
+  },
+  barEdge: {
+    borderWidth: 1,
+  },
+  glassBody: {
+    opacity: 0.9,
+  },
+  sheen: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: '55%',
+  },
   wrap: {
     position: 'absolute',
     left: 0,
@@ -208,6 +372,29 @@ const styles = StyleSheet.create({
     width: INDICATOR_WIDTH,
     height: INDICATOR_HEIGHT,
     borderRadius: INDICATOR_HEIGHT / 2,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+  },
+  dropShine: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: '60%',
+  },
+  depth: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '45%',
+  },
+  rim: {
+    position: 'absolute',
+    top: 0,
+    left: 24,
+    right: 24,
+    height: 1,
   },
   tab: {
     flex: 1,
