@@ -182,7 +182,7 @@ export function AppearanceScreen() {
           })}
         </ScrollView>
         <Text style={[styles.backdropHint, { color: theme.colors.textFaint }]}>
-          Artwork behind Home, Library, Discover, Updates and Profile.
+          Artwork behind the main tabs, with colours to match.
         </Text>
 
         <Text style={[styles.sectionLabel, { color: theme.colors.textFaint, marginTop: 28 }]}>

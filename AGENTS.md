@@ -394,7 +394,10 @@ When you add a new persisted store, follow the favorites pattern (in-memory stat
   by `ScreenBackdrop` in TabsScreen as a fixed wallpaper behind every main tab,
   under an even scrim of the background colour. Tab roots use
   `useScreenCanvas()` (transparent while a backdrop is on) instead of
-  `colors.bg`; a new main tab must do the same.
+  `colors.bg`; a new main tab must do the same. Each backdrop also carries
+  curated colours (accent + tinted bg/surface/elevated/glass, dark and light)
+  that ThemeProvider lays over the look's palette, before pure black. Check
+  contrast when adding one: on-accent on accent ≥ 4.5, accent on bg ≈ 4.5+.
 - **Tier lists** (`tierLists.ts` + `TierListsScreen`): S–D rows of library
   titles, exported as an image (rendered natively) to save or share.
 

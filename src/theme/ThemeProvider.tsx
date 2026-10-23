@@ -96,6 +96,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const theme = useMemo<Theme>(() => {
     const preset = themeById(appearance.themeId);
     let colors = preset.palettes[scheme];
+    // A backdrop brings the colours of its art: accent and tinted layers.
+    const backdrop = backdropById(appearance.backdrop);
+    if (backdrop) colors = { ...colors, ...backdrop.colors[scheme] };
     // AMOLED only means anything on a dark canvas.
     if (appearance.amoled && scheme === 'dark') colors = applyAmoled(colors);
 
