@@ -1,5 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Animated,
+  Easing,
+  ScrollView,
+  type ScrollViewProps,
   View,
   Text,
   Image,
@@ -16,14 +20,15 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withTiming,
-  runOnJS,
-  cancelAnimation,
-} from 'react-native-reanimated';
+import {
+  Gesture,
+  GestureDetector,
+  type GestureUpdateEvent,
+  type PanGestureHandlerEventPayload,
+  type PinchGestureHandlerEventPayload,
+  type TapGestureHandlerEventPayload,
+  type GestureStateChangeEvent,
+} from 'react-native-gesture-handler';
 import { getEngine } from '../engine';
 import { loadPages } from '../engine/pageCache';
 import { recordProgress, recordRead } from '../library/history';
@@ -75,6 +80,10 @@ function notify(message: string): void {
 // Zoom tuning: a sane max pinch scale and a fixed double-tap step.
 const MAX_SCALE = 4;
 const DOUBLE_TAP_SCALE = 2.5;
+/** How long a double-tap or release eases into place. */
+const ZOOM_EASE_MS = 220;
+/** How far a flick keeps panning, as seconds of its release velocity. */
+const PAN_GLIDE_S = 0.12;
 
 function clamp(value: number, min: number, max: number): number {
   'worklet';
@@ -128,11 +137,9 @@ export function ReaderScreen() {
   const series = `${params.sourceId}|${params.mangaUrl}`;
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  // Flips only when a gesture ends, never during one: a React render of this
+  // screen mid-pinch is what made zooming stutter.
   const [zoomed, setZoomed] = useState(false);
-  // True while two fingers are down: the list must stop scrolling immediately,
-  // not only once the pinch ends and `zoomed` lands — otherwise the strip
-  // drifts under the fingers for the whole first pinch.
-  const [pinching, setPinching] = useState(false);
   // Controlled per-page reload counters so a long-press (or the error Retry
   // button) can force a fresh fetch of a specific page. Keyed by the item key,
   // which is chapter-scoped — page indices repeat across chapters.
@@ -146,18 +153,57 @@ export function ReaderScreen() {
     if (currentRef.current) retryPage(currentRef.current);
   }, [retryPage]);
 
-  const scale = useSharedValue(1);
-  const savedScale = useSharedValue(1);
-  const tx = useSharedValue(0);
-  const ty = useSharedValue(0);
-  const savedTx = useSharedValue(0);
-  const savedTy = useSharedValue(0);
-  // Captured on pinch start so the point under the fingers stays anchored while
-  // the scale changes (origin-correct zoom).
-  const originX = useSharedValue(0);
-  const originY = useSharedValue(0);
-  const baseX = useSharedValue(0);
-  const baseY = useSharedValue(0);
+  // Zoom runs on React Native's own Animated values with the native driver:
+  // gestures set them from JS, and the transform is applied on the UI thread
+  // with no React render in between. The Reanimated version lost its updates
+  // in this app: a pinch reached 2x in the gesture but the page stayed 1x on
+  // screen, or caught up one gesture late, which read as lag and sticking.
+  const zoomAnim = useRef({
+    scale: new Animated.Value(1),
+    tx: new Animated.Value(0),
+    ty: new Animated.Value(0),
+  }).current;
+  // Where the zoom is, mirrored in JS: native-driven values can't be read back.
+  const zoomNow = useRef({ scale: 1, tx: 0, ty: 0 });
+  // Captured when a gesture starts, so the point under the fingers stays put.
+  const gestureStart = useRef({ scale: 1, tx: 0, ty: 0, contentX: 0, contentY: 0 });
+  const zoomAnimation = useRef<Animated.CompositeAnimation | null>(null);
+
+  // Values only take the native path once a native animation has used them;
+  // until then setValue would go through React and lag again.
+  useEffect(() => {
+    Animated.parallel(
+      [zoomAnim.scale, zoomAnim.tx, zoomAnim.ty].map(v =>
+        Animated.timing(v, { toValue: v === zoomAnim.scale ? 1 : 0, duration: 0, useNativeDriver: true }),
+      ),
+    ).start();
+  }, [zoomAnim]);
+
+  /** Moves the zoom, at once (following a finger) or eased (on release, double-tap). */
+  const setZoom = useCallback(
+    (next: { scale: number; tx: number; ty: number }, animate = false) => {
+      zoomAnimation.current?.stop();
+      zoomAnimation.current = null;
+      zoomNow.current = next;
+      if (!animate) {
+        zoomAnim.scale.setValue(next.scale);
+        zoomAnim.tx.setValue(next.tx);
+        zoomAnim.ty.setValue(next.ty);
+        return;
+      }
+      const ease = { duration: ZOOM_EASE_MS, easing: Easing.out(Easing.cubic), useNativeDriver: true };
+      const run = Animated.parallel([
+        Animated.timing(zoomAnim.scale, { toValue: next.scale, ...ease }),
+        Animated.timing(zoomAnim.tx, { toValue: next.tx, ...ease }),
+        Animated.timing(zoomAnim.ty, { toValue: next.ty, ...ease }),
+      ]);
+      zoomAnimation.current = run;
+      run.start(() => {
+        if (zoomAnimation.current === run) zoomAnimation.current = null;
+      });
+    },
+    [zoomAnim],
+  );
 
   // Key of the furthest visible page. Read through a callback rather than
   // handed to the gesture directly: a ref captured inside a worklet gets frozen
@@ -165,14 +211,9 @@ export function ReaderScreen() {
   const currentRef = useRef('');
 
   const resetZoom = useCallback(() => {
-    scale.value = withTiming(1);
-    savedScale.value = 1;
-    tx.value = withTiming(0);
-    ty.value = withTiming(0);
-    savedTx.value = 0;
-    savedTy.value = 0;
+    setZoom({ scale: 1, tx: 0, ty: 0 }, true);
     setZoomed(false);
-  }, [scale, savedScale, tx, ty, savedTx, savedTy]);
+  }, [setZoom]);
 
   const downloadsHydrated = useDownloadsHydrated();
   const toggles = useReaderToggles();
@@ -760,117 +801,170 @@ export function ReaderScreen() {
   const reopenKey = useMemo(() => (mode ? currentRef.current : ''), [mode]);
   const reopenIndex = reopenKey ? items.findIndex(item => item.key === reopenKey) : -1;
 
-  const zoomStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: tx.value }, { translateY: ty.value }, { scale: scale.value }],
-  }));
+  // Pinch anchors on the fingers (and follows them, so two fingers can pan as
+  // they zoom), pan and scale stay within the page, and double-tap zooms
+  // toward the tapped point or back out. The handlers are plain functions, not
+  // inline arrows, so they run as ordinary JS (`runOnJS(true)`) with their refs
+  // intact instead of being turned into worklets.
+  const zoomGeometry = useRef({ width, height, paged });
+  zoomGeometry.current = { width, height, paged };
+  const zoomedRef = useRef(zoomed);
+  zoomedRef.current = zoomed;
+  const markZoomed = useCallback((value: boolean) => {
+    if (zoomedRef.current !== value) setZoomed(value);
+  }, []);
 
-  // Pinch anchors on the focal point, pan/scale stay clamped to the content
-  // bounds, and double-tap zooms toward the tapped point. The gesture is
-  // memoised and the `zoomed` flag only flips when a gesture *ends*, so the
-  // handlers never rebuild mid-pinch (the previous cause of the jank).
-  const cx = width / 2;
-  const cy = height / 2;
+  /** Largest translation that keeps the scaled page covering the screen. */
+  const zoomBounds = useCallback((s: number) => {
+    const { width: w, height: h } = zoomGeometry.current;
+    return { x: ((s - 1) * w) / 2, y: ((s - 1) * h) / 2 };
+  }, []);
+
+  const onPinchStart = useCallback(
+    (e: GestureStateChangeEvent<PinchGestureHandlerEventPayload>) => {
+      zoomAnimation.current?.stop();
+      const now = zoomNow.current;
+      const { width: w, height: h } = zoomGeometry.current;
+      gestureStart.current = {
+        ...now,
+        // The page point under the fingers, in unzoomed coordinates.
+        contentX: (e.focalX - w / 2 - now.tx) / now.scale,
+        contentY: (e.focalY - h / 2 - now.ty) / now.scale,
+      };
+    },
+    [],
+  );
+  const onPinchUpdate = useCallback(
+    (e: GestureUpdateEvent<PinchGestureHandlerEventPayload>) => {
+      const start = gestureStart.current;
+      const { width: w, height: h } = zoomGeometry.current;
+      const s = clamp(start.scale * e.scale, 1, MAX_SCALE);
+      const b = zoomBounds(s);
+      setZoom({
+        scale: s,
+        tx: clamp(e.focalX - w / 2 - start.contentX * s, -b.x, b.x),
+        ty: clamp(e.focalY - h / 2 - start.contentY * s, -b.y, b.y),
+      });
+    },
+    [setZoom, zoomBounds],
+  );
+  const onPinchEnd = useCallback(() => {
+    if (zoomNow.current.scale <= 1.02) {
+      setZoom({ scale: 1, tx: 0, ty: 0 }, true);
+      markZoomed(false);
+    } else {
+      markZoomed(true);
+    }
+  }, [setZoom, markZoomed]);
+
+  const onPanStart = useCallback(() => {
+    zoomAnimation.current?.stop();
+    gestureStart.current = { ...zoomNow.current, contentX: 0, contentY: 0 };
+  }, []);
+  const onPanUpdate = useCallback(
+    (e: GestureUpdateEvent<PanGestureHandlerEventPayload>) => {
+      const start = gestureStart.current;
+      const b = zoomBounds(start.scale);
+      setZoom({
+        scale: start.scale,
+        tx: clamp(start.tx + e.translationX, -b.x, b.x),
+        // In the strip, vertical drags scroll the list instead (see below).
+        ty: zoomGeometry.current.paged ? clamp(start.ty + e.translationY, -b.y, b.y) : start.ty,
+      });
+    },
+    [setZoom, zoomBounds],
+  );
+  const onPanEnd = useCallback(
+    (e: GestureStateChangeEvent<PanGestureHandlerEventPayload>) => {
+      // A little glide in the direction of the flick, eased to a stop.
+      const now = zoomNow.current;
+      const b = zoomBounds(now.scale);
+      setZoom(
+        {
+          scale: now.scale,
+          tx: clamp(now.tx + e.velocityX * PAN_GLIDE_S, -b.x, b.x),
+          ty: zoomGeometry.current.paged
+            ? clamp(now.ty + e.velocityY * PAN_GLIDE_S, -b.y, b.y)
+            : now.ty,
+        },
+        true,
+      );
+    },
+    [setZoom, zoomBounds],
+  );
+
+  const onDoubleTap = useCallback(
+    (e: GestureStateChangeEvent<TapGestureHandlerEventPayload>) => {
+      if (zoomNow.current.scale > 1.02) {
+        setZoom({ scale: 1, tx: 0, ty: 0 }, true);
+        markZoomed(false);
+        return;
+      }
+      const { width: w, height: h } = zoomGeometry.current;
+      const s = DOUBLE_TAP_SCALE;
+      const b = zoomBounds(s);
+      setZoom(
+        {
+          scale: s,
+          tx: clamp((e.x - w / 2) * (1 - s), -b.x, b.x),
+          ty: clamp((e.y - h / 2) * (1 - s), -b.y, b.y),
+        },
+        true,
+      );
+      markZoomed(true);
+    },
+    [setZoom, zoomBounds, markZoomed],
+  );
+  const onSingleTap = useCallback(() => toggleChrome(), [toggleChrome]);
+  const onLongPress = useCallback(() => retryCurrentPage(), [retryCurrentPage]);
+
+  // The list's own scrolling, as a gesture that pinch and pan may take over. A
+  // plain scroll view that starts dragging makes Gesture Handler cancel every
+  // gesture, so in the side-swiping modes a pinch's first sideways movement
+  // turned the page and the zoom never happened. (Gesture Handler's ScrollView
+  // refuses to be interrupted at all, which blocked pinching everywhere.)
+  const scrollGesture = useMemo(() => Gesture.Native().disallowInterruption(false), []);
+  const renderScroll = useCallback(
+    (props: ScrollViewProps) => <GestureScrollView {...props} gesture={scrollGesture} />,
+    [scrollGesture],
+  );
+
   const gesture = useMemo(() => {
     const pinch = Gesture.Pinch()
-      .onTouchesDown(e => {
-        if (e.numberOfTouches >= 2) {
-          runOnJS(setPinching)(true);
-        }
-      })
-      .onStart(e => {
-        // A reset animation may still be in flight; anchor the pinch on the
-        // live values so the scale doesn't jump at first movement.
-        cancelAnimation(scale);
-        cancelAnimation(tx);
-        cancelAnimation(ty);
-        savedScale.value = scale.value;
-        savedTx.value = tx.value;
-        savedTy.value = ty.value;
-        originX.value = e.focalX;
-        originY.value = e.focalY;
-        baseX.value = (e.focalX - cx - savedTx.value) / savedScale.value;
-        baseY.value = (e.focalY - cy - savedTy.value) / savedScale.value;
-      })
-      .onUpdate(e => {
-        const s = clamp(savedScale.value * e.scale, 1, MAX_SCALE);
-        const mx = ((s - 1) * width) / 2;
-        const my = ((s - 1) * height) / 2;
-        scale.value = s;
-        tx.value = clamp(originX.value - cx - baseX.value * s, -mx, mx);
-        ty.value = clamp(originY.value - cy - baseY.value * s, -my, my);
-      })
-      .onEnd(() => {
-        if (scale.value <= 1.01) {
-          scale.value = withTiming(1);
-          tx.value = withTiming(0);
-          ty.value = withTiming(0);
-          savedScale.value = 1;
-          savedTx.value = 0;
-          savedTy.value = 0;
-          runOnJS(setZoomed)(false);
-        } else {
-          savedScale.value = scale.value;
-          savedTx.value = tx.value;
-          savedTy.value = ty.value;
-          runOnJS(setZoomed)(true);
-        }
-      })
-      .onFinalize(() => {
-        runOnJS(setPinching)(false);
-      });
+      .runOnJS(true)
+      .onStart(onPinchStart)
+      .onUpdate(onPinchUpdate)
+      .onEnd(onPinchEnd);
 
+    // Only while zoomed. In the strip it takes sideways drags and leaves
+    // up/down to the list, so a zoomed strip still scrolls; paged modes pan
+    // both ways (their page swipes are off while zoomed).
     const pan = Gesture.Pan()
+      .runOnJS(true)
       .enabled(zoomed)
-      .onUpdate(e => {
-        const mx = ((scale.value - 1) * width) / 2;
-        const my = ((scale.value - 1) * height) / 2;
-        tx.value = clamp(savedTx.value + e.translationX, -mx, mx);
-        ty.value = clamp(savedTy.value + e.translationY, -my, my);
-      })
-      .onEnd(() => {
-        savedTx.value = tx.value;
-        savedTy.value = ty.value;
-      });
+      .maxPointers(1)
+      .onStart(onPanStart)
+      .onUpdate(onPanUpdate)
+      .onEnd(onPanEnd);
+    if (!paged) pan.activeOffsetX([-12, 12]).failOffsetY([-12, 12]);
 
+    // Taps have no movement limit by default, so a quick page flick or pinch
+    // counted as a tap and toggled the chrome. The double-tap's limit also
+    // spans the gap between its two taps.
     const doubleTap = Gesture.Tap()
+      .runOnJS(true)
       .numberOfTaps(2)
       .maxDuration(260)
-      .onEnd(e => {
-        if (scale.value > 1.01) {
-          scale.value = withTiming(1);
-          tx.value = withTiming(0);
-          ty.value = withTiming(0);
-          savedScale.value = 1;
-          savedTx.value = 0;
-          savedTy.value = 0;
-          runOnJS(setZoomed)(false);
-        } else {
-          const s = DOUBLE_TAP_SCALE;
-          const mx = ((s - 1) * width) / 2;
-          const my = ((s - 1) * height) / 2;
-          const nx = clamp((e.x - cx) * (1 - s), -mx, mx);
-          const ny = clamp((e.y - cy) * (1 - s), -my, my);
-          scale.value = withTiming(s);
-          tx.value = withTiming(nx);
-          ty.value = withTiming(ny);
-          savedScale.value = s;
-          savedTx.value = nx;
-          savedTy.value = ny;
-          runOnJS(setZoomed)(true);
-        }
-      });
+      .maxDistance(40)
+      .onEnd(onDoubleTap);
 
     const singleTap = Gesture.Tap()
+      .runOnJS(true)
       .maxDuration(260)
-      .onEnd(() => {
-        runOnJS(toggleChrome)();
-      });
+      .maxDistance(12)
+      .onEnd(onSingleTap);
 
-    const longPress = Gesture.LongPress()
-      .minDuration(500)
-      .onStart(() => {
-        runOnJS(retryCurrentPage)();
-      });
+    const longPress = Gesture.LongPress().runOnJS(true).minDuration(500).onStart(onLongPress);
 
     // Pinch + pan run together; the tap family stays in its own Exclusive so the
     // single/double-tap disambiguation survives.
@@ -879,8 +973,8 @@ export function ReaderScreen() {
       Gesture.Exclusive(doubleTap, singleTap, longPress),
     );
   }, [
-    zoomed, cx, cy, width, height, toggleChrome, retryCurrentPage,
-    scale, savedScale, tx, ty, savedTx, savedTy, originX, originY, baseX, baseY,
+    zoomed, paged, onPinchStart, onPinchUpdate, onPinchEnd, onPanStart, onPanUpdate, onPanEnd,
+    onDoubleTap, onSingleTap, onLongPress,
   ]);
 
   return (
@@ -923,16 +1017,24 @@ export function ReaderScreen() {
         </View>
       ) : (
         <GestureDetector gesture={gesture}>
-          {/* While actively pinching, rasterize the layer so each frame is a
-              pure GPU matrix op instead of a full redraw of every visible
-              page; drops back off on release so the zoomed page stays sharp. */}
+          {/* Scale and translate are view properties applied on the UI thread,
+              so zooming never redraws the pages themselves. */}
           <Animated.View
-            style={[styles.zoomLayer, zoomStyle]}
-            renderToHardwareTextureAndroid={pinching}
+            style={[
+              styles.zoomLayer,
+              {
+                transform: [
+                  { translateX: zoomAnim.tx },
+                  { translateY: zoomAnim.ty },
+                  { scale: zoomAnim.scale },
+                ],
+              },
+            ]}
           >
             <FlatList
               ref={listRef}
               key={mode}
+              renderScrollComponent={renderScroll}
               initialScrollIndex={reopenIndex > 0 ? reopenIndex : undefined}
               data={items}
               keyExtractor={i => i.key}
@@ -940,7 +1042,10 @@ export function ReaderScreen() {
               horizontal={horizontal}
               inverted={inverted}
               pagingEnabled={paged}
-              scrollEnabled={!zoomed && !pinching}
+              // Paged modes lock page swipes while zoomed so a drag pans the
+              // page; the strip keeps scrolling (touches are mapped through
+              // the zoom, so it still tracks the finger 1:1).
+              scrollEnabled={paged ? !zoomed : true}
               // Keep the render window small, or every scrolled-past full-res
               // page stays mounted and drawn and long chapters get
               // progressively laggier. Paged modes also detach off-screen
@@ -1244,6 +1349,26 @@ function rememberImage(key: string, image: ImageFileDto) {
     const oldest = resolvedImages.keys().next().value;
     if (oldest !== undefined) resolvedImages.delete(oldest);
   }
+}
+
+/**
+ * The page list's scroll view inside a Gesture Handler native gesture. It's a
+ * component of its own so the ref the list attaches (for scrollToIndex and
+ * friends) reaches the ScrollView rather than stopping at the detector.
+ */
+function GestureScrollView({
+  gesture,
+  ref,
+  ...props
+}: ScrollViewProps & {
+  gesture: ReturnType<typeof Gesture.Native>;
+  ref?: React.Ref<ScrollView>;
+}) {
+  return (
+    <GestureDetector gesture={gesture}>
+      <ScrollView ref={ref} {...props} />
+    </GestureDetector>
+  );
 }
 
 function ReaderPage({
