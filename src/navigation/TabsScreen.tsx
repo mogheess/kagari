@@ -8,6 +8,7 @@ import { DiscoverScreen } from '../screens/DiscoverScreen';
 import { UpdatesScreen } from '../screens/UpdatesScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { TabNavProvider } from './TabNav';
+import { TabVisibilityProvider } from './screenVisibility';
 import type { TabKey } from './types';
 
 const TAB_ORDER: TabKey[] = ['home', 'library', 'discover', 'updates', 'profile'];
@@ -127,7 +128,9 @@ export function TabsScreen() {
                 collapsable={false}
                 pointerEvents={isActive ? 'auto' : 'none'}
               >
-                <View style={isActive ? styles.attached : styles.detached}>{elements[key]}</View>
+                <View style={isActive ? styles.attached : styles.detached}>
+                  <TabVisibilityProvider visible={isActive}>{elements[key]}</TabVisibilityProvider>
+                </View>
               </View>
             );
           })}

@@ -56,7 +56,8 @@ export function Cover({ manga, width, subtitle, progress, badge, inLibrary, onPr
           },
         ]}
       >
-        {!loaded ? (
+        {/* Without art there's nothing to wait for; a skeleton would sweep forever. */}
+        {!loaded && manga.thumbnailUrl ? (
           <Skeleton
             width={width}
             height={height}
