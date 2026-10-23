@@ -11,6 +11,7 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.manhwa.engine.EngineException
 import com.manhwa.engine.EngineFacade
+import com.manhwa.updates.BackgroundUpdates
 import com.manhwa.engine.backup.ExportRequest
 import com.manhwa.engine.dto.DownloadMetaDto
 import com.manhwa.engine.dto.PageDto
@@ -41,7 +42,7 @@ class ManhwaEngineModule(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
-    private val facade by lazy { EngineFacade(reactContext) }
+    private val facade by lazy { EngineFacade.get(reactContext) }
     private val repos by lazy { RepoManager(reactContext) }
     private val installer by lazy { ApkInstaller(reactContext) }
 
@@ -79,17 +80,31 @@ class ManhwaEngineModule(
         ""
     }
 
-    /**
-     * Holds the screen awake while reading. The flag lives on the window, so it
-     * must be set on the UI thread and cleared when the reader closes —
-     * otherwise the screen stays on for the rest of the session.
-     */
+    /** [intervalHours] 0 turns the background new-chapters check off. */
+    @ReactMethod
+    fun setBackgroundUpdates(intervalHours: Int, wifiOnly: Boolean, chargingOnly: Boolean, promise: Promise) =
+        resolve(promise) {
+            BackgroundUpdates.schedule(reactContext, intervalHours, wifiOnly, chargingOnly)
+            ""
+        }
+
+    /** What background checks found since last asked (JSON), emptied as it's read. */
+    @ReactMethod
+    fun takeBackgroundUpdates(promise: Promise) = resolve(promise) {
+        BackgroundUpdates.takeInbox(reactContext)
+    }
+
     /** The device's ABIs, preferred first, so the app updater can offer the matching APK. */
     @ReactMethod
     fun getSupportedAbis(promise: Promise) {
         promise.resolve(json.encodeToString(Build.SUPPORTED_ABIS.toList()))
     }
 
+    /**
+     * Holds the screen awake while reading. The flag lives on the window, so it
+     * must be set on the UI thread and cleared when the reader closes —
+     * otherwise the screen stays on for the rest of the session.
+     */
     @ReactMethod
     fun setKeepScreenOn(enabled: Boolean, promise: Promise) {
         val activity: Activity? = reactContext.currentActivity

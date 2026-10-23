@@ -14,7 +14,10 @@ import { RootNavigator } from './src/navigation/RootNavigator';
 import { getEngine } from './src/engine';
 import { checkForAppUpdate } from './src/app/appUpdate';
 import { checkExtensionUpdates } from './src/sources/extensionUpdates';
-import { checkLibraryUpdates } from './src/library/libraryUpdates';
+import { checkLibraryUpdates, mergeBackgroundUpdates } from './src/library/libraryUpdates';
+import { getBackgroundUpdateSettings, initBackgroundUpdates } from './src/library/backgroundUpdates';
+import { favoritesHydrated, getFavorites, subscribeFavorites } from './src/library/favorites';
+import { requestNotificationPermission } from './src/app/notificationPermission';
 import { initWhatsNew } from './src/app/whatsNew';
 import { WhatsNewSheet } from './src/components/WhatsNewSheet';
 import { UpdateAvailableSheet } from './src/components/UpdateAvailableSheet';
@@ -33,10 +36,16 @@ function UpdateBootstrap() {
   useEffect(() => {
     // One-time post-update release notes (runs once per launch).
     void initWhatsNew();
+    // Keep the closed-app new-chapters check scheduled to the saved setting.
+    initBackgroundUpdates();
     const run = () => {
       void checkForAppUpdate();
       void checkExtensionUpdates(getEngine());
-      void checkLibraryUpdates(getEngine());
+      // Fold in what the closed-app check found before scanning again, so the
+      // scan sees those chapters as known.
+      mergeBackgroundUpdates(getEngine())
+        .then(() => checkLibraryUpdates(getEngine()))
+        .catch(() => {});
     };
     const t = setTimeout(run, 2500);
     // Re-check periodically during a long-running session too (both checks are
@@ -51,6 +60,22 @@ function UpdateBootstrap() {
       clearInterval(interval);
       sub.remove();
     };
+  }, []);
+
+  // The first title added to the library is when new-chapter notifications
+  // start to matter: ask then (once), not at launch.
+  useEffect(() => {
+    // Null until the library has loaded: loading an existing library isn't
+    // "adding a first title".
+    let hadAny: boolean | null = favoritesHydrated() ? getFavorites().length > 0 : null;
+    return subscribeFavorites(() => {
+      if (!favoritesHydrated()) return;
+      const hasAny = getFavorites().length > 0;
+      if (hadAny === false && hasAny && getBackgroundUpdateSettings().intervalHours > 0) {
+        requestNotificationPermission({ unprompted: true }).catch(() => {});
+      }
+      hadAny = hasAny;
+    });
   }, []);
   return null;
 }

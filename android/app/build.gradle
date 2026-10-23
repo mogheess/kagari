@@ -267,4 +267,6 @@ dependencies {
     androidTestImplementation("com.squareup.okhttp3:mockwebserver3:5.4.0")
     // Storage Access Framework access to the user-chosen download folder.
     implementation("androidx.documentfile:documentfile:1.0.1")
+    // Periodic new-chapters check while the app is closed.
+    implementation("androidx.work:work-runtime-ktx:2.10.1")
 }

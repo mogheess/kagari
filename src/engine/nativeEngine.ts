@@ -13,6 +13,7 @@ import type {
   SourceDto,
   MangaDto,
   MangasPageDto,
+  BackgroundInboxDto,
   RelatedMangaDto,
   ChapterDto,
   PageDto,
@@ -71,6 +72,8 @@ interface ManhwaEngineNative {
   openInWebView(url: string): Promise<boolean | null>;
   getSupportedAbis(): Promise<string>;
   setKeepScreenOn(enabled: boolean): Promise<void>;
+  setBackgroundUpdates(intervalHours: number, wifiOnly: boolean, chargingOnly: boolean): Promise<string>;
+  takeBackgroundUpdates(): Promise<string>;
   exportMihonBackup(requestJson: string, fileName: string): Promise<string>;
   shareBackup(uri: string, fileName: string): Promise<void>;
 }
@@ -265,6 +268,14 @@ export function createNativeEngine(): Engine | null {
     async shareBackup(uri: string, fileName: string) {
       if (typeof Native.shareBackup !== 'function') return;
       await Native.shareBackup(uri, fileName);
+    },
+    async setBackgroundUpdates(intervalHours: number, wifiOnly: boolean, chargingOnly: boolean) {
+      if (typeof Native.setBackgroundUpdates !== 'function') return;
+      await Native.setBackgroundUpdates(intervalHours, wifiOnly, chargingOnly);
+    },
+    async takeBackgroundUpdates() {
+      if (typeof Native.takeBackgroundUpdates !== 'function') return { updates: [], snapshots: {} };
+      return parse<BackgroundInboxDto>(await Native.takeBackgroundUpdates());
     },
     async getSupportedAbis() {
       if (typeof Native.getSupportedAbis !== 'function') return [];
