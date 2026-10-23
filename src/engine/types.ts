@@ -71,6 +71,14 @@ export interface MangasPageDto {
   hasNextPage: boolean;
 }
 
+/** Titles related to one manga, as far as its source can tell. */
+export interface RelatedMangaDto {
+  /** The source's own related list, or null when it doesn't provide one. */
+  mangas?: MangaDto[] | null;
+  /** False when the source asks apps not to look for related titles by searching. */
+  searchAllowed: boolean;
+}
+
 /** Names a download needs to land in Mihon's folder layout under a picked storage location. */
 export interface DownloadMeta {
   mangaTitle: string;
@@ -291,6 +299,13 @@ export interface Engine {
   getMangaDetails(sourceId: string, mangaUrl: string, memo?: string): Promise<MangaDto>;
   /** Absolute, browser-openable URL for a manga (source baseUrl + path). */
   getMangaWebUrl(sourceId: string, mangaUrl: string): Promise<string>;
+  /** The source's own related titles for a manga; see `src/library/similar.ts`. */
+  getRelatedManga(
+    sourceId: string,
+    mangaUrl: string,
+    title: string,
+    memo?: string,
+  ): Promise<RelatedMangaDto>;
   getChapters(sourceId: string, mangaUrl: string, memo?: string): Promise<ChapterDto[]>;
   getPages(sourceId: string, chapterUrl: string, memo?: string): Promise<PageDto[]>;
   resolveImage(sourceId: string, page: PageDto): Promise<ImageRequestDto>;

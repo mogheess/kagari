@@ -29,6 +29,7 @@ import com.manhwa.engine.dto.ImageRequestDto
 import com.manhwa.engine.dto.MangaDto
 import com.manhwa.engine.dto.MangasPageDto
 import com.manhwa.engine.dto.PageDto
+import com.manhwa.engine.dto.RelatedMangaDto
 import com.manhwa.engine.dto.StorageLocationDto
 import com.manhwa.engine.storage.DownloadNaming
 import com.manhwa.engine.storage.StorageManager
@@ -185,6 +186,45 @@ class EngineFacade(context: Context) {
         val filters: FilterList = source.getFilterList()
         val result = source.getSearchManga(page, query, filters)
         return Mappers.mangasPageToDto(source.id, result)
+    }
+
+    /**
+     * Titles the source itself lists as related to [mangaUrl].
+     *
+     * The related-manga hooks come from Komikku's source API; keiyoushi
+     * extensions build against Mihon's, which has none, so almost no source
+     * overrides them. The vendored default would spend a details request and
+     * return nothing, so it's only called when the extension really overrides
+     * it. Otherwise `mangas` is null and the app falls back to searching.
+     */
+    suspend fun getRelatedManga(
+        sourceId: String,
+        mangaUrl: String,
+        title: String,
+        memoJson: String? = null,
+    ): RelatedMangaDto {
+        val source = source(sourceId) as? CatalogueSource
+            ?: return RelatedMangaDto(mangas = null, searchAllowed = false)
+        if (source.disableRelatedMangas) return RelatedMangaDto(mangas = null, searchAllowed = false)
+        val searchAllowed = !source.disableRelatedMangasBySearch
+        if (!overridesRelated(source)) return RelatedMangaDto(mangas = null, searchAllowed = searchAllowed)
+
+        val stub = SManga.create().apply {
+            url = mangaUrl
+            this.title = title
+            memo = Mappers.memoFromJson(memoJson)
+        }
+        val related = source.fetchRelatedMangaList(stub)
+            .filter { runCatching { it.url }.getOrNull().let { url -> url != null && url != mangaUrl } }
+            .map { Mappers.mangaToDto(source.id, it) }
+        return RelatedMangaDto(mangas = related, searchAllowed = searchAllowed)
+    }
+
+    private fun overridesRelated(source: CatalogueSource): Boolean {
+        val hooks = setOf("fetchRelatedMangaList", "relatedMangaListParse")
+        return generateSequence<Class<*>>(source.javaClass) { it.superclass }
+            .takeWhile { it != HttpSource::class.java && it != Any::class.java }
+            .any { cls -> cls.declaredMethods.any { it.name in hooks } }
     }
 
     /**
