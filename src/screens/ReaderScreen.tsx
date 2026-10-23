@@ -93,7 +93,14 @@ const STRIP_FOOTER_HEIGHT = 80;
  * "continue", rather than something you cross by accident on a fling.
  */
 const CHAPTER_TRANSITION_HEIGHT = 260;
-const VIEWABILITY_CONFIG = { itemVisiblePercentThreshold: 50 };
+/**
+ * A page counts as in view when at least half of it shows, or when it fills at
+ * least half the screen. The second is what reaches a webtoon page several
+ * screens tall, which can never be half on screen; the first is what reaches a
+ * short last page, so a chapter can still be read to the end.
+ */
+const HALF_VISIBLE = { itemVisiblePercentThreshold: 50 };
+const FILLS_HALF_SCREEN = { viewAreaCoveragePercentThreshold: 50 };
 
 let activeImageFetches = 0;
 const imageFetchQueue: (() => void)[] = [];
@@ -408,7 +415,7 @@ export function ReaderScreen() {
   const activeRef = useRef({ url: activeUrl, page: activePage });
   activeRef.current = { url: activeUrl, page: activePage };
 
-  const onViewable = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
+  const onViewable = useRef((viewableItems: ViewToken[]) => {
     let furthest: ReaderItem | null = null;
     let furthestIndex = -1;
     for (const v of viewableItems) {
@@ -441,6 +448,25 @@ export function ReaderScreen() {
     setActivePage(furthest.pageIndex);
     currentRef.current = furthest.key;
   }).current;
+
+  // The list reports each rule separately; a page in view by either counts.
+  const inViewByRule = useRef<[ViewToken[], ViewToken[]]>([[], []]);
+  const viewabilityPairs = useRef(
+    [HALF_VISIBLE, FILLS_HALF_SCREEN].map((viewabilityConfig, rule) => ({
+      viewabilityConfig,
+      onViewableItemsChanged: ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+        inViewByRule.current[rule] = viewableItems;
+        const seen = new Set<string>();
+        const union: ViewToken[] = [];
+        for (const token of [...inViewByRule.current[0], ...inViewByRule.current[1]]) {
+          if (seen.has(token.key)) continue;
+          seen.add(token.key);
+          union.push(token);
+        }
+        onViewable(union);
+      },
+    })),
+  ).current;
 
   const { prev: prevChapter, next: nextChapter } = useMemo(
     () => neighboursOf(orderedChapters, activeUrl),
@@ -910,7 +936,7 @@ export function ReaderScreen() {
               initialNumToRender={3}
               showsVerticalScrollIndicator={false}
               showsHorizontalScrollIndicator={false}
-              onViewableItemsChanged={onViewable}
+              viewabilityConfigCallbackPairs={viewabilityPairs}
               onScroll={e => {
                 const { x, y } = e.nativeEvent.contentOffset;
                 const offset = horizontal ? x : y;
@@ -937,7 +963,6 @@ export function ReaderScreen() {
                 flinging.current = false;
                 releaseHeldInserts();
               }}
-              viewabilityConfig={VIEWABILITY_CONFIG}
               scrollEventThrottle={16}
               // Loading an earlier chapter prepends items; without this the
               // content under the reader's finger would jump down by its height.
