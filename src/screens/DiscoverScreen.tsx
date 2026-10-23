@@ -528,8 +528,11 @@ function SourceBrowse({
                       const url = source?.baseUrl;
                       if (!url) return;
                       try {
-                        await engine.openInWebView(url);
-                        reload();
+                        const cleared = await engine.openInWebView(url);
+                        // Resolves when the WebView closes. For a human check,
+                        // retrying without a new clearance would only fail again;
+                        // for other errors a retry on return is still worth it.
+                        if (cleared || !humanCheck) reload();
                       } catch {}
                     }}
                     style={[

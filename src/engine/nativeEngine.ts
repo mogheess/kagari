@@ -60,7 +60,7 @@ interface ManhwaEngineNative {
   renderTierListImage(exportJson: string): Promise<string>;
   saveImageToGallery(uri: string): Promise<string>;
   shareImage(uri: string): Promise<void>;
-  openInWebView(url: string): Promise<void>;
+  openInWebView(url: string): Promise<boolean | null>;
   setKeepScreenOn(enabled: boolean): Promise<void>;
   exportMihonBackup(requestJson: string, fileName: string): Promise<string>;
   shareBackup(uri: string, fileName: string): Promise<void>;
@@ -254,7 +254,8 @@ export function createNativeEngine(): Engine | null {
       if (typeof Native.openInWebView !== 'function') {
         throw new Error('In-app WebView is unavailable on this build.');
       }
-      await Native.openInWebView(url);
+      // Builds before 0.7 resolved with nothing as soon as the WebView opened.
+      return (await Native.openInWebView(url)) === true;
     },
   };
 }
