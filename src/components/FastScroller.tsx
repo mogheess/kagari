@@ -17,13 +17,8 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import {
-  Animated,
-  PanResponder,
-  StyleSheet,
-  View,
-  type ScrollView,
-} from 'react-native';
+import { Animated, StyleSheet, View, type ScrollView } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useTheme } from '../theme/ThemeProvider';
 import { thumbTopForDrag } from './fastScrollerMath';
 
@@ -114,38 +109,35 @@ export const FastScroller = forwardRef<FastScrollerHandle, Props>(function FastS
     [],
   );
 
-  // Ref mirrors so the PanResponder (created once) always reads live geometry.
+  // Ref mirrors so the gesture (created once) always reads live geometry.
   const geometry = useRef({ travel, maxScroll, thumbTop });
   geometry.current = { travel, maxScroll, thumbTop };
 
-  const panResponder = useMemo(
+  // A gesture-handler Pan rather than a PanResponder: under the app's
+  // GestureHandlerRootView the PanResponder was cancelled right after it was
+  // granted, so dragging the thumb never moved the list.
+  const pan = useMemo(
     () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
-        onPanResponderGrant: () => {
+      Gesture.Pan()
+        .runOnJS(true)
+        .minDistance(0)
+        .onBegin(() => {
           dragStartTop.current = geometry.current.thumbTop;
           setDragging(true);
           show();
-        },
-        onPanResponderMove: (_evt, gesture) => {
+        })
+        .onUpdate(e => {
           const { travel: t, maxScroll: m } = geometry.current;
           if (t <= 0 || m <= 0) return;
-          // `gesture.dy` is cumulative from grant, so it must be applied to the
-          // thumb position captured at grant rather than the live thumb.
-          const next = thumbTopForDrag(dragStartTop.current, gesture.dy, t);
+          // translationY is cumulative from the start of the drag, so it's
+          // applied to the thumb position captured then, not the live one.
+          const next = thumbTopForDrag(dragStartTop.current, e.translationY, t);
           scrollRef.current?.scrollTo({ y: (next / t) * m, animated: false });
-        },
-        onPanResponderRelease: () => {
+        })
+        .onFinalize(() => {
           setDragging(false);
           scheduleHide();
-        },
-        onPanResponderTerminate: () => {
-          setDragging(false);
-          scheduleHide();
-        },
-      }),
-    // `geometry` is a ref, so the responder never needs rebuilding.
+        }),
     [scrollRef, show, scheduleHide],
   );
 
@@ -156,21 +148,22 @@ export const FastScroller = forwardRef<FastScrollerHandle, Props>(function FastS
       pointerEvents="box-none"
       style={[styles.track, { top: topInset, height: trackHeight, opacity }]}
     >
-      <View
-        {...panResponder.panHandlers}
-        pointerEvents={visible ? 'auto' : 'none'}
-        style={[styles.touchArea, { transform: [{ translateY: thumbTop }] }]}
-      >
+      <GestureDetector gesture={pan}>
         <View
-          style={[
-            styles.thumb,
-            {
-              backgroundColor: dragging ? theme.colors.accent : theme.colors.textFaint,
-              width: dragging ? THUMB_WIDTH + 2 : THUMB_WIDTH,
-            },
-          ]}
-        />
-      </View>
+          pointerEvents={visible ? 'auto' : 'none'}
+          style={[styles.touchArea, { transform: [{ translateY: thumbTop }] }]}
+        >
+          <View
+            style={[
+              styles.thumb,
+              {
+                backgroundColor: dragging ? theme.colors.accent : theme.colors.textFaint,
+                width: dragging ? THUMB_WIDTH + 2 : THUMB_WIDTH,
+              },
+            ]}
+          />
+        </View>
+      </GestureDetector>
     </Animated.View>
   );
 });
