@@ -10,11 +10,13 @@
 import { useSyncExternalStore } from 'react';
 import { makePersistence } from '../store/persist';
 import { APP_VERSION, LATEST_RELEASE_API, RELEASES_PAGE_URL, compareVersions } from './version';
+import { pickApkAsset } from './apkAsset';
+import { getEngine } from '../engine';
 
 export interface AppUpdateInfo {
   /** Latest version without a leading "v". */
   version: string;
-  /** Direct APK asset URL when present, otherwise the release page. */
+  /** This device's APK (matching ABI, else universal) when present, otherwise the release page. */
   url: string;
   notes?: string;
   publishedAt?: string;
@@ -114,7 +116,10 @@ export async function checkForAppUpdate(opts?: { force?: boolean }): Promise<voi
       return;
     }
 
-    const apk = rel.assets?.find(a => a.name.toLowerCase().endsWith('.apk'));
+    const abis = await getEngine()
+      .getSupportedAbis()
+      .catch(() => [] as string[]);
+    const apk = pickApkAsset(rel.assets ?? [], abis);
     const latest: AppUpdateInfo = {
       version: tag.replace(/^v/i, ''),
       url: apk?.browser_download_url ?? rel.html_url ?? RELEASES_PAGE_URL,

@@ -61,6 +61,7 @@ interface ManhwaEngineNative {
   saveImageToGallery(uri: string): Promise<string>;
   shareImage(uri: string): Promise<void>;
   openInWebView(url: string): Promise<void>;
+  getSupportedAbis(): Promise<string>;
   setKeepScreenOn(enabled: boolean): Promise<void>;
   exportMihonBackup(requestJson: string, fileName: string): Promise<string>;
   shareBackup(uri: string, fileName: string): Promise<void>;
@@ -244,6 +245,10 @@ export function createNativeEngine(): Engine | null {
     async shareBackup(uri: string, fileName: string) {
       if (typeof Native.shareBackup !== 'function') return;
       await Native.shareBackup(uri, fileName);
+    },
+    async getSupportedAbis() {
+      if (typeof Native.getSupportedAbis !== 'function') return [];
+      return parse<string[]>(await Native.getSupportedAbis());
     },
     async setKeepScreenOn(enabled: boolean) {
       // Older builds lack the method; keeping the screen on is optional.

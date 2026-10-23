@@ -61,6 +61,20 @@ react {
 def enableProguardInReleaseBuilds = false
 
 /**
+ * Release builds ship one APK per ABI plus a universal APK. Nearly every phone
+ * only needs arm64-v8a, and bundling all four ABIs' native libraries roughly
+ * triples the download. Debug builds (and CI) stay a single APK.
+ *
+ * Every APK keeps the same versionCode, as Mihon's do. Per-ABI offsets are only
+ * needed for Play Store multi-APK; for sideloaded builds they'd stop people
+ * moving between the universal APK and a split one, since one of the two would
+ * always count as a downgrade.
+ */
+def abiSplitsEnabled = gradle.startParameter.taskNames.any { it.toLowerCase().contains("release") }
+def splitAbis = (findProperty("reactNativeArchitectures") ?: "armeabi-v7a,arm64-v8a,x86,x86_64")
+    .split(",").collect { it.trim() }.findAll { !it.isEmpty() }
+
+/**
  * The preferred build flavor of JavaScriptCore (JSC)
  *
  * For example, to use the international variant, you can use:
@@ -111,6 +125,14 @@ android {
             }
         }
     }
+    splits {
+        abi {
+            enable abiSplitsEnabled
+            reset()
+            include(*splitAbis)
+            universalApk true
+        }
+    }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
@@ -136,6 +158,16 @@ android {
         // `-compatibility` also keeps DefaultImpls for anything still expecting
         // the old scheme.
         freeCompilerArgs += ["-Xjvm-default=all-compatibility"]
+    }
+}
+
+// Release APKs are named for the release page: Kagari-v0.7.0-arm64-v8a.apk,
+// Kagari-v0.7.0-universal.apk, ...
+android.applicationVariants.all { variant ->
+    if (variant.buildType.name != "release") return
+    variant.outputs.all { output ->
+        def abi = output.getFilter("ABI") ?: "universal"
+        outputFileName = "Kagari-v${variant.versionName}-${abi}.apk"
     }
 }
 
