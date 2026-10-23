@@ -1,13 +1,7 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, Platform } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Animated, View, Text, Pressable, StyleSheet, Platform } from 'react-native';
 import { BlurView } from '@react-native-community/blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring,
-  withTiming,
-} from 'react-native-reanimated';
 import { useTheme } from '../theme/ThemeProvider';
 import { withAlpha } from '../utils/color';
 import { Icon, type IconName } from '../components/Icon';
@@ -47,6 +41,12 @@ const INDICATOR_WIDTH = 56;
 const INDICATOR_HEIGHT = 32;
 const ROW_PADDING_TOP = 8;
 const SPRING = { damping: 18, stiffness: 220, mass: 0.7 };
+/**
+ * Plain Animated on the native driver, not Reanimated: switching tabs mounts a
+ * whole screen in the same commit, and the Reanimated version's final position
+ * never reached the screen, leaving the pill one tab behind.
+ */
+const useNativeDriver = true;
 
 export function GlassTabBar({ active, onChange }: GlassTabBarProps) {
   const theme = useTheme();
@@ -57,14 +57,18 @@ export function GlassTabBar({ active, onChange }: GlassTabBarProps) {
   // The indicator slides between tabs rather than jumping, so the eye follows
   // the switch. Tab widths are equal, so one measurement places it.
   const [rowWidth, setRowWidth] = useState(0);
-  const position = useSharedValue(activeIndex);
+  const position = useRef(new Animated.Value(activeIndex)).current;
   useEffect(() => {
-    position.value = withSpring(activeIndex, SPRING);
+    const spring = Animated.spring(position, { toValue: activeIndex, ...SPRING, useNativeDriver });
+    spring.start();
+    return () => spring.stop();
   }, [activeIndex, position]);
   const tabWidth = rowWidth / TABS.length;
-  const indicatorStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: position.value * tabWidth + (tabWidth - INDICATOR_WIDTH) / 2 }],
-  }));
+  const firstX = (tabWidth - INDICATOR_WIDTH) / 2;
+  const translateX = position.interpolate({
+    inputRange: [0, TABS.length - 1],
+    outputRange: [firstX, firstX + (TABS.length - 1) * tabWidth],
+  });
 
   return (
     <View style={[styles.wrap, { paddingBottom: Math.max(insets.bottom, 10) }]} pointerEvents="box-none">
@@ -92,8 +96,10 @@ export function GlassTabBar({ active, onChange }: GlassTabBarProps) {
               pointerEvents="none"
               style={[
                 styles.indicator,
-                { backgroundColor: withAlpha(theme.colors.accent, theme.scheme === 'dark' ? 0.2 : 0.16) },
-                indicatorStyle,
+                {
+                  backgroundColor: withAlpha(theme.colors.accent, theme.scheme === 'dark' ? 0.2 : 0.16),
+                  transform: [{ translateX }],
+                },
               ]}
             />
           ) : null}
@@ -125,8 +131,7 @@ function TabButton({
   onPress: () => void;
 }) {
   const theme = useTheme();
-  const pressed = useSharedValue(1);
-  const pressStyle = useAnimatedStyle(() => ({ transform: [{ scale: pressed.value }] }));
+  const pressed = useRef(new Animated.Value(1)).current;
   const color = active ? theme.colors.accent : theme.colors.textMuted;
   const badgeText = badge > 99 ? '99+' : String(badge);
 
@@ -135,17 +140,17 @@ function TabButton({
       style={styles.tab}
       onPress={onPress}
       onPressIn={() => {
-        pressed.value = withTiming(0.9, { duration: 90 });
+        Animated.timing(pressed, { toValue: 0.9, duration: 90, useNativeDriver }).start();
       }}
       onPressOut={() => {
-        pressed.value = withSpring(1, SPRING);
+        Animated.spring(pressed, { toValue: 1, ...SPRING, useNativeDriver }).start();
       }}
       hitSlop={6}
       accessibilityRole="tab"
       accessibilityState={{ selected: active }}
       accessibilityLabel={badge > 0 ? `${tab.label}, ${badgeText} new` : tab.label}
     >
-      <Animated.View style={[styles.iconBox, pressStyle]}>
+      <Animated.View style={[styles.iconBox, { transform: [{ scale: pressed }] }]}>
         <Icon name={tab.icon} size={22} color={color} filled={active} />
         {badge > 0 ? (
           <View
