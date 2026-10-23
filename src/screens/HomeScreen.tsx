@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useSources, useSourcesLoaded, refreshSources } from '../sources/sourcesStore';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useTheme } from '../theme/ThemeProvider';
+import { useTheme, useScreenCanvas } from '../theme/ThemeProvider';
 import { useHomeConfig } from '../home/HomeConfig';
 import { useTabNav } from '../navigation/TabNav';
 import { HomeBlockView } from '../components/HomeBlockView';
@@ -21,6 +21,7 @@ const TAB_BAR_SPACE = 110;
 
 export function HomeScreen() {
   const theme = useTheme();
+  const canvas = useScreenCanvas();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const { blocks } = useHomeConfig();
@@ -52,7 +53,7 @@ export function HomeScreen() {
   }, []);
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
+    <View style={{ flex: 1, backgroundColor: canvas }}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{

@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BackHandler, Linking, StyleSheet, View } from 'react-native';
 import { StackActions, useNavigation } from '@react-navigation/native';
 import { GlassTabBar } from './GlassTabBar';
+import { ScreenBackdrop } from '../components/ScreenBackdrop';
+import { useTheme } from '../theme/ThemeProvider';
 import { HomeScreen } from '../screens/HomeScreen';
 import { LibraryScreen } from '../screens/LibraryScreen';
 import { DiscoverScreen } from '../screens/DiscoverScreen';
@@ -37,6 +39,7 @@ const FAR_FAR_AWAY = 30000;
 
 export function TabsScreen() {
   const navigation = useNavigation();
+  const theme = useTheme();
   const [active, setActive] = useState<TabKey>('home');
   const [mounted, setMounted] = useState<Set<TabKey>>(() => new Set<TabKey>(['home']));
 
@@ -116,7 +119,8 @@ export function TabsScreen() {
 
   return (
     <TabNavProvider active={active} navigateTab={navigateTab}>
-      <View style={{ flex: 1 }}>
+      <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
+        <ScreenBackdrop />
         <View style={{ flex: 1 }}>
           {TAB_ORDER.map(key => {
             if (!mounted.has(key)) return null;

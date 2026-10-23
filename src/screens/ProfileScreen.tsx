@@ -14,7 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useTheme, useAppearance } from '../theme/ThemeProvider';
+import { useTheme, useAppearance, useScreenCanvas } from '../theme/ThemeProvider';
 import { Icon, type IconName } from '../components/Icon';
 import { useAppUpdate, checkForAppUpdate } from '../app/appUpdate';
 import { useExtensionUpdates, checkExtensionUpdates } from '../sources/extensionUpdates';
@@ -48,6 +48,7 @@ const TAB_BAR_SPACE = 110;
 
 export function ProfileScreen() {
   const theme = useTheme();
+  const canvas = useScreenCanvas();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const { appearance } = useAppearance();
@@ -57,7 +58,7 @@ export function ProfileScreen() {
 
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
+    <View style={{ flex: 1, backgroundColor: canvas }}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{

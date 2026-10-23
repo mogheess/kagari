@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, Pressable, FlatList, RefreshControl, ScrollView
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useTheme } from '../theme/ThemeProvider';
+import { useTheme, useScreenCanvas } from '../theme/ThemeProvider';
 import { Icon } from '../components/Icon';
 import { RemoteImage } from '../components/RemoteImage';
 import { SwipeTabs } from '../components/SwipeTabs';
@@ -62,6 +62,7 @@ type UpdateRowItem =
 
 export function UpdatesScreen() {
   const theme = useTheme();
+  const canvas = useScreenCanvas();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const history = useHistory();
@@ -126,7 +127,7 @@ export function UpdatesScreen() {
     });
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
+    <View style={{ flex: 1, backgroundColor: canvas }}>
       <View style={{ paddingTop: insets.top + 8, paddingHorizontal: theme.spacing.lg }}>
         <View style={styles.titleRow}>
           <Text style={[theme.typography.title, { color: theme.colors.text }]}>Activity</Text>
