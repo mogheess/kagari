@@ -141,6 +141,35 @@ describe('insertChapter', () => {
       ordered.slice(-MAX_LOADED_CHAPTERS).map(item => item.url),
     );
   });
+
+  test('with keepEarlier, reading forward never drops an earlier chapter', () => {
+    const ordered = Array.from({ length: 12 }, (_, i) => chapter(i + 1));
+    const add = (w: LoadedChapter[], n: number, active: number) =>
+      insertChapter(w, loaded(n, 20), ordered, ordered[active - 1].url, MAX_LOADED_CHAPTERS, true);
+    let window: LoadedChapter[] = [];
+
+    // Reading forward: open chapter n, then its next one is preloaded.
+    for (let n = 1; n <= 8; n++) {
+      window = add(window, n, n);
+      window = add(window, n + 1, n);
+    }
+
+    expect(window.map(item => item.chapter.name)).toEqual(ordered.slice(0, 9).map(c => c.name));
+  });
+
+  test('with keepEarlier, chapters after the active one are trimmed, keeping the next', () => {
+    const ordered = Array.from({ length: 10 }, (_, i) => chapter(i + 1));
+    const add = (w: LoadedChapter[], n: number) =>
+      insertChapter(w, loaded(n, 5), ordered, ordered[5].url, MAX_LOADED_CHAPTERS, true);
+    // Active is chapter 6 with five earlier chapters loaded; two later ones arrive.
+    let window = [1, 2, 3, 4, 5, 6].map(n => loaded(n, 5));
+    window = add(window, 7);
+    window = add(window, 8);
+
+    expect(window.map(item => item.chapter.name)).toEqual(
+      [1, 2, 3, 4, 5, 6, 7].map(n => `Chapter ${n}`),
+    );
+  });
 });
 
 describe('neighboursOf', () => {
