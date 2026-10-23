@@ -116,6 +116,11 @@ export function FeaturedCarousel({ data, onOpenManga }: FeaturedCarouselProps) {
         initialNumToRender={1}
         maxToRenderPerBatch={2}
         windowSize={3}
+        // FlatList clips off-screen children on Android by default. Six
+        // slides gain nothing from it, and RN's clipping bookkeeping crashed
+        // the app ("Required value was null" in updateSubviewClipStatus) when
+        // the auto-advance animated the scroll while Home was a hidden tab.
+        removeClippedSubviews={false}
       />
       <View
         style={{
