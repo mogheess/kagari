@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, FlatList, useWindowDimensions, type ViewToken } from 'react-native';
 import { useTheme } from '../theme/ThemeProvider';
+import { useScreenVisible } from '../navigation/screenVisibility';
 import { FeaturedHero } from './FeaturedHero';
 import type { MangaDto } from '../engine/types';
 
@@ -40,8 +41,11 @@ export function FeaturedCarousel({ data, onOpenManga }: FeaturedCarouselProps) {
     indexRef.current = index;
   }, [index]);
 
+  // Don't keep paging a carousel nobody can see (another tab, or a screen on top).
+  const visible = useScreenVisible();
+
   useEffect(() => {
-    if (data.length <= 1) return;
+    if (data.length <= 1 || !visible) return;
     const timer = setInterval(() => {
       if (interacting.current) return;
       const next = (indexRef.current + 1) % data.length;
@@ -50,7 +54,7 @@ export function FeaturedCarousel({ data, onOpenManga }: FeaturedCarouselProps) {
       setIndex(next);
     }, ROTATE_MS);
     return () => clearInterval(timer);
-  }, [data.length, width]);
+  }, [data.length, width, visible]);
 
   const onViewable = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
     const first = viewableItems[0];

@@ -1,14 +1,8 @@
-import React, { useEffect, useState } from 'react';
-import { StyleProp, View, ViewStyle } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Animated, Easing, StyleProp, View, ViewStyle } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
-import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withRepeat,
-  withTiming,
-  Easing,
-} from 'react-native-reanimated';
 import { useTheme } from '../theme/ThemeProvider';
+import { useScreenVisible } from '../navigation/screenVisibility';
 
 interface SkeletonProps {
   width?: number | `${number}%`;
@@ -26,24 +20,38 @@ const SWEEP_MS = 1300;
  * was close to invisible on both themes — a loading rail read as a row of
  * stale grey boxes. A moving highlight is legible at any contrast because the
  * eye tracks motion, not brightness.
+ *
+ * The sweep runs on the native animation driver and stops while its screen is
+ * hidden. As a Reanimated loop it committed the whole shadow tree every frame,
+ * and screens kept alive under the reader kept theirs running: an idle reader
+ * held the UI thread at 70–90%.
  */
 export function Skeleton({ width = '100%', height = 16, radius = 8, style }: SkeletonProps) {
   const theme = useTheme();
+  const visible = useScreenVisible();
   const [measured, setMeasured] = useState(0);
-  const progress = useSharedValue(0);
+  const progress = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    progress.value = withRepeat(
-      withTiming(1, { duration: SWEEP_MS, easing: Easing.inOut(Easing.quad) }),
-      -1,
-      false,
+    if (!visible || measured <= 0) return;
+    progress.setValue(0);
+    const loop = Animated.loop(
+      Animated.timing(progress, {
+        toValue: 1,
+        duration: SWEEP_MS,
+        easing: Easing.inOut(Easing.quad),
+        useNativeDriver: true,
+      }),
     );
-  }, [progress]);
+    loop.start();
+    return () => loop.stop();
+  }, [visible, measured, progress]);
 
   // Travel from fully off the left edge to fully off the right.
-  const sweep = useAnimatedStyle(() => ({
-    transform: [{ translateX: -measured + progress.value * measured * 2 }],
-  }));
+  const translateX = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-measured, measured],
+  });
 
   const highlight = theme.scheme === 'dark' ? 'rgba(255,255,255,0.09)' : 'rgba(255,255,255,0.75)';
 
@@ -62,7 +70,15 @@ export function Skeleton({ width = '100%', height = 16, radius = 8, style }: Ske
       ]}
     >
       {measured > 0 ? (
-        <Animated.View style={[{ position: 'absolute', top: 0, bottom: 0, width: measured }, sweep]}>
+        <Animated.View
+          style={{
+            position: 'absolute',
+            top: 0,
+            bottom: 0,
+            width: measured,
+            transform: [{ translateX }],
+          }}
+        >
           <LinearGradient
             colors={['transparent', highlight, 'transparent']}
             start={{ x: 0, y: 0.5 }}
