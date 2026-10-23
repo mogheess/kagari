@@ -38,6 +38,13 @@ import {
   type ReaderItem,
 } from '../reader/chapterWindow';
 import {
+  buildStripLayout,
+  hasPageShape,
+  pageShapeKey,
+  PLACEHOLDER_RATIO,
+  rememberPageShape,
+} from '../reader/stripLayout';
+import {
   getDownloadEntry,
   useDownloadsHydrated,
   enqueueDownload,
@@ -76,8 +83,8 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 type ReaderRoute = RouteProp<RootStackParamList, 'Reader'>;
 const MAX_IMAGE_FETCHES = 1;
 const IMAGE_FETCH_RETRIES = 3;
-/** A far webtoon jump steps through measured pages; stop after this many. */
-const MAX_SCROLL_RETRIES = 40;
+/** Longest a jump waits for the scroll event that says it landed. */
+const JUMP_SETTLE_TIMEOUT_MS = 500;
 /** Bottom spacer under the webtoon strip so the last page clears the chrome. */
 const STRIP_FOOTER_HEIGHT = 80;
 /**
@@ -106,6 +113,10 @@ export function ReaderScreen() {
   // Per-series reading mode: a manhwa keeps Webtoon, a manga keeps its own
   // paged layout, and brand-new titles inherit the most recent pick.
   const mode = useReaderMode(params.sourceId, params.mangaUrl);
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+  /** Groups page shapes by title (see reader/stripLayout). */
+  const series = `${params.sourceId}|${params.mangaUrl}`;
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [zoomed, setZoomed] = useState(false);
@@ -184,6 +195,28 @@ export function ReaderScreen() {
   const activeUrlRef = useRef(activeUrl);
   activeUrlRef.current = activeUrl;
 
+  // An earlier chapter goes in above the reader, and the list keeps their
+  // place by shifting the scroll offset to match. That only works while the
+  // list is still. Mid-jump, the jump lands inside the chapter that was just
+  // added; mid-scroll, a scroll event from before the shift can arrive after
+  // it, and the list lays itself out around the old offset. Either way the
+  // reader ends up in the earlier chapter, which then counts as current and
+  // preloads the one before it. So earlier chapters wait in `heldInserts`
+  // until the list is still. Opening the reader is a jump too: it positions
+  // on the requested page.
+  const jumping = useRef(true);
+  const dragging = useRef(false);
+  const flinging = useRef(false);
+  const heldInserts = useRef<(() => void)[]>([]);
+  const releaseHeldInserts = useCallback(() => {
+    if (jumping.current || dragging.current || flinging.current) return;
+    for (const insert of heldInserts.current.splice(0)) insert();
+  }, []);
+  /** Scroll offset along the list as of the last scroll event. */
+  const scrollOffset = useRef(0);
+  /** Exact offset of an item, for the current layout (set each render). */
+  const offsetOf = useRef<(index: number) => number>(() => 0);
+
   /**
    * Resolves a chapter's pages and slots it into the window. Downloaded
    * chapters read from local storage; everything else goes to the source.
@@ -201,14 +234,32 @@ export function ReaderScreen() {
           offlineCount > 0
             ? Array.from({ length: offlineCount }, (_, i) => ({ index: i }))
             : await loadPages(params.sourceId, url, chapter.memo);
-        setLoadedChapters(prev =>
-          insertChapter(
-            prev,
-            { chapter, pages, offline: offlineCount > 0 },
-            orderedChapters,
-            activeUrlRef.current,
-          ),
-        );
+        const insert = () =>
+          setLoadedChapters(prev =>
+            insertChapter(
+              prev,
+              { chapter, pages, offline: offlineCount > 0 },
+              orderedChapters,
+              activeUrlRef.current,
+            ),
+          );
+        const rank = (u: string) => orderedChapters.findIndex(c => c.url === u);
+        const earlier = rank(url) < rank(activeUrlRef.current);
+        // An earlier chapter goes in above the reader, and its last page is
+        // what ends up across the top edge. Measure that page first so it
+        // arrives at its real height: one that grows while straddling the edge
+        // pushes everything below it down, and nothing can hold the reader's
+        // page still against that.
+        const last = pages[pages.length - 1];
+        if (earlier && !isPaged(modeRef.current) && last) {
+          await measurePage(params.sourceId, series, url, last, offlineCount > 0);
+        }
+        if (earlier) {
+          heldInserts.current.push(insert);
+          releaseHeldInserts();
+        } else {
+          insert();
+        }
       } catch (e) {
         // Only the chapter the reader was opened on is worth surfacing; a
         // failed preload of a neighbour just means its transition panel stays.
@@ -219,7 +270,14 @@ export function ReaderScreen() {
         inFlight.current.delete(url);
       }
     },
-    [downloadsHydrated, orderedChapters, params.sourceId, params.chapter.url],
+    [
+      downloadsHydrated,
+      orderedChapters,
+      params.sourceId,
+      params.chapter.url,
+      series,
+      releaseHeldInserts,
+    ],
   );
 
   // Open on the requested chapter, then keep its neighbours warm. Preloading is
@@ -364,6 +422,12 @@ export function ReaderScreen() {
 
     const prevUrl = activeRef.current.url;
     if (furthest.chapter.url !== prevUrl) {
+      // Only a scroll the reader makes moves them into another chapter.
+      // Layout settling (a chapter prepended above, pages above growing as
+      // they load) can put a neighbour's page in view for a frame; following
+      // that would make it current and preload the chapter before it, which
+      // shifts the list again.
+      if (!dragging.current && !flinging.current) return;
       // Moving forward past a chapter means it was read to the end — the last
       // page may be taller than the viewport and never cross the visibility
       // threshold on its own.
@@ -406,8 +470,56 @@ export function ReaderScreen() {
     };
   }, [params.sourceId, params.mangaUrl]);
 
-  /** Steps taken toward an unmeasured index (see onScrollToIndexFailed). */
-  const scrollRetries = useRef(0);
+  /** Key of the item the current jump is aiming for. */
+  const scrollTarget = useRef<string | null>(null);
+  /** Offset the current jump reports once it has landed. */
+  const jumpOffset = useRef<number | null>(null);
+  const jumpTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** The jump has landed (or given up): let held-back earlier chapters in. */
+  const settleJump = useCallback(() => {
+    if (jumpTimeout.current) clearTimeout(jumpTimeout.current);
+    jumpTimeout.current = null;
+    jumping.current = false;
+    scrollTarget.current = null;
+    jumpOffset.current = null;
+    releaseHeldInserts();
+  }, [releaseHeldInserts]);
+
+  /** Scrolls to the current target. Both layouts give exact offsets, so it lands. */
+  const attemptScroll = useCallback(() => {
+    const key = scrollTarget.current;
+    if (!key) return;
+    // Looked up now, not when the jump was asked for.
+    const index = itemsRef.current.findIndex(item => item.key === key);
+    if (index < 0) {
+      settleJump();
+      return;
+    }
+    const target = offsetOf.current(index);
+    jumpOffset.current = target;
+    listRef.current?.scrollToIndex({ index, animated: false });
+    // This is the page in view now. Viewability catches up a little later,
+    // and paged modes restore this key when a held chapter goes in on landing.
+    currentRef.current = key;
+    // It has landed when a scroll event reports the target (see onScroll). If
+    // the list was already there no event comes; past the end of the content
+    // it reports a smaller offset. The timeout covers both.
+    if (Math.abs(scrollOffset.current - target) < 1) requestAnimationFrame(settleJump);
+    if (jumpTimeout.current) clearTimeout(jumpTimeout.current);
+    jumpTimeout.current = setTimeout(settleJump, JUMP_SETTLE_TIMEOUT_MS);
+  }, [settleJump]);
+
+  /** Jumps to an item by key, on the next frame unless asked otherwise. */
+  const scrollToKey = useCallback(
+    (key: string, nextFrame = true) => {
+      scrollTarget.current = key;
+      jumping.current = true;
+      if (nextFrame) requestAnimationFrame(attemptScroll);
+      else attemptScroll();
+    },
+    [attemptScroll],
+  );
 
   /** Scrolls to a page of the active chapter (used by the slider). */
   const goToPage = useCallback(
@@ -416,14 +528,9 @@ export function ReaderScreen() {
       setActivePage(clamped);
       const target = indexOfPage(items, activeUrl, clamped);
       if (target < 0) return;
-      scrollRetries.current = 0;
-      try {
-        listRef.current?.scrollToIndex({ index: target, animated: false });
-      } catch {
-        // onScrollToIndexFailed handles the rare miss.
-      }
+      scrollToKey(items[target].key, false);
     },
-    [total, items, activeUrl],
+    [total, items, activeUrl, scrollToKey],
   );
 
   // Live scrub: paged modes jump per page (snappy); the webtoon strip commits on
@@ -487,14 +594,8 @@ export function ReaderScreen() {
     const previousIndex = previousKeys.indexOf(key);
     const index = items.findIndex(item => item.key === key);
     if (previousIndex < 0 || index < 0 || previousIndex === index) return;
-    requestAnimationFrame(() => {
-      try {
-        listRef.current?.scrollToIndex({ index, animated: false });
-      } catch {
-        // onScrollToIndexFailed recovers.
-      }
-    });
-  }, [items, paged]);
+    scrollToKey(key);
+  }, [items, paged, scrollToKey]);
 
   useEffect(() => {
     const jump = pendingJump.current;
@@ -507,15 +608,8 @@ export function ReaderScreen() {
     if (target < 0) return;
     setActiveUrl(jump.url);
     setActivePage(page);
-    scrollRetries.current = 0;
-    requestAnimationFrame(() => {
-      try {
-        listRef.current?.scrollToIndex({ index: target, animated: false });
-      } catch {
-        // onScrollToIndexFailed recovers.
-      }
-    });
-  }, [loadedChapters, items, jumpRequest]);
+    scrollToKey(items[target].key);
+  }, [loadedChapters, items, jumpRequest, scrollToKey]);
 
   // Resume: position on the requested page once the opening chapter is in.
   const resumed = useRef(false);
@@ -523,23 +617,58 @@ export function ReaderScreen() {
     const wanted = params.startAtEnd ? -1 : params.initialPage ?? 0;
     if (resumed.current || items.length === 0) return;
     const entry = loadedChapters.find(l => l.chapter.url === params.chapter.url);
-    if (!entry || entry.pages.length === 0) return;
+    if (!entry) return;
     resumed.current = true;
     const page = wanted < 0 ? entry.pages.length - 1 : Math.min(wanted, entry.pages.length - 1);
     const target = indexOfPage(items, params.chapter.url, page);
-    if (target <= 0) return;
+    if (target <= 0) {
+      settleJump();
+      return;
+    }
     setActivePage(page);
+    scrollToKey(items[target].key);
+  }, [
+    items,
+    loadedChapters,
+    params.chapter.url,
+    params.initialPage,
+    params.startAtEnd,
+    scrollToKey,
+    settleJump,
+  ]);
+
+  // The strip's layout, worked out rather than measured. Pages differ wildly in
+  // height (a webtoon page can be ten screens tall), so the list's own
+  // estimates for cells it hasn't rendered swing every time a page loads, and
+  // keeping the reader's place against those swings made the strip drift.
+  // Every cell's height comes from here instead: a transition is fixed, a page
+  // is the screen width times its image's shape once known, or a placeholder
+  // shape until then. Cells render at exactly these heights.
+  const [layoutVersion, setLayoutVersion] = useState(0);
+  const layoutBumpQueued = useRef(false);
+  const onPageMeasured = useCallback(() => {
+    // Many pages can finish in one frame; relayout once.
+    if (layoutBumpQueued.current) return;
+    layoutBumpQueued.current = true;
     requestAnimationFrame(() => {
-      try {
-        listRef.current?.scrollToIndex({ index: target, animated: false });
-      } catch {
-        // onScrollToIndexFailed recovers.
-      }
+      layoutBumpQueued.current = false;
+      setLayoutVersion(v => v + 1);
     });
-  }, [items, loadedChapters, params.chapter.url, params.initialPage, params.startAtEnd]);
+  }, []);
+  const stripLayout = useMemo(
+    () => ({
+      ...buildStripLayout(items, params.sourceId, series, width, CHAPTER_TRANSITION_HEIGHT),
+      // Page shapes live outside React; this is what says they changed.
+      version: layoutVersion,
+    }),
+    [items, width, params.sourceId, series, layoutVersion],
+  );
+  offsetOf.current = paged
+    ? index => index * (horizontal ? width : height)
+    : index => stripLayout.offsets[index] ?? 0;
 
   const renderItem = useCallback(
-    ({ item }: { item: ReaderItem }) =>
+    ({ item, index }: { item: ReaderItem; index: number }) =>
       item.kind === 'transition' ? (
         <ChapterTransition
           direction={item.direction}
@@ -558,6 +687,9 @@ export function ReaderScreen() {
           page={item.page}
           width={width}
           screenHeight={height}
+          series={series}
+          stripHeight={stripLayout.lengths[index] ?? width * PLACEHOLDER_RATIO}
+          onMeasured={onPageMeasured}
           layout={paged ? 'page' : 'strip'}
           reloadToken={reloadTokens[item.key] ?? 0}
           onRetry={() => retryPage(item.key)}
@@ -573,6 +705,9 @@ export function ReaderScreen() {
       reloadTokens,
       retryPage,
       onOpenInWebView,
+      stripLayout,
+      onPageMeasured,
+      series,
     ],
   );
 
@@ -761,16 +896,47 @@ export function ReaderScreen() {
               inverted={inverted}
               pagingEnabled={paged}
               scrollEnabled={!zoomed && !pinching}
-              // Detach far-off-screen pages and keep the render window small,
-              // or every scrolled-past full-res page stays mounted and drawn
-              // and long chapters get progressively laggier.
-              removeClippedSubviews
+              // Keep the render window small, or every scrolled-past full-res
+              // page stays mounted and drawn and long chapters get
+              // progressively laggier. Paged modes also detach off-screen
+              // pages. The strip can't: Android then counts only on-screen
+              // cells, so keeping the reader's place anchors on the second
+              // visible page (or none, when one tall page fills the screen),
+              // and the strip jumps as pages around it load. Memory was the
+              // same either way when measured; it's the decoded image cache.
+              removeClippedSubviews={paged}
               windowSize={7}
               maxToRenderPerBatch={3}
               initialNumToRender={3}
               showsVerticalScrollIndicator={false}
               showsHorizontalScrollIndicator={false}
               onViewableItemsChanged={onViewable}
+              onScroll={e => {
+                const { x, y } = e.nativeEvent.contentOffset;
+                const offset = horizontal ? x : y;
+                scrollOffset.current = offset;
+                const target = jumpOffset.current;
+                if (target != null && Math.abs(offset - target) < 1) {
+                  requestAnimationFrame(settleJump);
+                }
+              }}
+              // Scrolling by hand ends any jump in progress.
+              onScrollBeginDrag={() => {
+                dragging.current = true;
+                if (jumping.current) settleJump();
+              }}
+              onScrollEndDrag={() => {
+                dragging.current = false;
+                // A fling may follow; if not, the list is still now.
+                setTimeout(releaseHeldInserts, 100);
+              }}
+              onMomentumScrollBegin={() => {
+                flinging.current = true;
+              }}
+              onMomentumScrollEnd={() => {
+                flinging.current = false;
+                releaseHeldInserts();
+              }}
               viewabilityConfig={VIEWABILITY_CONFIG}
               scrollEventThrottle={16}
               // Loading an earlier chapter prepends items; without this the
@@ -784,23 +950,12 @@ export function ReaderScreen() {
                       const size = horizontal ? width : height;
                       return { length: size, offset: size * index, index };
                     }
-                  : undefined
+                  : (_, index) => ({
+                      length: stripLayout.lengths[index] ?? 0,
+                      offset: stripLayout.offsets[index] ?? 0,
+                      index,
+                    })
               }
-              onScrollToIndexFailed={info => {
-                // Webtoon has no getItemLayout, so a jump past what's been
-                // measured misses. Step to the furthest measured page, let the
-                // list render and measure around it, then try again. Estimating
-                // from the average page height instead overshot back and forth
-                // across chapters (pages are measured as their images load),
-                // which flipped the active chapter on the way.
-                const list = listRef.current;
-                if (!list) return;
-                if (++scrollRetries.current > MAX_SCROLL_RETRIES) return;
-                list.scrollToIndex({ index: info.highestMeasuredFrameIndex, animated: false });
-                setTimeout(() => {
-                  listRef.current?.scrollToIndex({ index: info.index, animated: false });
-                }, 60);
-              }}
               ListFooterComponent={
                 paged ? null : <View style={{ height: STRIP_FOOTER_HEIGHT }} />
               }
@@ -983,40 +1138,113 @@ function ChapterTransition({
   );
 }
 
+/** How long to wait for a page's shape before rendering it with the placeholder. */
+const MEASURE_TIMEOUT_MS = 4000;
+
+/** Learns a page's shape before it's rendered. Falls back to the placeholder. */
+async function measurePage(
+  sourceId: string,
+  series: string,
+  chapterUrl: string,
+  page: PageDto,
+  offline: boolean,
+): Promise<void> {
+  const key = pageShapeKey(sourceId, chapterUrl, page.index);
+  if (hasPageShape(key)) return;
+  const image = offline
+    ? getEngine().fetchDownloadedImage(sourceId, chapterUrl, page.index)
+    : getEngine().fetchImage(sourceId, page);
+  const timeout = new Promise<null>(resolve => setTimeout(() => resolve(null), MEASURE_TIMEOUT_MS));
+  try {
+    const result = await Promise.race([image, timeout]);
+    if (result) rememberPageShape(key, series, result.width, result.height);
+  } catch {
+    // Render with the placeholder; the page measures itself when it loads.
+  }
+}
+
+/**
+ * Image each page last resolved to, so a page that leaves the render window
+ * and comes back shows straight away instead of queueing behind every other
+ * page for a file it already has. Pages remount more than one might expect:
+ * when a page above the reader grows, the list briefly lays out around the old
+ * scroll offset until the corrected one arrives.
+ */
+const resolvedImages = new Map<string, ImageFileDto>();
+const MAX_RESOLVED_IMAGES = 300;
+
+function rememberImage(key: string, image: ImageFileDto) {
+  resolvedImages.delete(key);
+  resolvedImages.set(key, image);
+  if (resolvedImages.size > MAX_RESOLVED_IMAGES) {
+    const oldest = resolvedImages.keys().next().value;
+    if (oldest !== undefined) resolvedImages.delete(oldest);
+  }
+}
+
 function ReaderPage({
   sourceId,
+  series,
   chapterUrl,
   downloaded,
   page,
   width,
   screenHeight,
+  stripHeight,
+  onMeasured,
   layout,
   reloadToken,
   onRetry,
   onOpenWebView,
 }: {
   sourceId: string;
+  series: string;
   chapterUrl: string;
   downloaded: boolean;
   page: PageDto;
   width: number;
   screenHeight: number;
+  /** This page's height in the strip, from the reader's layout model. */
+  stripHeight: number;
+  /** Called when this page's image shape is first known or changes. */
+  onMeasured: () => void;
   layout: 'strip' | 'page';
   reloadToken: number;
   onRetry: () => void;
   onOpenWebView: () => void;
 }) {
-  const [ratio, setRatio] = useState(1.5);
-  const [uri, setUri] = useState<string | null>(null);
-  const [tiles, setTiles] = useState<ImageTileDto[]>([]);
+  const key = pageShapeKey(sourceId, chapterUrl, page.index);
+  const [uri, setUri] = useState<string | null>(() => resolvedImages.get(key)?.uri ?? null);
+  const [tiles, setTiles] = useState<ImageTileDto[]>(() => {
+    const image = resolvedImages.get(key);
+    return image ? sortTiles(image) : [];
+  });
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Bumped when a remembered file turns out to be gone, to fetch it again.
+  const [stale, setStale] = useState(0);
+  const measured = useCallback(
+    (w?: number, h?: number) => {
+      if (rememberPageShape(key, series, w, h)) onMeasured();
+    },
+    [key, series, onMeasured],
+  );
+  const onImageError = useCallback(() => {
+    if (!resolvedImages.delete(key)) return;
+    setStale(n => n + 1);
+  }, [key]);
 
   useEffect(() => {
     let cancelled = false;
+    const known = reloadToken > 0 ? undefined : resolvedImages.get(key);
+    if (known) {
+      setUri(known.uri);
+      setTiles(sortTiles(known));
+      setLoadError(null);
+      return;
+    }
     setUri(null);
     setTiles([]);
     setLoadError(null);
-    setRatio(1.5);
 
     const request = downloaded
       ? getEngine().fetchDownloadedImage(sourceId, chapterUrl, page.index)
@@ -1024,6 +1252,10 @@ function ReaderPage({
     request
       .then(image => {
         if (!cancelled) {
+          // Size the cell from the decoded dimensions in the same render that
+          // shows the image, instead of one placeholder-sized frame later.
+          measured(image.width, image.height);
+          rememberImage(key, image);
           setUri(image.uri);
           setTiles(sortTiles(image));
         }
@@ -1035,7 +1267,7 @@ function ReaderPage({
     return () => {
       cancelled = true;
     };
-  }, [page, sourceId, chapterUrl, downloaded, reloadToken]);
+  }, [page, sourceId, chapterUrl, downloaded, reloadToken, measured, key, stale]);
 
   if (layout === 'page') {
     return (
@@ -1048,6 +1280,7 @@ function ReaderPage({
             style={{ width, height: screenHeight }}
             resizeMode="contain"
             resizeMethod="scale"
+            onError={onImageError}
           />
         ) : loadError ? (
           <ReaderImageError message={loadError} onRetry={onRetry} onOpenWebView={onOpenWebView} />
@@ -1059,10 +1292,12 @@ function ReaderPage({
   }
 
   if (tiles.length > 0) {
+    // Split the model's height between the tiles so they add up to it exactly.
+    const tilesHeight = tiles.reduce((sum, tile) => sum + tile.height, 0) || 1;
     return (
-      <View style={{ width, backgroundColor: '#0a0a0a' }}>
+      <View style={{ width, height: stripHeight, backgroundColor: '#0a0a0a' }}>
         {tiles.map(tile => {
-          const height = Math.max(1, Math.round((width * tile.height) / tile.width));
+          const height = (stripHeight * tile.height) / tilesHeight;
           return (
             <Image
               key={`${page.index}:${tile.index}`}
@@ -1070,6 +1305,7 @@ function ReaderPage({
               style={{ width, height }}
               resizeMode="stretch"
               resizeMethod="scale"
+              onError={onImageError}
             />
           );
         })}
@@ -1079,18 +1315,22 @@ function ReaderPage({
 
   return (
     <View
-      style={{ width, height: width * ratio, backgroundColor: '#0a0a0a', justifyContent: 'center' }}
+      style={{ width, height: stripHeight, backgroundColor: '#0a0a0a', justifyContent: 'center' }}
     >
       {uri ? (
         <Image
           source={{ uri }}
-          style={{ width, height: width * ratio }}
+          style={{ width, height: stripHeight }}
           resizeMode="contain"
           resizeMethod="scale"
           onLoad={e => {
+            // The fetch already reported the full-size dimensions; this is
+            // for results that came back without them.
+            if (hasPageShape(key)) return;
             const { width: w, height: h } = e.nativeEvent.source;
-            if (w && h) setRatio(h / w);
+            measured(w, h);
           }}
+          onError={onImageError}
         />
       ) : loadError ? (
         <ReaderImageError message={loadError} onRetry={onRetry} onOpenWebView={onOpenWebView} />
