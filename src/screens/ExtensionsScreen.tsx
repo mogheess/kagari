@@ -15,6 +15,7 @@ import { useTheme } from '../theme/ThemeProvider';
 import { getEngine } from '../engine';
 import { refreshSources } from '../sources/sourcesStore';
 import { Icon } from '../components/Icon';
+import { ExtensionIcon } from '../components/ExtensionIcon';
 import {
   computeExtensionUpdates,
   getExtensionUpdates,
@@ -227,6 +228,13 @@ export function ExtensionsScreen() {
     [installedExts],
   );
 
+  // Repo icons for installed rows whose APK icon couldn't be rendered natively.
+  const repoIcons = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of available) if (a.iconUrl) m.set(a.pkg, a.iconUrl);
+    return m;
+  }, [available]);
+
   // Installed extensions whose repo has a newer version.
   const extUpdates = useMemo(
     () => computeExtensionUpdates(installedExts, available),
@@ -264,8 +272,8 @@ export function ExtensionsScreen() {
 
   // Drives FlatList row re-renders when install state or in-flight pkg changes.
   const listExtra = useMemo(
-    () => ({ installedPkgs, busyPkg, failedPkgs, updatesByPkg, orphanedPkgs }),
-    [installedPkgs, busyPkg, failedPkgs, updatesByPkg, orphanedPkgs],
+    () => ({ installedPkgs, busyPkg, failedPkgs, updatesByPkg, orphanedPkgs, repoIcons }),
+    [installedPkgs, busyPkg, failedPkgs, updatesByPkg, orphanedPkgs, repoIcons],
   );
 
   // Language chips, most common first.
@@ -502,11 +510,7 @@ export function ExtensionsScreen() {
       <View
         style={[styles.extRow, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
       >
-        <View style={[styles.extIcon, { backgroundColor: theme.colors.elevated }]}>
-          <Text style={{ color: theme.colors.textMuted, fontWeight: '800', fontSize: 15 }}>
-            {ext.name.charAt(0).toUpperCase()}
-          </Text>
-        </View>
+        <ExtensionIcon uri={ext.iconUrl} name={ext.name} />
         <View style={{ flex: 1 }}>
           <Text numberOfLines={1} style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
             {ext.name}
@@ -566,9 +570,7 @@ export function ExtensionsScreen() {
       <View
         style={[styles.extRow, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
       >
-        <View style={[styles.extIcon, { backgroundColor: theme.colors.elevated }]}>
-          <Icon name="book" size={18} color={theme.colors.textMuted} />
-        </View>
+        <ExtensionIcon uri={ext.iconUrl ?? repoIcons.get(ext.pkg)} name={ext.name} />
         <View style={{ flex: 1 }}>
           <Text numberOfLines={1} style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
             {ext.name}
@@ -794,13 +796,6 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
     marginBottom: 10,
-  },
-  extIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   installBtn: {
     minWidth: 78,
