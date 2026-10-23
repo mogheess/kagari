@@ -196,6 +196,8 @@ function fromLegacyJson(
     pkg: raw.pkg,
     apk: raw.apk,
     apkUrl: `${repoBaseDir(indexUrl)}apk/${raw.apk}`,
+    // The JSON index has no icon field; repos publish them next to the APKs.
+    iconUrl: `${repoBaseDir(indexUrl)}icon/${raw.pkg}.png`,
     lang: raw.lang,
     versionName: raw.version,
     versionCode: raw.code,

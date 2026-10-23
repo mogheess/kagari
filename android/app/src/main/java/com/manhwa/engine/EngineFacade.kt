@@ -30,6 +30,7 @@ import com.manhwa.engine.dto.MangaDto
 import com.manhwa.engine.dto.MangasPageDto
 import com.manhwa.engine.dto.PageDto
 import com.manhwa.engine.dto.StorageLocationDto
+import com.manhwa.engine.loader.ExtensionIcons
 import com.manhwa.engine.storage.DownloadNaming
 import com.manhwa.engine.storage.StorageManager
 import com.manhwa.engine.dto.SourceDto
@@ -92,9 +93,12 @@ class EngineFacade(context: Context) {
         if (extensions.isEmpty()) reload()
     }
 
+    private val extensionIcons by lazy { ExtensionIcons(appContext) }
+
     fun listExtensions(): List<ExtensionDto> {
         ensureLoaded()
         return extensions.map { ext ->
+            val icon = extensionIcons.uriFor(ext.pkg, ext.versionCode)
             ExtensionDto(
                 pkg = ext.pkg,
                 name = ext.name,
@@ -104,7 +108,8 @@ class EngineFacade(context: Context) {
                 lang = ext.lang,
                 isNsfw = ext.isNsfw,
                 trusted = ext.trusted,
-                sources = ext.sources.map { Mappers.sourceToDto(it, ext.pkg, ext.isNsfw) },
+                sources = ext.sources.map { Mappers.sourceToDto(it, ext.pkg, ext.isNsfw, icon) },
+                iconUrl = icon,
             )
         }
     }
@@ -112,7 +117,8 @@ class EngineFacade(context: Context) {
     fun listSources(): List<SourceDto> {
         ensureLoaded()
         return extensions.flatMap { ext ->
-            ext.sources.map { Mappers.sourceToDto(it, ext.pkg, ext.isNsfw) }
+            val icon = extensionIcons.uriFor(ext.pkg, ext.versionCode)
+            ext.sources.map { Mappers.sourceToDto(it, ext.pkg, ext.isNsfw, icon) }
         }
     }
 

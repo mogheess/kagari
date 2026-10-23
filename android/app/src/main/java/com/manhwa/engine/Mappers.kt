@@ -17,7 +17,7 @@ import eu.kanade.tachiyomi.source.model.SManga
 /** Maps Tachiyomi source-api model objects into our JSON DTOs. */
 object Mappers {
 
-    fun sourceToDto(source: Source, extensionPkg: String, isNsfw: Boolean): SourceDto {
+    fun sourceToDto(source: Source, extensionPkg: String, isNsfw: Boolean, iconUrl: String? = null): SourceDto {
         val catalogue = source as? CatalogueSource
         val http = source as? eu.kanade.tachiyomi.source.online.HttpSource
         return SourceDto(
@@ -27,6 +27,7 @@ object Mappers {
             supportsLatest = catalogue?.supportsLatest ?: false,
             isNsfw = isNsfw,
             extensionPkg = extensionPkg,
+            iconUrl = iconUrl,
             baseUrl = http?.baseUrl,
         )
     }
