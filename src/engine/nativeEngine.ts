@@ -50,6 +50,7 @@ interface ManhwaEngineNative {
   fetchCover(sourceId: string, url: string): Promise<string>;
   downloadPage(sourceId: string, chapterUrl: string, pageJson: string, metaJson: string | null): Promise<string>;
   migrateDownloadedChapter?(sourceId: string, chapterUrl: string, metaJson: string): Promise<string>;
+  getDownloadedSizes?(keysJson: string): Promise<string>;
   getStorageLocation?(): Promise<string>;
   pickStorageLocation?(): Promise<string | null>;
   clearStorageLocation?(): Promise<void>;
@@ -177,6 +178,11 @@ export function createNativeEngine(): Engine | null {
         JSON.stringify(page),
         meta ? JSON.stringify(meta) : null,
       );
+    },
+    async getDownloadedSizes(keys) {
+      if (keys.length === 0) return [];
+      if (typeof Native.getDownloadedSizes !== 'function') return keys.map(() => 0);
+      return parse<number[]>(await Native.getDownloadedSizes(JSON.stringify(keys)));
     },
     async migrateDownloadedChapter(sourceId, chapterUrl, meta) {
       if (typeof Native.migrateDownloadedChapter !== 'function') return 0;

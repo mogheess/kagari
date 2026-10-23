@@ -22,6 +22,7 @@ import androidx.annotation.RequiresApi
 import androidx.core.content.FileProvider
 import com.manhwa.engine.dto.ChapterDto
 import com.manhwa.engine.dto.ExtensionDto
+import com.manhwa.engine.dto.ChapterKeyDto
 import com.manhwa.engine.dto.DownloadMetaDto
 import com.manhwa.engine.dto.ImageFileDto
 import com.manhwa.engine.dto.ImageTileDto
@@ -595,6 +596,24 @@ class EngineFacade(context: Context) {
             contentType = null,
             tiles = tiles,
         )
+    }
+
+    /**
+     * Bytes on disk for each chapter, in the order given; 0 when nothing is
+     * downloaded. Counts both homes, since a chapter can be half-moved. Under a
+     * picked folder every file length is a provider query, so callers batch and
+     * cache rather than asking per row.
+     */
+    fun downloadedSizes(keys: List<ChapterKeyDto>): List<Long> = keys.map { key ->
+        val external = storage.rememberedChapterDir(key.sourceId, key.chapterUrl)
+            ?.listFiles()
+            ?.sumOf { if (it.isFile) it.length() else 0L }
+            ?: 0L
+        val internal = internalChapterDir(key.sourceId, key.chapterUrl)
+            .listFiles()
+            ?.sumOf { if (it.isFile) it.length() else 0L }
+            ?: 0L
+        external + internal
     }
 
     /** Removes all downloaded pages for a chapter, wherever they live. */

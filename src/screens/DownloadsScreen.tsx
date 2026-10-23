@@ -1,68 +1,156 @@
-import React from 'react';
-import { View, Text, Pressable, StyleSheet, FlatList, Alert } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { View, Text, Pressable, StyleSheet, FlatList, Alert, ScrollView, TextInput } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme } from '../theme/ThemeProvider';
 import { Icon } from '../components/Icon';
 import { RemoteImage } from '../components/RemoteImage';
-import { useDownloads, removeDownload, type DownloadEntry } from '../library/downloads';
+import { OptionSheet, type SheetOption } from '../components/OptionSheet';
+import { useDownloads, removeDownload } from '../library/downloads';
 import { useStorageLocation, describeStorageLocation } from '../library/storageLocation';
+import {
+  arrangeGroups,
+  formatBytes,
+  groupByManga,
+  type DownloadGroup,
+  type DownloadSort,
+  type DownloadStatusFilter,
+} from '../library/downloadsArrange';
+import { useDownloadsView, setDownloadsView, resetDownloadsFilters } from '../library/downloadsView';
+import { useGroupSizes } from '../library/downloadSizes';
+import { useSources } from '../sources/sourcesStore';
 import type { RootStackParamList } from '../navigation/types';
 import type { MangaDto, MangaStatus } from '../engine/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-/** All downloaded/queued chapters of a single manga, grouped together. */
-interface MangaGroup {
-  sourceId: string;
-  mangaUrl: string;
-  title: string;
-  thumbnailUrl?: string;
-  chapters: DownloadEntry[];
-  done: number;
-  active: number;
-  errored: number;
-  latest: number;
-}
+const SORTS: readonly SheetOption<DownloadSort>[] = [
+  { value: 'recent', label: 'Recently downloaded' },
+  { value: 'title', label: 'Title' },
+  { value: 'source', label: 'Source' },
+  { value: 'chapters', label: 'Most chapters' },
+  { value: 'size', label: 'Size on disk' },
+];
 
-function groupByManga(entries: DownloadEntry[]): MangaGroup[] {
-  const map = new Map<string, MangaGroup>();
-  for (const e of entries) {
-    const key = `${e.sourceId}:${e.mangaUrl}`;
-    let g = map.get(key);
-    if (!g) {
-      g = {
-        sourceId: e.sourceId,
-        mangaUrl: e.mangaUrl,
-        title: e.title,
-        thumbnailUrl: e.thumbnailUrl,
-        chapters: [],
-        done: 0,
-        active: 0,
-        errored: 0,
-        latest: 0,
-      };
-      map.set(key, g);
-    }
-    g.chapters.push(e);
-    if (e.status === 'done') g.done += 1;
-    else if (e.status === 'error') g.errored += 1;
-    else g.active += 1;
-    g.latest = Math.max(g.latest, e.createdAt);
-  }
-  return [...map.values()].sort(
-    (a, b) => b.active - a.active || b.errored - a.errored || b.latest - a.latest,
-  );
-}
+const STATUS_CHIPS: readonly { value: DownloadStatusFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'active', label: 'Downloading' },
+  { value: 'failed', label: 'Failed' },
+  { value: 'done', label: 'Done' },
+];
 
 export function DownloadsScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const downloads = useDownloads();
-  const groups = groupByManga(downloads);
   const location = useStorageLocation();
+  const view = useDownloadsView();
+  const sources = useSources();
+  const [query, setQuery] = useState('');
+  const [sheet, setSheet] = useState<'sort' | 'source' | null>(null);
+
+  const groups = useMemo(() => groupByManga(downloads), [downloads]);
+  const sizes = useGroupSizes(groups);
+  const sourceNames = useMemo(() => new Map(sources.map(s => [s.id, s.name])), [sources]);
+
+  // A saved source filter for a source with nothing downloaded any more would
+  // hide everything with no visible reason; treat it as "all".
+  const sourceFilter = view.sourceId && groups.some(g => g.sourceId === view.sourceId) ? view.sourceId : null;
+
+  const shown = useMemo(
+    () =>
+      arrangeGroups(groups, {
+        sort: view.sort,
+        status: view.status,
+        sourceId: sourceFilter,
+        query,
+        sourceNames,
+        sizes,
+      }),
+    [groups, view.sort, view.status, sourceFilter, query, sourceNames, sizes],
+  );
+
+  const statusCounts = useMemo(() => {
+    const counts: Record<DownloadStatusFilter, number> = { all: groups.length, active: 0, failed: 0, done: 0 };
+    for (const g of groups) {
+      if (g.active > 0) counts.active += 1;
+      if (g.errored > 0) counts.failed += 1;
+      if (g.done === g.chapters.length) counts.done += 1;
+    }
+    return counts;
+  }, [groups]);
+
+  const sourceOptions = useMemo<SheetOption<string | null>[]>(() => {
+    const perSource = new Map<string, number>();
+    for (const g of groups) perSource.set(g.sourceId, (perSource.get(g.sourceId) ?? 0) + 1);
+    const opts = [...perSource.entries()]
+      .map(([id, count]) => ({ value: id as string | null, label: sourceNames.get(id) ?? 'Source not installed', hint: String(count) }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    return [{ value: null, label: 'All sources', hint: String(groups.length) }, ...opts];
+  }, [groups, sourceNames]);
+
+  const sortLabel = SORTS.find(o => o.value === view.sort)?.label ?? 'Recently downloaded';
+  const sourceLabel = sourceFilter ? sourceNames.get(sourceFilter) ?? 'Source not installed' : 'All sources';
+  const filtering = view.status !== 'all' || sourceFilter != null || query.trim() !== '';
+
+  const chip = (label: string, active: boolean, onPress: () => void, withCaret = false) => (
+    <Pressable
+      key={label}
+      onPress={onPress}
+      style={[
+        styles.chip,
+        active
+          ? { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent }
+          : { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+      ]}
+    >
+      <Text style={{ color: active ? theme.colors.onAccent : theme.colors.text, fontSize: 12.5, fontWeight: '600' }}>
+        {label}
+      </Text>
+      {withCaret ? (
+        <Icon name="chevronDown" size={13} color={active ? theme.colors.onAccent : theme.colors.textMuted} />
+      ) : null}
+    </Pressable>
+  );
+
+  const toolbar =
+    groups.length > 0 ? (
+      <View style={{ marginBottom: 12 }}>
+        <Text numberOfLines={1} style={{ color: theme.colors.textFaint, fontSize: 12, marginBottom: 10 }}>
+          {`Saved to ${describeStorageLocation(location)}`}
+        </Text>
+        <View style={[styles.search, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+          <Icon name="search" size={16} color={theme.colors.textMuted} />
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Search downloads"
+            placeholderTextColor={theme.colors.textFaint}
+            style={[styles.searchInput, { color: theme.colors.text }]}
+            autoCorrect={false}
+            returnKeyType="search"
+          />
+          {query ? (
+            <Pressable hitSlop={8} onPress={() => setQuery('')}>
+              <Icon name="close" size={16} color={theme.colors.textMuted} />
+            </Pressable>
+          ) : null}
+        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+          {chip(sortLabel, false, () => setSheet('sort'), true)}
+          {STATUS_CHIPS.map(c =>
+            chip(
+              c.value === 'all' ? c.label : `${c.label} ${statusCounts[c.value]}`,
+              view.status === c.value,
+              () => setDownloadsView({ status: c.value }),
+            ),
+          )}
+          {sourceOptions.length > 2 ? chip(sourceLabel, sourceFilter != null, () => setSheet('source'), true) : null}
+        </ScrollView>
+      </View>
+    ) : null;
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
@@ -75,35 +163,46 @@ export function DownloadsScreen() {
       </View>
 
       <FlatList
-        data={groups}
-        keyExtractor={g => `${g.sourceId}:${g.mangaUrl}`}
+        data={shown}
+        keyExtractor={g => g.key}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ padding: theme.spacing.lg, paddingTop: 12 }}
-        ListHeaderComponent={
-          groups.length > 0 ? (
-            <Text
-              numberOfLines={1}
-              style={{ color: theme.colors.textFaint, fontSize: 12, marginBottom: 12 }}
-            >
-              {`Saved to ${describeStorageLocation(location)}`}
-            </Text>
-          ) : null
-        }
+        ListHeaderComponent={toolbar}
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <View style={[styles.emptyIcon, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-              <Icon name="download" size={26} color={theme.colors.textMuted} />
+          groups.length > 0 && filtering ? (
+            <View style={[styles.empty, { paddingTop: 48 }]}>
+              <Text style={[theme.typography.heading, { color: theme.colors.text }]}>Nothing matches</Text>
+              <Text style={{ color: theme.colors.textMuted, fontSize: 13.5, textAlign: 'center', marginTop: 6 }}>
+                No downloads match these filters.
+              </Text>
+              <Pressable
+                onPress={() => {
+                  setQuery('');
+                  resetDownloadsFilters();
+                }}
+                style={[styles.clearBtn, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}
+              >
+                <Text style={{ color: theme.colors.text, fontWeight: '700' }}>Clear filters</Text>
+              </Pressable>
             </View>
-            <Text style={[theme.typography.heading, { color: theme.colors.text, marginTop: 16 }]}>
-              No downloads yet
-            </Text>
-            <Text style={{ color: theme.colors.textMuted, fontSize: 13.5, textAlign: 'center', marginTop: 6, lineHeight: 20 }}>
-              Tap the download icon next to a chapter to save it for offline reading.
-            </Text>
-          </View>
+          ) : (
+            <View style={styles.empty}>
+              <View style={[styles.emptyIcon, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+                <Icon name="download" size={26} color={theme.colors.textMuted} />
+              </View>
+              <Text style={[theme.typography.heading, { color: theme.colors.text, marginTop: 16 }]}>
+                No downloads yet
+              </Text>
+              <Text style={{ color: theme.colors.textMuted, fontSize: 13.5, textAlign: 'center', marginTop: 6, lineHeight: 20 }}>
+                Tap the download icon next to a chapter to save it for offline reading.
+              </Text>
+            </View>
+          )
         }
         renderItem={({ item }) => (
           <MangaGroupRow
             group={item}
+            size={sizes.get(item.key)}
             onOpen={() =>
               navigation.navigate('MangaDetail', {
                 sourceId: item.sourceId,
@@ -114,11 +213,28 @@ export function DownloadsScreen() {
           />
         )}
       />
+
+      <OptionSheet
+        visible={sheet === 'sort'}
+        title="Sort by"
+        options={SORTS}
+        selected={view.sort}
+        onSelect={value => setDownloadsView({ sort: value })}
+        onClose={() => setSheet(null)}
+      />
+      <OptionSheet
+        visible={sheet === 'source'}
+        title="Source"
+        options={sourceOptions}
+        selected={sourceFilter}
+        onSelect={value => setDownloadsView({ sourceId: value })}
+        onClose={() => setSheet(null)}
+      />
     </View>
   );
 }
 
-function groupToManga(g: MangaGroup): MangaDto {
+function groupToManga(g: DownloadGroup): MangaDto {
   return {
     sourceId: g.sourceId,
     url: g.mangaUrl,
@@ -130,7 +246,7 @@ function groupToManga(g: MangaGroup): MangaDto {
   };
 }
 
-function MangaGroupRow({ group, onOpen }: { group: MangaGroup; onOpen: () => void }) {
+function MangaGroupRow({ group, size, onOpen }: { group: DownloadGroup; size?: number; onOpen: () => void }) {
   const theme = useTheme();
   const total = group.chapters.length;
 
@@ -145,6 +261,7 @@ function MangaGroupRow({ group, onOpen }: { group: MangaGroup; onOpen: () => voi
   } else {
     subtitle = `${total} ${total === 1 ? 'chapter' : 'chapters'} \u00B7 Saved offline`;
   }
+  if (size != null && size > 0) subtitle += ` \u00B7 ${formatBytes(size)}`;
 
   const pct = total > 0 ? Math.round((group.done / total) * 100) : 0;
 
@@ -243,6 +360,40 @@ const styles = StyleSheet.create({
     height: 34,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  search: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    height: 40,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    paddingVertical: 0,
+  },
+  chips: {
+    gap: 8,
+    paddingTop: 10,
+  },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    height: 32,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  clearBtn: {
+    marginTop: 16,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   empty: {
     alignItems: 'center',
