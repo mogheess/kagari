@@ -1,5 +1,5 @@
 /**
- * Draggable scrollbar thumb for a long `ScrollView`.
+ * Draggable scrollbar thumb for a long list.
  *
  * A chapter list runs to several hundred rows, so reaching the far end by
  * swiping takes many flings. Dragging this thumb maps directly onto the scroll
@@ -17,13 +17,14 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { Animated, StyleSheet, View, type ScrollView } from 'react-native';
+import { Animated, StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useTheme } from '../theme/ThemeProvider';
 import { thumbTopForDrag } from './fastScrollerMath';
 
 interface Props {
-  scrollRef: React.RefObject<ScrollView | null>;
+  /** Scrolls the list to an absolute offset (no animation). */
+  scrollTo: (y: number) => void;
   /** Total scrollable content height, from `onContentSizeChange`. */
   contentHeight: number;
   /** Visible height of the scroll view, from `onLayout`. */
@@ -47,7 +48,7 @@ const FADE_OUT_DELAY = 1400;
 
 export const FastScroller = forwardRef<FastScrollerHandle, Props>(function FastScrollerComponent(
   {
-    scrollRef,
+    scrollTo,
     contentHeight,
     viewportHeight,
     topInset = 0,
@@ -74,7 +75,7 @@ export const FastScroller = forwardRef<FastScrollerHandle, Props>(function FastS
   const enabled = viewportHeight > 0 && contentHeight > viewportHeight * MIN_OVERFLOW_RATIO;
 
   // Where the thumb sits for the current scroll offset. While dragging, the
-  // ScrollView's own onScroll drives this, so the thumb tracks the finger
+  // list's own onScroll drives this, so the thumb tracks the finger
   // without a second source of truth.
   const thumbTop = maxScroll > 0 ? (scrollY / maxScroll) * travel : 0;
 
@@ -112,6 +113,8 @@ export const FastScroller = forwardRef<FastScrollerHandle, Props>(function FastS
   // Ref mirrors so the gesture (created once) always reads live geometry.
   const geometry = useRef({ travel, maxScroll, thumbTop });
   geometry.current = { travel, maxScroll, thumbTop };
+  const scrollToRef = useRef(scrollTo);
+  scrollToRef.current = scrollTo;
 
   // A gesture-handler Pan rather than a PanResponder: under the app's
   // GestureHandlerRootView the PanResponder was cancelled right after it was
@@ -132,13 +135,13 @@ export const FastScroller = forwardRef<FastScrollerHandle, Props>(function FastS
           // translationY is cumulative from the start of the drag, so it's
           // applied to the thumb position captured then, not the live one.
           const next = thumbTopForDrag(dragStartTop.current, e.translationY, t);
-          scrollRef.current?.scrollTo({ y: (next / t) * m, animated: false });
+          scrollToRef.current((next / t) * m);
         })
         .onFinalize(() => {
           setDragging(false);
           scheduleHide();
         }),
-    [scrollRef, show, scheduleHide],
+    [show, scheduleHide],
   );
 
   if (!enabled) return null;

@@ -3,6 +3,9 @@ import {
   View,
   Text,
   ScrollView,
+  FlatList,
+  type ListRenderItem,
+  type LayoutChangeEvent,
   Pressable,
   StyleSheet,
   ActivityIndicator,
@@ -144,7 +147,10 @@ export function MangaDetailScreen() {
   const selecting = selected.size > 0;
 
   // Geometry for the fast-scroll thumb.
-  const scrollRef = useRef<ScrollView | null>(null);
+  const listRef = useRef<FlatList<ChapterDto> | null>(null);
+  const scrollListTo = useCallback((y: number) => {
+    listRef.current?.scrollToOffset({ offset: y, animated: false });
+  }, []);
   const fastScrollerRef = useRef<FastScrollerHandle | null>(null);
   const [contentHeight, setContentHeight] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
@@ -524,10 +530,68 @@ export function MangaDetailScreen() {
     [manga, chapters],
   );
 
+  // Rows get stable handlers so a selection change only re-renders the rows
+  // whose props changed, not every mounted row.
+  const rowHandlers = useRef({ press: onChapterPress, longPress: onChapterLongPress });
+  rowHandlers.current = { press: onChapterPress, longPress: onChapterLongPress };
+  const onRowPress = useCallback((ch: ChapterDto) => rowHandlers.current.press(ch), []);
+  const onRowLongPress = useCallback((ch: ChapterDto) => rowHandlers.current.longPress(ch), []);
+
+  // Without getItemLayout a FlatList only sizes itself up to the last row it
+  // has measured, so the fast-scroll thumb would see a fraction of the list.
+  // Rows are one fixed height (single-line text), measured from the first.
+  const [headerHeight, setHeaderHeight] = useState(0);
+  const [rowHeight, setRowHeight] = useState(0);
+  const onFirstRowLayout = useCallback((e: LayoutChangeEvent) => {
+    const h = e.nativeEvent.layout.height;
+    setRowHeight(prev => (Math.abs(prev - h) < 0.5 ? prev : h));
+  }, []);
+  const getChapterLayout = useMemo(
+    () =>
+      rowHeight > 0
+        ? (_data: ArrayLike<ChapterDto> | null | undefined, index: number) => ({
+            length: rowHeight,
+            offset: headerHeight + rowHeight * index,
+            index,
+          })
+        : undefined,
+    [rowHeight, headerHeight],
+  );
+
+  const renderChapter = useCallback<ListRenderItem<ChapterDto>>(
+    ({ item, index }) => (
+      <ChapterRow
+        onLayout={index === 0 ? onFirstRowLayout : undefined}
+        chapter={item}
+        progress={progressMap[chapterKey(params.sourceId, item.url)]}
+        picked={selected.has(item.url)}
+        selecting={selecting}
+        manga={manga}
+        onPress={onRowPress}
+        onLongPress={onRowLongPress}
+      />
+    ),
+    [progressMap, params.sourceId, selected, selecting, manga, onRowPress, onRowLongPress, onFirstRowLayout],
+  );
+  const rowExtra = useMemo(
+    () => ({ progressMap, selected, manga }),
+    [progressMap, selected, manga],
+  );
+
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
-      <ScrollView
-        ref={scrollRef}
+      <FlatList
+        ref={listRef}
+        data={displayedChapters}
+        keyExtractor={chapterRowKey}
+        renderItem={renderChapter}
+        getItemLayout={getChapterLayout}
+        extraData={rowExtra}
+        // A few hundred rows is common and thousands happen (long-running
+        // manhua); only mount what's near the viewport.
+        initialNumToRender={14}
+        maxToRenderPerBatch={20}
+        windowSize={9}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 40 }}
         scrollEventThrottle={16}
@@ -544,258 +608,203 @@ export function MangaDetailScreen() {
             progressViewOffset={insets.top + 28}
           />
         }
-      >
-        {/* Backdrop */}
-        <View style={{ height: backdropHeight }}>
-          {manga?.thumbnailUrl ? (
-            <RemoteImage
-              uri={manga.thumbnailUrl}
-              sourceId={params.sourceId}
-              blurRadius={28}
-              style={StyleSheet.absoluteFill}
-              resizeMode="cover"
-            />
-          ) : null}
-          <LinearGradient
-            colors={[withAlpha(tint, 0.2), 'transparent', theme.colors.bg]}
-            locations={[0, 0.45, 1]}
-            style={StyleSheet.absoluteFill}
-          />
+        ListHeaderComponent={
+          <View onLayout={e => setHeaderHeight(e.nativeEvent.layout.height)}>
+            {/* Backdrop */}
+            <View style={{ height: backdropHeight }}>
+              {manga?.thumbnailUrl ? (
+                <RemoteImage
+                  uri={manga.thumbnailUrl}
+                  sourceId={params.sourceId}
+                  blurRadius={28}
+                  style={StyleSheet.absoluteFill}
+                  resizeMode="cover"
+                />
+              ) : null}
+              <LinearGradient
+                colors={[withAlpha(tint, 0.2), 'transparent', theme.colors.bg]}
+                locations={[0, 0.45, 1]}
+                style={StyleSheet.absoluteFill}
+              />
 
-          <Pressable
-            onPress={() => navigation.goBack()}
-            style={[styles.backBtn, { top: insets.top + 6, backgroundColor: theme.colors.scrim }]}
-          >
-            <Icon name="back" size={22} color={theme.colors.text} />
-          </Pressable>
-        </View>
-
-        {/* Header block */}
-        <View style={[styles.headerRow, { marginTop: -backdropHeight * 0.42 }]}>
-          {manga?.thumbnailUrl ? (
-            <RemoteImage
-              uri={manga.thumbnailUrl}
-              sourceId={params.sourceId}
-              style={[styles.cover, { borderColor: theme.colors.border }]}
-              fallback={<Skeleton width={108} height={158} radius={12} />}
-            />
-          ) : (
-            <Skeleton width={108} height={158} radius={12} />
-          )}
-          <View style={styles.headerMeta}>
-            <Text numberOfLines={3} style={[theme.typography.title, { color: theme.colors.text }]}>
-              {manga?.title ?? 'Loading\u2026'}
-            </Text>
-            {manga?.author ? (
-              <Text style={{ color: theme.colors.textMuted, marginTop: 4 }}>{manga.author}</Text>
-            ) : null}
-            {manga?.status ? (
-              <View style={[styles.statusPill, { borderColor: theme.colors.border }]}>
-                <View style={[styles.dot, { backgroundColor: theme.colors.accent }]} />
-                <Text style={{ color: theme.colors.textMuted, fontSize: 12, fontWeight: '600' }}>
-                  {cap(manga.status)}
-                </Text>
-              </View>
-            ) : null}
-          </View>
-        </View>
-
-        {/* Genres */}
-        {manga?.genres?.length ? (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.genres}
-          >
-            {manga.genres.map(g => (
-              <View key={g} style={[styles.genreChip, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-                <Text style={{ color: theme.colors.textMuted, fontSize: 12.5 }}>{g}</Text>
-              </View>
-            ))}
-          </ScrollView>
-        ) : null}
-
-        {/* Actions */}
-        <View style={styles.actions}>
-          <Pressable
-            onPress={() => resume && openReader(resume.chapter, resume.page)}
-            style={({ pressed }) => [styles.primaryBtn, { backgroundColor: theme.colors.accent, opacity: pressed ? 0.9 : 1 }]}
-          >
-            <Icon name="book" size={18} color={theme.colors.onAccent} />
-            <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 15 }}>
-              {resume?.resuming ? 'Resume' : 'Start reading'}
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={() => {
-              if (!manga) return;
-              if (favorited) {
-                toggleFavorite(manga);
-              } else {
-                addToLibrary();
-              }
-            }}
-            onLongPress={() => favorited && setCatSheet(true)}
-            style={[
-              styles.secondaryBtn,
-              {
-                borderColor: favorited ? theme.colors.accent : theme.colors.border,
-                backgroundColor: favorited ? withAlpha(theme.colors.accent, 0.14) : 'transparent',
-              },
-            ]}
-          >
-            <Icon
-              name="bookmark"
-              size={18}
-              color={favorited ? theme.colors.accent : theme.colors.text}
-              filled={favorited}
-            />
-          </Pressable>
-        </View>
-
-        {favorited ? (
-          <Pressable onPress={() => setCatSheet(true)} style={styles.catRow}>
-            <Icon name="bookmark" size={14} color={theme.colors.textMuted} />
-            <Text style={{ color: theme.colors.textMuted, fontSize: 13, flex: 1 }} numberOfLines={1}>
-              {assignedNames.length > 0 ? assignedNames.join(', ') : 'Add to category'}
-            </Text>
-            <Icon name="chevronRight" size={15} color={theme.colors.textFaint} />
-          </Pressable>
-        ) : null}
-
-        {/* Source attribution + actions (open in browser / migrate) */}
-        <Pressable onPress={() => setSourceSheet(true)} style={styles.catRow}>
-          <Icon name="globe" size={14} color={theme.colors.textMuted} />
-          <Text style={{ color: theme.colors.textMuted, fontSize: 13, flex: 1 }} numberOfLines={1}>
-            {sourceName ? `Source: ${sourceName}` : 'Source options'}
-          </Text>
-          <Icon name="chevronRight" size={15} color={theme.colors.textFaint} />
-        </Pressable>
-
-        {/* Description */}
-        {manga?.description ? (
-          <Pressable onPress={() => setExpanded(e => !e)} style={styles.descWrap}>
-            <Text
-              numberOfLines={expanded ? undefined : 3}
-              style={[theme.typography.body, { color: theme.colors.textMuted }]}
-            >
-              {manga.description}
-            </Text>
-            <Icon name={expanded ? 'chevronDown' : 'chevronRight'} size={16} color={theme.colors.textFaint} />
-          </Pressable>
-        ) : null}
-
-        {/* Chapters */}
-        <View style={styles.chaptersHeader}>
-          <Text style={[theme.typography.heading, { color: theme.colors.text }]}>
-            Chapters{chapters ? ` (${chapters.length})` : ''}
-          </Text>
-          <View style={styles.chapterHeaderActions}>
-            <Pressable
-              onPress={() => setBulkSheet(true)}
-              hitSlop={8}
-              disabled={!chapters?.length}
-              style={styles.sortBtn}
-            >
-              <Icon name="download" size={17} color={theme.colors.textMuted} />
-            </Pressable>
-            <Pressable
-              onPress={() => setSortAsc(a => !a)}
-              hitSlop={8}
-              disabled={!chapters?.length}
-              style={styles.sortBtn}
-            >
-              <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, fontWeight: '700' }}>
-                {sortAsc ? 'Oldest first' : 'Newest first'}
-              </Text>
-              <Icon name="filter" size={16} color={theme.colors.textMuted} />
-            </Pressable>
-          </View>
-        </View>
-
-        {!chapters && chaptersLoading ? (
-          Array.from({ length: 6 }).map((_, i) => (
-            <View key={i} style={{ paddingHorizontal: theme.spacing.lg, paddingVertical: 12 }}>
-              <Skeleton width="60%" height={14} />
+              <Pressable
+                onPress={() => navigation.goBack()}
+                style={[styles.backBtn, { top: insets.top + 6, backgroundColor: theme.colors.scrim }]}
+              >
+                <Icon name="back" size={22} color={theme.colors.text} />
+              </Pressable>
             </View>
-          ))
-        ) : displayedChapters.length === 0 ? (
-          <ChaptersNotice
-            sourceMissing={sourceMissing}
-            error={chaptersError}
-            canBrowse={!sourceMissing}
-            canMigrate={otherSourceCount > 0}
-            onRetry={onRefresh}
-            onBrowse={() => setSourceSheet(true)}
-            onMigrate={() => setMigratePick(true)}
-          />
-        ) : (
-          displayedChapters.map((ch, i) => {
-              const prog = progressMap[chapterKey(params.sourceId, ch.url)];
-              const inProgress = !!prog && !prog.read && prog.lastPage > 0;
-              const picked = selected.has(ch.url);
-              return (
-                <Pressable
-                  key={`${ch.url}:${i}`}
-                  onPress={() => onChapterPress(ch)}
-                  onLongPress={() => onChapterLongPress(ch)}
-                  delayLongPress={250}
-                  style={({ pressed }) => [
-                    styles.chapterRow,
-                    {
-                      borderColor: theme.colors.border,
-                      backgroundColor: picked
-                        ? withAlpha(theme.colors.accent, 0.16)
-                        : pressed
-                        ? theme.colors.surface
-                        : 'transparent',
-                    },
-                  ]}
-                >
-                  {selecting ? (
-                    <View
-                      style={[
-                        styles.selectDot,
-                        picked
-                          ? { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent }
-                          : { borderColor: theme.colors.textFaint },
-                      ]}
-                    >
-                      {picked ? <Icon name="check" size={12} color={theme.colors.onAccent} /> : null}
-                    </View>
-                  ) : null}
-                  <View style={{ flex: 1, opacity: prog?.read ? 0.45 : 1 }}>
-                    <Text
-                      numberOfLines={1}
-                      style={[
-                        theme.typography.bodyStrong,
-                        { color: prog?.read ? theme.colors.textFaint : theme.colors.text },
-                      ]}
-                    >
-                      {ch.name}
+
+            {/* Header block */}
+            <View style={[styles.headerRow, { marginTop: -backdropHeight * 0.42 }]}>
+              {manga?.thumbnailUrl ? (
+                <RemoteImage
+                  uri={manga.thumbnailUrl}
+                  sourceId={params.sourceId}
+                  style={[styles.cover, { borderColor: theme.colors.border }]}
+                  fallback={<Skeleton width={108} height={158} radius={12} />}
+                />
+              ) : (
+                <Skeleton width={108} height={158} radius={12} />
+              )}
+              <View style={styles.headerMeta}>
+                <Text numberOfLines={3} style={[theme.typography.title, { color: theme.colors.text }]}>
+                  {manga?.title ?? 'Loading\u2026'}
+                </Text>
+                {manga?.author ? (
+                  <Text style={{ color: theme.colors.textMuted, marginTop: 4 }}>{manga.author}</Text>
+                ) : null}
+                {manga?.status ? (
+                  <View style={[styles.statusPill, { borderColor: theme.colors.border }]}>
+                    <View style={[styles.dot, { backgroundColor: theme.colors.accent }]} />
+                    <Text style={{ color: theme.colors.textMuted, fontSize: 12, fontWeight: '600' }}>
+                      {cap(manga.status)}
                     </Text>
-                    <View style={styles.chapterMeta}>
-                      <Text style={{ color: theme.colors.textFaint, fontSize: 12 }}>
-                        {formatDate(ch.dateUpload)}
-                        {ch.scanlator ? `  \u00B7  ${ch.scanlator}` : ''}
-                      </Text>
-                      {inProgress ? (
-                        <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '700' }}>
-                          {formatProgress(prog)}
-                        </Text>
-                      ) : null}
-                    </View>
                   </View>
-                  {selecting ? null : <ChapterDownloadButton manga={manga} chapter={ch} />}
+                ) : null}
+              </View>
+            </View>
+
+            {/* Genres */}
+            {manga?.genres?.length ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.genres}
+              >
+                {manga.genres.map(g => (
+                  <View key={g} style={[styles.genreChip, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+                    <Text style={{ color: theme.colors.textMuted, fontSize: 12.5 }}>{g}</Text>
+                  </View>
+                ))}
+              </ScrollView>
+            ) : null}
+
+            {/* Actions */}
+            <View style={styles.actions}>
+              <Pressable
+                onPress={() => resume && openReader(resume.chapter, resume.page)}
+                style={({ pressed }) => [styles.primaryBtn, { backgroundColor: theme.colors.accent, opacity: pressed ? 0.9 : 1 }]}
+              >
+                <Icon name="book" size={18} color={theme.colors.onAccent} />
+                <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 15 }}>
+                  {resume?.resuming ? 'Resume' : 'Start reading'}
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  if (!manga) return;
+                  if (favorited) {
+                    toggleFavorite(manga);
+                  } else {
+                    addToLibrary();
+                  }
+                }}
+                onLongPress={() => favorited && setCatSheet(true)}
+                style={[
+                  styles.secondaryBtn,
+                  {
+                    borderColor: favorited ? theme.colors.accent : theme.colors.border,
+                    backgroundColor: favorited ? withAlpha(theme.colors.accent, 0.14) : 'transparent',
+                  },
+                ]}
+              >
+                <Icon
+                  name="bookmark"
+                  size={18}
+                  color={favorited ? theme.colors.accent : theme.colors.text}
+                  filled={favorited}
+                />
+              </Pressable>
+            </View>
+
+            {favorited ? (
+              <Pressable onPress={() => setCatSheet(true)} style={styles.catRow}>
+                <Icon name="bookmark" size={14} color={theme.colors.textMuted} />
+                <Text style={{ color: theme.colors.textMuted, fontSize: 13, flex: 1 }} numberOfLines={1}>
+                  {assignedNames.length > 0 ? assignedNames.join(', ') : 'Add to category'}
+                </Text>
+                <Icon name="chevronRight" size={15} color={theme.colors.textFaint} />
+              </Pressable>
+            ) : null}
+
+            {/* Source attribution + actions (open in browser / migrate) */}
+            <Pressable onPress={() => setSourceSheet(true)} style={styles.catRow}>
+              <Icon name="globe" size={14} color={theme.colors.textMuted} />
+              <Text style={{ color: theme.colors.textMuted, fontSize: 13, flex: 1 }} numberOfLines={1}>
+                {sourceName ? `Source: ${sourceName}` : 'Source options'}
+              </Text>
+              <Icon name="chevronRight" size={15} color={theme.colors.textFaint} />
+            </Pressable>
+
+            {/* Description */}
+            {manga?.description ? (
+              <Pressable onPress={() => setExpanded(e => !e)} style={styles.descWrap}>
+                <Text
+                  numberOfLines={expanded ? undefined : 3}
+                  style={[theme.typography.body, { color: theme.colors.textMuted }]}
+                >
+                  {manga.description}
+                </Text>
+                <Icon name={expanded ? 'chevronDown' : 'chevronRight'} size={16} color={theme.colors.textFaint} />
+              </Pressable>
+            ) : null}
+
+            {/* Chapters */}
+            <View style={styles.chaptersHeader}>
+              <Text style={[theme.typography.heading, { color: theme.colors.text }]}>
+                Chapters{chapters ? ` (${chapters.length})` : ''}
+              </Text>
+              <View style={styles.chapterHeaderActions}>
+                <Pressable
+                  onPress={() => setBulkSheet(true)}
+                  hitSlop={8}
+                  disabled={!chapters?.length}
+                  style={styles.sortBtn}
+                >
+                  <Icon name="download" size={17} color={theme.colors.textMuted} />
                 </Pressable>
-              );
-            })
-        )}
-      </ScrollView>
+                <Pressable
+                  onPress={() => setSortAsc(a => !a)}
+                  hitSlop={8}
+                  disabled={!chapters?.length}
+                  style={styles.sortBtn}
+                >
+                  <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, fontWeight: '700' }}>
+                    {sortAsc ? 'Oldest first' : 'Newest first'}
+                  </Text>
+                  <Icon name="filter" size={16} color={theme.colors.textMuted} />
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        }
+        ListEmptyComponent={
+          !chapters && chaptersLoading ? (
+            <>
+              {Array.from({ length: 6 }).map((_, i) => (
+                <View key={i} style={{ paddingHorizontal: theme.spacing.lg, paddingVertical: 12 }}>
+                  <Skeleton width="60%" height={14} />
+                </View>
+              ))}
+            </>
+          ) : (
+            <ChaptersNotice
+              sourceMissing={sourceMissing}
+              error={chaptersError}
+              canBrowse={!sourceMissing}
+              canMigrate={otherSourceCount > 0}
+              onRetry={onRefresh}
+              onBrowse={() => setSourceSheet(true)}
+              onMigrate={() => setMigratePick(true)}
+            />
+          )
+        }
+      />
 
       <FastScroller
         ref={fastScrollerRef}
-        scrollRef={scrollRef}
+        scrollTo={scrollListTo}
         contentHeight={contentHeight}
         viewportHeight={viewportHeight}
         topInset={insets.top + 56}
@@ -1464,6 +1473,94 @@ function ChaptersNotice({
 }
 
 /** Per-chapter download control: download / progress / done / retry. */
+const chapterRowKey = (ch: ChapterDto, i: number) => `${ch.url}:${i}`;
+
+/** Some sources fill scanlator with only whitespace or zero-width spaces. */
+function cleanScanlator(name: string | undefined): string {
+  return (name ?? '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+}
+
+const ChapterRow = React.memo(function ChapterRow({
+  chapter: ch,
+  progress: prog,
+  picked,
+  selecting,
+  manga,
+  onPress,
+  onLongPress,
+  onLayout,
+}: {
+  onLayout?: (e: LayoutChangeEvent) => void;
+  chapter: ChapterDto;
+  progress: ChapterProgress | undefined;
+  picked: boolean;
+  selecting: boolean;
+  manga: MangaDto | undefined;
+  onPress: (ch: ChapterDto) => void;
+  onLongPress: (ch: ChapterDto) => void;
+}) {
+  const theme = useTheme();
+  const inProgress = !!prog && !prog.read && prog.lastPage > 0;
+  const scanlator = cleanScanlator(ch.scanlator);
+  return (
+    <Pressable
+      onLayout={onLayout}
+      onPress={() => onPress(ch)}
+      onLongPress={() => onLongPress(ch)}
+      delayLongPress={250}
+      style={({ pressed }) => [
+        styles.chapterRow,
+        {
+          borderColor: theme.colors.border,
+          backgroundColor: picked
+            ? withAlpha(theme.colors.accent, 0.16)
+            : pressed
+            ? theme.colors.surface
+            : 'transparent',
+        },
+      ]}
+    >
+      {selecting ? (
+        <View
+          style={[
+            styles.selectDot,
+            picked
+              ? { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent }
+              : { borderColor: theme.colors.textFaint },
+          ]}
+        >
+          {picked ? <Icon name="check" size={12} color={theme.colors.onAccent} /> : null}
+        </View>
+      ) : null}
+      <View style={[styles.chapterText, { opacity: prog?.read ? 0.45 : 1 }]}>
+        <Text
+          numberOfLines={1}
+          style={[
+            theme.typography.bodyStrong,
+            { color: prog?.read ? theme.colors.textFaint : theme.colors.text },
+          ]}
+        >
+          {ch.name}
+        </Text>
+        {/* One line so every row is the same height; the list's offset
+            estimates (and the fast-scroll thumb) rely on that. */}
+        <View style={styles.chapterMeta}>
+          <Text numberOfLines={1} style={[styles.chapterMetaText, { color: theme.colors.textFaint }]}>
+            {formatDate(ch.dateUpload)}
+            {scanlator ? `  \u00B7  ${scanlator}` : ''}
+          </Text>
+          {inProgress && prog ? (
+            <Text style={[styles.chapterProgress, { color: theme.colors.accent }]}>
+              {formatProgress(prog)}
+            </Text>
+          ) : null}
+        </View>
+      </View>
+      {selecting ? null : <ChapterDownloadButton manga={manga} chapter={ch} />}
+    </Pressable>
+  );
+});
+
 function ChapterDownloadButton({
   manga,
   chapter,
@@ -1678,12 +1775,22 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
+  chapterText: {
+    flex: 1,
+  },
   chapterMeta: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     marginTop: 2,
-    flexWrap: 'wrap',
+  },
+  chapterMetaText: {
+    fontSize: 12,
+    flexShrink: 1,
+  },
+  chapterProgress: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   notice: {
     alignItems: 'center',
