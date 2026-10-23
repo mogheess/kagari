@@ -9,6 +9,7 @@
  */
 import { useSyncExternalStore } from 'react';
 import type { AvailableExtensionDto, Engine, ExtensionDto } from '../engine/types';
+import { syncRepoSigningKeys } from './repoTrust';
 
 export interface ExtensionUpdate {
   pkg: string;
@@ -106,6 +107,8 @@ export async function checkExtensionUpdates(
       engine.getAvailableExtensions(),
     ]);
     setExtensionUpdates(computeExtensionUpdates(installed, available));
+    // Best-effort; it swallows its own failures.
+    syncRepoSigningKeys(available).catch(() => {});
   } catch {
     // Offline or repo down — keep whatever we had.
   } finally {

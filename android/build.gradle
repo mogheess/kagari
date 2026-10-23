@@ -5,7 +5,15 @@ buildscript {
         compileSdkVersion = 36
         targetSdkVersion = 36
         ndkVersion = "27.1.12297006"
-        kotlinVersion = "2.1.20"
+        // Extensions resolve the Kotlin stdlib and kotlinx libraries from the
+        // app at runtime, so the app must be at least as new as what keiyoushi
+        // compiles them with (gradle/libs.versions.toml there). React Native
+        // 0.86 itself ships Kotlin 2.1.20; this overrides it for every module.
+        kotlinVersion = "2.4.10"
+        // AsyncStorage builds Room with KSP and picks a KSP from a table that
+        // stops at Kotlin 2.2. KSP 2.3+ no longer tracks Kotlin versions; this
+        // is the one keiyoushi pairs with the Kotlin above.
+        kspVersion = "2.3.9"
     }
     repositories {
         google()
@@ -14,7 +22,7 @@ buildscript {
     dependencies {
         classpath("com.android.tools.build:gradle")
         classpath("com.facebook.react:react-native-gradle-plugin")
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion")
         classpath("org.jetbrains.kotlin:kotlin-serialization:$kotlinVersion")
     }
 }

@@ -11,6 +11,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeProvider';
 import { Icon } from './Icon';
+import { ExtensionIcon } from './ExtensionIcon';
 import { langLabel } from '../utils/lang';
 import { LanguageFilterRow } from './LanguageFilterRow';
 import { useEnabledLanguages, filterByLanguages } from '../sources/languageFilter';
@@ -31,7 +32,7 @@ function extLabel(pkg: string): string {
 }
 
 type Row =
-  | { kind: 'group'; key: string; label: string; count: number }
+  | { kind: 'group'; key: string; label: string; count: number; iconUrl?: string }
   | { kind: 'source'; key: string; source: SourceDto };
 
 /**
@@ -81,7 +82,13 @@ export function SourcePickerSheet({
           a.lang.localeCompare(b.lang) ||
           a.name.localeCompare(b.name),
       );
-      out.push({ kind: 'group', key: `g:${pkg}`, label: extLabel(pkg), count: list.length });
+      out.push({
+        kind: 'group',
+        key: `g:${pkg}`,
+        label: extLabel(pkg),
+        count: list.length,
+        iconUrl: list.find(s => s.iconUrl)?.iconUrl,
+      });
       for (const s of list) out.push({ kind: 'source', key: s.id, source: s });
     }
     return out;
@@ -136,9 +143,12 @@ export function SourcePickerSheet({
           renderItem={({ item }) => {
             if (item.kind === 'group') {
               return (
-                <Text style={[styles.groupLabel, { color: theme.colors.textFaint }]}>
-                  {item.label.toUpperCase()} · {item.count}
-                </Text>
+                <View style={styles.groupRow}>
+                  <ExtensionIcon uri={item.iconUrl} name={item.label} size={22} />
+                  <Text style={[styles.groupLabel, { color: theme.colors.textFaint }]}>
+                    {item.label.toUpperCase()} · {item.count}
+                  </Text>
+                </View>
               );
             }
             const s = item.source;
@@ -229,12 +239,17 @@ const styles = StyleSheet.create({
     fontSize: 15,
     padding: 0,
   },
+  groupRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 14,
+    marginBottom: 4,
+  },
   groupLabel: {
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 1.2,
-    marginTop: 14,
-    marginBottom: 4,
   },
   row: {
     flexDirection: 'row',

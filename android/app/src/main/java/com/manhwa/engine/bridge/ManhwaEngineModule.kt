@@ -2,6 +2,7 @@ package com.manhwa.engine.bridge
 
 import android.app.Activity
 import android.content.Intent
+import android.os.Build
 import android.view.WindowManager
 import com.facebook.react.bridge.ActivityEventListener
 import com.facebook.react.bridge.Promise
@@ -50,6 +51,9 @@ class ManhwaEngineModule(
     /** Resolved by [onActivityResult] when the storage-folder picker returns. */
     private var pickStoragePromise: Promise? = null
 
+    /** Resolved by [onActivityResult] when the in-app WebView closes. */
+    private var webViewPromise: Promise? = null
+
     init {
         reactContext.addActivityEventListener(this)
     }
@@ -60,6 +64,8 @@ class ManhwaEngineModule(
         reactContext.removeActivityEventListener(this)
         pickPromise = null
         pickStoragePromise = null
+        webViewPromise?.resolve(false)
+        webViewPromise = null
         clearKeepScreenOn()
         scope.cancel()
         super.invalidate()
@@ -78,6 +84,12 @@ class ManhwaEngineModule(
      * must be set on the UI thread and cleared when the reader closes —
      * otherwise the screen stays on for the rest of the session.
      */
+    /** The device's ABIs, preferred first, so the app updater can offer the matching APK. */
+    @ReactMethod
+    fun getSupportedAbis(promise: Promise) {
+        promise.resolve(json.encodeToString(Build.SUPPORTED_ABIS.toList()))
+    }
+
     @ReactMethod
     fun setKeepScreenOn(enabled: Boolean, promise: Promise) {
         val activity: Activity? = reactContext.currentActivity
@@ -138,7 +150,16 @@ class ManhwaEngineModule(
     @ReactMethod
     fun removeRepo(url: String, promise: Promise) = resolve(promise) {
         repos.remove(url)
+        // Its signing key no longer vouches for anything.
+        facade.updateRepoSigningKeys(emptyMap(), repos.list().map { it.url })
         ""
+    }
+
+    /** `keysJson`: `{ repoUrl: signingKeyFingerprint }` for the repos just fetched. */
+    @ReactMethod
+    fun setRepoSigningKeys(keysJson: String, promise: Promise) = resolve(promise) {
+        val fetched = json.decodeFromString<Map<String, String>>(keysJson)
+        facade.updateRepoSigningKeys(fetched, repos.list().map { it.url }).toString()
     }
 
     @ReactMethod
@@ -181,13 +202,12 @@ class ManhwaEngineModule(
     @ReactMethod
     fun search(sourceId: String, query: String, page: Int, filtersJson: String, promise: Promise) =
         resolve(promise) {
-            json.encodeToString(facade.search(sourceId, query, page))
+            json.encodeToString(facade.search(sourceId, query, page, filtersJson))
         }
 
     @ReactMethod
     fun getFilters(sourceId: String, promise: Promise) = resolve(promise) {
-        // TODO: serialize the source's FilterList into the FilterDto schema.
-        "[]"
+        facade.getFilters(sourceId)
     }
 
     // --- detail / reading ---
@@ -195,6 +215,17 @@ class ManhwaEngineModule(
     @ReactMethod
     fun getMangaDetails(sourceId: String, mangaUrl: String, memoJson: String?, promise: Promise) = resolve(promise) {
         json.encodeToString(facade.getMangaDetails(sourceId, mangaUrl, memoJson))
+    }
+
+    @ReactMethod
+    fun getRelatedManga(
+        sourceId: String,
+        mangaUrl: String,
+        title: String,
+        memoJson: String?,
+        promise: Promise,
+    ) = resolve(promise) {
+        json.encodeToString(facade.getRelatedManga(sourceId, mangaUrl, title, memoJson))
     }
 
     @ReactMethod
@@ -358,6 +389,11 @@ class ManhwaEngineModule(
                 val uri = if (resultCode == Activity.RESULT_OK) data?.data else null
                 promise.resolve(uri?.toString())
             }
+            WEBVIEW_REQUEST -> {
+                val promise = webViewPromise ?: return
+                webViewPromise = null
+                promise.resolve(data?.getBooleanExtra(SourceWebViewActivity.RESULT_CLEARED, false) == true)
+            }
             PICK_STORAGE_REQUEST -> {
                 val promise = pickStoragePromise ?: return
                 pickStoragePromise = null
@@ -403,6 +439,12 @@ class ManhwaEngineModule(
 
     // --- in-app web view (manual Cloudflare clearance) ---
 
+    /**
+     * Opens the in-app WebView and resolves when the user closes it — with
+     * `true` if they came back with a new Cloudflare clearance for that site, so
+     * the screen can retry on its own. Resolving on open (as this used to) made
+     * the caller retry before the user had done anything.
+     */
     @ReactMethod
     fun openInWebView(url: String, promise: Promise) {
         if (url.isBlank()) {
@@ -412,15 +454,30 @@ class ManhwaEngineModule(
         try {
             val ua = runCatching { facade.userAgent() }.getOrNull()
             val activity = reactContext.currentActivity
-            val ctx = activity ?: reactContext.applicationContext
-            val intent = Intent(ctx, SourceWebViewActivity::class.java).apply {
+            if (activity == null) {
+                // No foreground activity to return to: open it standalone and
+                // report nothing, since we won't hear when it closes.
+                val ctx = reactContext.applicationContext
+                ctx.startActivity(
+                    Intent(ctx, SourceWebViewActivity::class.java).apply {
+                        putExtra(SourceWebViewActivity.EXTRA_URL, url)
+                        if (ua != null) putExtra(SourceWebViewActivity.EXTRA_UA, ua)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    },
+                )
+                promise.resolve(false)
+                return
+            }
+            // One WebView at a time; a stale caller just learns nothing changed.
+            webViewPromise?.resolve(false)
+            webViewPromise = promise
+            val intent = Intent(activity, SourceWebViewActivity::class.java).apply {
                 putExtra(SourceWebViewActivity.EXTRA_URL, url)
                 if (ua != null) putExtra(SourceWebViewActivity.EXTRA_UA, ua)
-                if (activity == null) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            ctx.startActivity(intent)
-            promise.resolve(null)
+            activity.startActivityForResult(intent, WEBVIEW_REQUEST)
         } catch (e: Throwable) {
+            webViewPromise = null
             promise.reject("webview_failed", e.message ?: "Could not open the web view", e)
         }
     }
@@ -454,5 +511,6 @@ class ManhwaEngineModule(
         const val NAME = "ManhwaEngine"
         private const val PICK_BACKUP_REQUEST = 0xBAC0
         private const val PICK_STORAGE_REQUEST = 0xBAC1
+        private const val WEBVIEW_REQUEST = 0xBAC2
     }
 }
