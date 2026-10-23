@@ -237,6 +237,16 @@ abstract class HttpSource : CatalogueSource {
         return client.newCall(imageRequest(page)).asObservableSuccess()
     }
 
+    /**
+     * Downloads a page image with the source's own request and client, like
+     * Mihon's `getImage`. Prefer it over [fetchImage] when the body is read
+     * afterwards: an Rx subscription cancels its call when it unsubscribes,
+     * and awaiting the first item unsubscribes as soon as the response
+     * arrives, so the body read fails with "stream was reset: CANCEL".
+     */
+    open suspend fun getImage(page: Page): Response =
+        client.newCall(imageRequest(page)).awaitSuccess()
+
     protected open fun imageRequest(page: Page): Request = GET(page.imageUrl!!, headers)
 
     // endregion

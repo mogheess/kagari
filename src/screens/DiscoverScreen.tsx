@@ -22,6 +22,7 @@ import { getEngine } from '../engine';
 import { Cover } from '../components/Cover';
 import { CoverRail } from '../components/CoverRail';
 import { Icon } from '../components/Icon';
+import { ExtensionIcon } from '../components/ExtensionIcon';
 import { SwipeTabs } from '../components/SwipeTabs';
 import { SourcePickerSheet } from '../components/SourcePickerSheet';
 import { GlobalSourcesSheet } from '../components/GlobalSourcesSheet';
@@ -296,7 +297,11 @@ function SourceSelectPill({
         { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, opacity: pressed ? 0.85 : 1 },
       ]}
     >
-      <Icon name="globe" size={16} color={theme.colors.accent} />
+      {source?.iconUrl ? (
+        <ExtensionIcon uri={source.iconUrl} name={source.name} size={22} />
+      ) : (
+        <Icon name="globe" size={16} color={theme.colors.accent} />
+      )}
       <View style={{ flex: 1 }}>
         <Text numberOfLines={1} style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>
           {source?.name ?? 'Select source'}
@@ -528,8 +533,11 @@ function SourceBrowse({
                       const url = source?.baseUrl;
                       if (!url) return;
                       try {
-                        await engine.openInWebView(url);
-                        reload();
+                        const cleared = await engine.openInWebView(url);
+                        // Resolves when the WebView closes. For a human check,
+                        // retrying without a new clearance would only fail again;
+                        // for other errors a retry on return is still worth it.
+                        if (cleared || !humanCheck) reload();
                       } catch {}
                     }}
                     style={[

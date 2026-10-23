@@ -379,14 +379,17 @@ export interface Engine {
   shareBackup(uri: string, fileName: string): Promise<void>;
 
   // device
+  /** Device ABIs, preferred first (e.g. `["arm64-v8a", "armeabi-v7a"]`). Empty when unknown. */
+  getSupportedAbis(): Promise<string[]>;
   /** Holds the screen awake (reader). Best-effort; no-ops without an Activity. */
   setKeepScreenOn(enabled: boolean): Promise<void>;
 
   // web view
   /**
-   * Opens a URL in an in-app WebView that shares the engine's cookie jar, so the
-   * user can clear a Cloudflare challenge manually (the resulting `cf_clearance`
-   * cookie is then reused by the source's HTTP client).
+   * Opens `url` in the in-app WebView, which shares the engine's cookie jar so
+   * a Cloudflare check passed there is reused by the source's HTTP client.
+   * Resolves when the user closes it: `true` when they came back with a new
+   * Cloudflare clearance for that site (worth retrying), `false` otherwise.
    */
-  openInWebView(url: string): Promise<void>;
+  openInWebView(url: string): Promise<boolean>;
 }

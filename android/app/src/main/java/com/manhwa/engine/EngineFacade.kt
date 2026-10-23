@@ -30,6 +30,7 @@ import com.manhwa.engine.dto.MangaDto
 import com.manhwa.engine.dto.MangasPageDto
 import com.manhwa.engine.dto.PageDto
 import com.manhwa.engine.dto.StorageLocationDto
+import com.manhwa.engine.loader.ExtensionIcons
 import com.manhwa.engine.storage.DownloadNaming
 import com.manhwa.engine.storage.StorageManager
 import com.manhwa.engine.dto.SourceDto
@@ -92,9 +93,12 @@ class EngineFacade(context: Context) {
         if (extensions.isEmpty()) reload()
     }
 
+    private val extensionIcons by lazy { ExtensionIcons(appContext) }
+
     fun listExtensions(): List<ExtensionDto> {
         ensureLoaded()
         return extensions.map { ext ->
+            val icon = extensionIcons.uriFor(ext.pkg, ext.versionCode)
             ExtensionDto(
                 pkg = ext.pkg,
                 name = ext.name,
@@ -104,7 +108,8 @@ class EngineFacade(context: Context) {
                 lang = ext.lang,
                 isNsfw = ext.isNsfw,
                 trusted = ext.trusted,
-                sources = ext.sources.map { Mappers.sourceToDto(it, ext.pkg, ext.isNsfw) },
+                sources = ext.sources.map { Mappers.sourceToDto(it, ext.pkg, ext.isNsfw, icon) },
+                iconUrl = icon,
                 signatureHash = ext.signatureHash,
             )
         }
@@ -113,7 +118,8 @@ class EngineFacade(context: Context) {
     fun listSources(): List<SourceDto> {
         ensureLoaded()
         return extensions.flatMap { ext ->
-            ext.sources.map { Mappers.sourceToDto(it, ext.pkg, ext.isNsfw) }
+            val icon = extensionIcons.uriFor(ext.pkg, ext.versionCode)
+            ext.sources.map { Mappers.sourceToDto(it, ext.pkg, ext.isNsfw, icon) }
         }
     }
 
@@ -321,7 +327,7 @@ class EngineFacade(context: Context) {
         if (!finalFile.exists() || finalFile.length() == 0L) {
             val temp = File(cacheDir, "$key.tmp")
             contentType = try {
-                source.fetchImage(model).awaitSingle().use { response ->
+                source.getImage(model).use { response ->
                     writeImageResponse(response, temp)
                 }
             } catch (error: Throwable) {
@@ -513,7 +519,7 @@ class EngineFacade(context: Context) {
                       else internalChapterDir(sourceId, chapterUrl).apply { mkdirs() }
         val temp = File(scratch, "${hashKey("$sourceId|$chapterUrl")}_${page.index}.tmp")
         val contentType = try {
-            source.fetchImage(model).awaitSingle().use { response -> writeImageResponse(response, temp) }
+            source.getImage(model).use { response -> writeImageResponse(response, temp) }
         } catch (error: Throwable) {
             temp.delete()
             directImageResponse(source, imageUrl).use { response -> writeImageResponse(response, temp) }

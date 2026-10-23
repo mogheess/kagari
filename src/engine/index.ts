@@ -60,6 +60,7 @@ function createUnavailableEngine(): Engine {
     shareImage: reject,
     exportMihonBackup: reject,
     shareBackup: reject,
+    getSupportedAbis: () => Promise.resolve([]),
     setKeepScreenOn: () => Promise.resolve(),
     openInWebView: reject,
   };
