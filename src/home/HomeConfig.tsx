@@ -9,25 +9,52 @@ import React, {
 } from 'react';
 import { makePersistence } from '../store/persist';
 
-export type HomeBlockKind = 'featured' | 'continue' | 'popular' | 'latest' | 'recommended';
+export type HomeBlockKind =
+  | 'featured'
+  /** The library (favorites). */
+  | 'continue'
+  /** Recently read titles, from reading history. */
+  | 'history'
+  /** New chapters in the library, from the Updates feed. */
+  | 'updates'
+  | 'popular'
+  | 'latest'
+  /** A saved search on one source. */
+  | 'search'
+  /** One rail per installed source, so a new library of sources shows up without setup. */
+  | 'perSource'
+  | 'recommended';
 
 export interface HomeBlock {
   id: string;
   kind: HomeBlockKind;
-  /** Source this block pulls from (for featured/popular/latest/recommended). */
+  /** Source this block pulls from (for featured/popular/latest/search/recommended). */
   sourceId?: string;
   /** Friendly source name for the header suffix. */
   sourceName?: string;
+  /** What a `search` block searches for. */
+  query?: string;
+  /** Added by the user in Customize Home; these can be removed, built-ins only hidden. */
+  custom?: boolean;
   enabled: boolean;
 }
 
 const DEFAULT_BLOCKS: HomeBlock[] = [
   { id: 'b_featured', kind: 'featured', enabled: true },
+  { id: 'b_history', kind: 'history', enabled: true },
+  { id: 'b_updates', kind: 'updates', enabled: true },
   { id: 'b_continue', kind: 'continue', enabled: true },
   { id: 'b_popular', kind: 'popular', enabled: true },
   { id: 'b_latest', kind: 'latest', enabled: true },
+  { id: 'b_sources', kind: 'perSource', enabled: true },
   { id: 'b_recommended', kind: 'recommended', enabled: false },
 ];
+
+/**
+ * Built-ins introduced after people already had a saved layout. They're new
+ * rather than removed, so they arrive switched on in their default place.
+ */
+const ADDED_LATER = new Set(['b_history', 'b_updates', 'b_sources']);
 
 const store = makePersistence<HomeBlock[]>('@kagari/home-blocks/v1');
 
@@ -38,13 +65,22 @@ const store = makePersistence<HomeBlock[]>('@kagari/home-blocks/v1');
  * back in (as disabled, so a previously-removed section reappears in Customize
  * Home for re-enabling without suddenly changing the home screen).
  */
-function mergeWithDefaults(stored: HomeBlock[]): HomeBlock[] {
+export function mergeWithDefaults(stored: HomeBlock[]): HomeBlock[] {
   const seen = new Set(stored.map(b => b.id));
-  const missing = DEFAULT_BLOCKS.filter(b => !seen.has(b.id)).map(b => ({
-    ...b,
-    enabled: false,
-  }));
-  return missing.length > 0 ? [...stored, ...missing] : stored;
+  let next = stored.slice();
+  DEFAULT_BLOCKS.forEach((block, defaultIndex) => {
+    if (seen.has(block.id)) return;
+    if (ADDED_LATER.has(block.id)) {
+      // Slot it in after the built-in that precedes it by default.
+      const before = DEFAULT_BLOCKS.slice(0, defaultIndex).reverse().find(b => seen.has(b.id));
+      const at = before ? next.findIndex(b => b.id === before.id) + 1 : 0;
+      next = [...next.slice(0, at), block, ...next.slice(at)];
+    } else {
+      next = [...next, { ...block, enabled: false }];
+    }
+    seen.add(block.id);
+  });
+  return next;
 }
 
 /** The default source every browse section uses unless it has its own override. */
@@ -57,6 +93,10 @@ const universalStore = makePersistence<UniversalSource>('@kagari/home-universal-
 interface HomeConfigValue {
   blocks: HomeBlock[];
   setBlocks: (b: HomeBlock[]) => void;
+  /** Adds a user section (enabled) at the end. */
+  addBlock: (block: Omit<HomeBlock, 'id' | 'enabled' | 'custom'>) => void;
+  /** Removes a user-added section; built-ins can only be hidden. */
+  removeBlock: (id: string) => void;
   toggle: (id: string) => void;
   move: (from: number, to: number) => void;
   /** Assigns the source a browse block pulls from (a per-section override). */
@@ -117,6 +157,25 @@ export function HomeConfigProvider({ children }: { children: React.ReactNode }) 
     [],
   );
 
+  const addBlock = useCallback(
+    (block: Omit<HomeBlock, 'id' | 'enabled' | 'custom'>) =>
+      update(prev => [
+        ...prev,
+        {
+          ...block,
+          id: `c_${block.kind}_${Date.now().toString(36)}`,
+          enabled: true,
+          custom: true,
+        },
+      ]),
+    [update],
+  );
+
+  const removeBlock = useCallback(
+    (id: string) => update(prev => prev.filter(b => !(b.id === id && b.custom))),
+    [update],
+  );
+
   const toggle = useCallback(
     (id: string) => update(prev => prev.map(b => (b.id === id ? { ...b, enabled: !b.enabled } : b))),
     [update],
@@ -166,6 +225,8 @@ export function HomeConfigProvider({ children }: { children: React.ReactNode }) 
     () => ({
       blocks,
       setBlocks,
+      addBlock,
+      removeBlock,
       toggle,
       move,
       setSource,
@@ -178,6 +239,8 @@ export function HomeConfigProvider({ children }: { children: React.ReactNode }) 
     [
       blocks,
       setBlocks,
+      addBlock,
+      removeBlock,
       toggle,
       move,
       setSource,
@@ -197,9 +260,15 @@ export function useHomeConfig(): HomeConfigValue {
   return ctx;
 }
 
-/** Whether this block browses a source (and therefore needs a source picker). */
+/** Whether this block browses one source (and therefore needs a source picker). */
 export function isBrowseBlock(block: HomeBlock): boolean {
-  return block.kind !== 'continue';
+  return (
+    block.kind === 'featured' ||
+    block.kind === 'popular' ||
+    block.kind === 'latest' ||
+    block.kind === 'search' ||
+    block.kind === 'recommended'
+  );
 }
 
 export function blockLabel(block: HomeBlock): string {
@@ -207,7 +276,15 @@ export function blockLabel(block: HomeBlock): string {
     case 'featured':
       return 'Featured';
     case 'continue':
-      return 'Continue Reading';
+      return 'Library';
+    case 'history':
+      return 'Continue reading';
+    case 'updates':
+      return 'New chapters';
+    case 'perSource':
+      return 'From your sources';
+    case 'search':
+      return block.query ? `\u201C${block.query}\u201D` : 'Saved search';
     case 'popular':
       return `Popular${block.sourceName ? ` \u00B7 ${block.sourceName}` : ''}`;
     case 'latest':

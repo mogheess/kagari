@@ -12,6 +12,8 @@ export type BrowseMode = 'popular' | 'latest';
 export interface DiscoverIntent {
   sourceId: string;
   browse: BrowseMode;
+  /** Search this on the source instead of browsing (a saved-search rail's "See all"). */
+  query?: string;
   /** Bumped on every request so repeat taps re-trigger application. */
   nonce: number;
 }
@@ -24,8 +26,12 @@ function emit(): void {
 }
 
 /** Asks the Discover tab to open a specific source in the given browse mode. */
-export function requestDiscover(sourceId: string, browse: BrowseMode = 'popular'): void {
-  intent = { sourceId, browse, nonce: (intent?.nonce ?? 0) + 1 };
+export function requestDiscover(
+  sourceId: string,
+  browse: BrowseMode = 'popular',
+  query?: string,
+): void {
+  intent = { sourceId, browse, query, nonce: (intent?.nonce ?? 0) + 1 };
   emit();
 }
 

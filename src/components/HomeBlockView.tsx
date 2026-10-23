@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { Icon } from './Icon';
 import { useTheme } from '../theme/ThemeProvider';
@@ -9,7 +9,10 @@ import { CoverRail } from './CoverRail';
 import { FeaturedCarousel } from './FeaturedCarousel';
 import { blockLabel, useHomeConfig, type HomeBlock } from '../home/HomeConfig';
 import { useFavorites, favoriteToManga, useFavoriteKeySet, favoriteKey } from '../library/favorites';
-import { pickDefaultSource } from '../utils/sourceSelect';
+import { pickDefaultSource, sortSourcesForPicker } from '../utils/sourceSelect';
+import { useHistory, historyToManga } from '../library/history';
+import { useLibraryUpdates, updateToManga, type LibraryUpdate } from '../library/libraryUpdates';
+import { filterByLanguages, useEnabledLanguages } from '../sources/languageFilter';
 import { useSourceHealth, unhealthyIds, recordSourceResult } from '../sources/sourceHealth';
 import { requestDiscover } from '../sources/discoverIntent';
 import { useTabNav } from '../navigation/TabNav';
@@ -36,6 +39,15 @@ interface HomeBlockViewProps {
 export function HomeBlockView({ block, sources, onOpenManga, refreshKey = 0 }: HomeBlockViewProps) {
   if (block.kind === 'continue') {
     return <ContinueBlock onOpenManga={onOpenManga} />;
+  }
+  if (block.kind === 'history') {
+    return <HistoryBlock onOpenManga={onOpenManga} />;
+  }
+  if (block.kind === 'updates') {
+    return <NewChaptersBlock onOpenManga={onOpenManga} />;
+  }
+  if (block.kind === 'perSource') {
+    return <PerSourceBlock sources={sources} onOpenManga={onOpenManga} refreshKey={refreshKey} />;
   }
   return (
     <BrowseBlock
@@ -68,6 +80,148 @@ function ContinueBlock({ onOpenManga }: { onOpenManga: (m: MangaDto) => void }) 
   );
 }
 
+/** How many rails "From your sources" shows at most, to keep Home's first load reasonable. */
+const PER_SOURCE_MAX = 6;
+/** Covers in the history and new-chapters rails. */
+const RAIL_MAX = 12;
+
+/**
+ * The source a browse block pulls from: its own override, then the universal
+ * source, then the smart default. A "latest" block skips sources without one.
+ */
+function resolveBlockSource(
+  block: HomeBlock,
+  sources: SourceDto[],
+  universalSourceId: string | undefined,
+  unhealthy: Set<string>,
+): SourceDto | undefined {
+  const wantsLatest = block.kind === 'latest';
+  const ok = (s?: SourceDto) => !!s && (!wantsLatest || s.supportsLatest);
+  const override = sources.find(s => s.id === block.sourceId);
+  const universal = sources.find(s => s.id === universalSourceId);
+  if (ok(override)) return override;
+  if (ok(universal)) return universal;
+  const fallback = pickDefaultSource(sources, { needsLatest: wantsLatest, unhealthy });
+  return ok(fallback) ? fallback : undefined;
+}
+
+/** Recently read titles, newest first; the subtitle is the chapter you were on. */
+function HistoryBlock({ onOpenManga }: { onOpenManga: (m: MangaDto) => void }) {
+  const theme = useTheme();
+  const history = useHistory();
+  const recent = useMemo(
+    () => history.slice().sort((a, b) => b.readAt - a.readAt).slice(0, RAIL_MAX),
+    [history],
+  );
+  if (recent.length === 0) return null;
+  const chapterOf = new Map(recent.map(e => [favoriteKey(e.sourceId, e.mangaUrl), e.chapterName]));
+  return (
+    <View style={{ marginBottom: theme.spacing.xxl }}>
+      <View style={{ paddingHorizontal: theme.spacing.lg, marginBottom: theme.spacing.md }}>
+        <SectionHeader title="Continue reading" />
+      </View>
+      <CoverRail
+        data={recent.map(historyToManga)}
+        coverWidth={112}
+        subtitleOf={m => chapterOf.get(favoriteKey(m.sourceId, m.url))}
+        onPressItem={onOpenManga}
+      />
+    </View>
+  );
+}
+
+/** Library titles with new chapters (from the Updates feed), one cover each. */
+function NewChaptersBlock({ onOpenManga }: { onOpenManga: (m: MangaDto) => void }) {
+  const theme = useTheme();
+  const { navigateTab } = useTabNav();
+  const feed = useLibraryUpdates();
+  const items = useMemo(() => {
+    const seen = new Set<string>();
+    const out: LibraryUpdate[] = [];
+    for (const u of feed) {
+      if (u.kind === 'added') continue;
+      const key = favoriteKey(u.sourceId, u.mangaUrl);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(u);
+      if (out.length >= RAIL_MAX) break;
+    }
+    return out;
+  }, [feed]);
+  if (items.length === 0) return null;
+  const countOf = new Map(items.map(u => [favoriteKey(u.sourceId, u.mangaUrl), u.newCount]));
+  return (
+    <View style={{ marginBottom: theme.spacing.xxl }}>
+      <View style={{ paddingHorizontal: theme.spacing.lg, marginBottom: theme.spacing.md }}>
+        <SectionHeader title="New chapters" onSeeAll={() => navigateTab('updates')} />
+      </View>
+      <CoverRail
+        data={items.map(updateToManga)}
+        coverWidth={112}
+        subtitleOf={m => {
+          const n = countOf.get(favoriteKey(m.sourceId, m.url)) ?? 0;
+          return n === 1 ? '1 new chapter' : `${n} new chapters`;
+        }}
+        onPressItem={onOpenManga}
+      />
+    </View>
+  );
+}
+
+/**
+ * One rail per installed source (Latest where the source has it, else
+ * Popular), so someone with several sources sees all of them without setting
+ * Home up. Skips sources another enabled rail already shows, adult sources and
+ * languages switched off in the source picker.
+ */
+function PerSourceBlock({
+  sources,
+  onOpenManga,
+  refreshKey,
+}: {
+  sources: SourceDto[];
+  onOpenManga: (m: MangaDto) => void;
+  refreshKey: number;
+}) {
+  const { blocks, universalSourceId } = useHomeConfig();
+  const health = useSourceHealth();
+  const languages = useEnabledLanguages();
+  const virtual = useMemo(() => {
+    const unhealthy = unhealthyIds(health);
+    const shown = new Set<string>();
+    for (const b of blocks) {
+      if (!b.enabled || (b.kind !== 'popular' && b.kind !== 'latest' && b.kind !== 'featured')) continue;
+      const s = resolveBlockSource(b, sources, universalSourceId, unhealthy);
+      if (s) shown.add(s.id);
+    }
+    return sortSourcesForPicker(filterByLanguages(sources, languages))
+      .filter(s => !s.isNsfw && !shown.has(s.id))
+      // Recently failing sources go last rather than leading the feed with errors.
+      .sort((a, b) => Number(unhealthy.has(a.id)) - Number(unhealthy.has(b.id)))
+      .slice(0, PER_SOURCE_MAX)
+      .map<HomeBlock>(s => ({
+        id: `auto:${s.id}`,
+        kind: s.supportsLatest ? 'latest' : 'popular',
+        sourceId: s.id,
+        sourceName: s.name,
+        enabled: true,
+      }));
+  }, [blocks, sources, universalSourceId, health, languages]);
+  return (
+    <>
+      {virtual.map(b => (
+        <BrowseBlock
+          key={b.id}
+          block={b}
+          sources={sources}
+          onOpenManga={onOpenManga}
+          refreshKey={refreshKey}
+        />
+      ))}
+    </>
+  );
+}
+
 function BrowseBlock({
   block,
   sources,
@@ -88,32 +242,26 @@ function BrowseBlock({
   const [retry, setRetry] = useState(0);
 
   const wantsLatest = block.kind === 'latest';
-  // Resolution order: per-section override -> universal source -> smart default.
-  // Skip any candidate that can't satisfy a "latest" section.
-  const ok = (s?: SourceDto) => !!s && (!wantsLatest || s.supportsLatest);
-  const override = sources.find(s => s.id === block.sourceId);
-  const universal = sources.find(s => s.id === universalSourceId);
-  const source = ok(override)
-    ? override
-    : ok(universal)
-      ? universal
-      : pickDefaultSource(sources, { needsLatest: wantsLatest, unhealthy: unhealthyIds(health) });
-  const usable = ok(source);
+  const query = block.kind === 'search' ? block.query?.trim() ?? '' : '';
+  const source = resolveBlockSource(block, sources, universalSourceId, unhealthyIds(health));
+  const usable = !!source && (block.kind !== 'search' || query.length > 0);
   const sourceId = source?.id;
 
   const { data, loading, error } = useAsync<MangaDto[]>(async () => {
     if (!sourceId || !usable) return [];
     try {
-      const res = wantsLatest
-        ? await engine.getLatest(sourceId, 1)
-        : await engine.getPopular(sourceId, 1);
+      const res = query
+        ? await engine.search(sourceId, query, 1)
+        : wantsLatest
+          ? await engine.getLatest(sourceId, 1)
+          : await engine.getPopular(sourceId, 1);
       recordSourceResult(sourceId, true);
       return res.manga;
     } catch (e) {
       recordSourceResult(sourceId, false);
       throw e;
     }
-  }, [sourceId, block.kind, usable, refreshKey, retry]);
+  }, [sourceId, block.kind, query, usable, refreshKey, retry]);
 
   if (!usable) return null;
   // On a failed fetch `data` still holds the PREVIOUS source's titles (useAsync
@@ -155,7 +303,7 @@ function BrowseBlock({
           onSeeAll={
             sourceId
               ? () => {
-                  requestDiscover(sourceId, wantsLatest ? 'latest' : 'popular');
+                  requestDiscover(sourceId, wantsLatest ? 'latest' : 'popular', query || undefined);
                   navigateTab('discover');
                 }
               : undefined
