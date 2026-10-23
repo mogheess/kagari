@@ -113,7 +113,8 @@ classloader). So the host must *provide* that runtime. We vendor it under
   and maps results to DTOs. Images still go through the source's
   `fetchImage(page)`, which is Rx.
 - `EngineInjektModule.kt`: registers Injekt singletons (`Application`,
-  `NetworkHelper`, `Json`) that extensions expect via `uy.kohesive.injekt`.
+  `NetworkHelper`, `Json`, `ProtoBuf`) that extensions expect via
+  `uy.kohesive.injekt`.
 - `loader/`: `ExtensionLoader` (discovers/loads APKs, accepts lib versions
   `1.4` to `1.6`, reads `tachiyomix.contentWarning` before the legacy `nsfw`
   flag, auto-trusts explicitly installed ones), `ChildFirstPathClassLoader`,
@@ -153,6 +154,12 @@ separate outage; diff against KeiSource before blaming a site.
   read back on later calls. They cross the bridge as JSON text
   (`MangaDto.memo` / `ChapterDto.memo`), are persisted on favorites and
   download entries, and are passed back to details, chapters and pages.
+- **Injekt singletons, keyed by class.** Extensions `injectLazy()` the
+  `Application`, `NetworkHelper`, `Json` and `ProtoBuf` (MANGA Plus). A missing
+  one throws inside the extension's class initialiser, often on a coroutine
+  the extension launched, which kills the whole app. Register by the exact
+  class: `ProtoBuf` used as a value is `ProtoBuf.Default`, so it needs
+  `addSingletonFactory<ProtoBuf>`.
 - **No concurrent `getMangaUpdate` for one title.** KeiSource throws if it
   happens. `EngineFacade` serializes both calls per `sourceId|mangaUrl`.
 - **Fatal errors must still surface.** RxJava 1 treats `LinkageError` and
