@@ -369,7 +369,8 @@ function SourceSelectPill({
         { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, opacity: pressed ? 0.85 : 1 },
       ]}
     >
-      {source?.iconUrl ? (
+      {/* A letter tile stands in for a missing icon, so the name never shifts. */}
+      {source ? (
         <ExtensionIcon uri={source.iconUrl} name={source.name} size={22} />
       ) : (
         <Icon name="globe" size={16} color={theme.colors.accent} />

@@ -3,6 +3,8 @@ import { View, Text, TextInput, FlatList, Pressable, Modal, StyleSheet } from 'r
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeProvider';
 import { Icon } from './Icon';
+import { ExtensionIcon } from './ExtensionIcon';
+import { ICON_SIZE } from './SourcePickerSheet';
 import { langLabel } from '../utils/lang';
 import { LanguageFilterRow } from './LanguageFilterRow';
 import { useEnabledLanguages, filterByLanguages } from '../sources/languageFilter';
@@ -69,7 +71,9 @@ export function GlobalSourcesSheet({ visible, sources, onClose }: GlobalSourcesS
           a.lang.localeCompare(b.lang) ||
           a.name.localeCompare(b.name),
       );
-      out.push({ kind: 'group', key: `g:${pkg}`, label: extLabel(pkg) });
+      // Rows carry their extension's icon; a header only helps when one
+      // extension has several sources (one per language).
+      if (list.length > 1) out.push({ kind: 'group', key: `g:${pkg}`, label: extLabel(pkg) });
       for (const s of list) out.push({ kind: 'source', key: s.id, source: s });
     }
     return out;
@@ -135,19 +139,11 @@ export function GlobalSourcesSheet({ visible, sources, onClose }: GlobalSourcesS
                   { backgroundColor: pressed ? theme.colors.surface : 'transparent' },
                 ]}
               >
-                <View
-                  style={[
-                    styles.checkbox,
-                    {
-                      borderColor: checked ? theme.colors.accent : theme.colors.border,
-                      backgroundColor: checked ? theme.colors.accent : 'transparent',
-                    },
-                  ]}
-                >
-                  {checked ? <Icon name="check" size={14} color={theme.colors.onAccent} /> : null}
-                </View>
+                <ExtensionIcon uri={s.iconUrl} name={s.name} size={ICON_SIZE} />
                 <View style={{ flex: 1 }}>
-                  <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>{s.name}</Text>
+                  <Text numberOfLines={1} style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
+                    {s.name}
+                  </Text>
                   <View style={styles.tags}>
                     <Text style={[styles.langTag, { color: theme.colors.textMuted, borderColor: theme.colors.border }]}>
                       {langLabel(s.lang)}
@@ -158,6 +154,17 @@ export function GlobalSourcesSheet({ visible, sources, onClose }: GlobalSourcesS
                       </Text>
                     ) : null}
                   </View>
+                </View>
+                <View
+                  style={[
+                    styles.checkbox,
+                    {
+                      borderColor: checked ? theme.colors.accent : theme.colors.border,
+                      backgroundColor: checked ? theme.colors.accent : 'transparent',
+                    },
+                  ]}
+                >
+                  {checked ? <Icon name="check" size={14} color={theme.colors.onAccent} /> : null}
                 </View>
               </Pressable>
             );
@@ -223,13 +230,15 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 1.2,
     marginTop: 14,
-    marginBottom: 4,
+    marginBottom: 2,
+    // Lines up with the icons in the rows below.
+    paddingHorizontal: 8,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingVertical: 12,
+    paddingVertical: 10,
     paddingHorizontal: 8,
     borderRadius: 10,
   },
