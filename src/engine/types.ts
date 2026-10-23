@@ -326,6 +326,11 @@ export interface Engine {
     chapterUrl: string,
     pageIndex: number,
   ): Promise<ImageFileDto>;
+  /**
+   * Bytes on disk for each chapter's download, in the order given (0 when
+   * nothing is saved). Slow under a picked folder; batch and cache.
+   */
+  getDownloadedSizes(keys: readonly { sourceId: string; chapterUrl: string }[]): Promise<number[]>;
   /** Deletes all downloaded pages for a chapter. */
   deleteDownloadedChapter(sourceId: string, chapterUrl: string): Promise<void>;
   /**
