@@ -327,7 +327,9 @@ When you add a new persisted store, follow the favorites pattern (in-memory stat
   `EngineFacade.fetchImage`, which busts the disk cache and re-downloads.
   Freshly-downloaded files that don't decode are rejected (not cached) so a
   truncated download can't keep rendering black. Opening a chapter records history.
-  Supports **pinch / double-tap zoom** and a per-page **actions menu** (e.g. save
+  Supports **pinch / double-tap zoom** (double-tap again to zoom out; pan while
+  zoomed; the webtoon strip still scrolls while zoomed, paged modes lock page
+  swipes until you zoom back out) and a per-page **actions menu** (e.g. save
   the image to a separate phone-gallery album, distinct from chapter downloads).
   The bottom chrome carries a themed **page slider** (`src/components/PageSlider.tsx`):
   a draggable thumb over a filled track flanked by the current/total page numbers
@@ -475,6 +477,17 @@ patches/                       patch-package patches (react-native-screens)
   `FlatList` in an absolute `Pressable`, and don't gate page visibility on a
   Reanimated opacity; that caused the "white screen, pages glimpsed on back" bug.
   Tap-to-toggle lives on each page; bars are plain conditional views.
+- **Reader zoom uses core `Animated` (native driver), not Reanimated.** On this
+  RN / Reanimated / Gesture Handler combination, Reanimated transform updates
+  didn't reliably reach the screen (the zoom lagged a gesture behind or stuck
+  at 1x). Gesture handlers run as plain JS (`runOnJS(true)`, passed as
+  `useCallback` refs so Babel doesn't turn them into worklets). The page list
+  scrolls through `GestureScrollView`, a plain `ScrollView` wrapped in
+  `Gesture.Native().disallowInterruption(false)`: a bare `ScrollView` makes
+  Gesture Handler cancel the pinch as soon as it drags (paged modes turned the
+  page instead), and Gesture Handler's own `FlatList` can't be interrupted at
+  all. Give every `Gesture.Tap()` a `maxDistance`; it has no movement limit by
+  default, so flicks counted as taps.
 - **Comments** explain *why*, not *what*. No narration comments.
 - **Empty states are required.** Zero-content screens render a friendly prompt
   that routes to **Extensions** (see `HomeScreen`/`DiscoverScreen`).
