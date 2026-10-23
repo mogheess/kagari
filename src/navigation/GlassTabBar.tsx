@@ -1,13 +1,15 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, Platform } from 'react-native';
 import { BlurView } from '@react-native-community/blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   useAnimatedStyle,
+  useSharedValue,
+  withSpring,
   withTiming,
-  useDerivedValue,
 } from 'react-native-reanimated';
 import { useTheme } from '../theme/ThemeProvider';
+import { withAlpha } from '../utils/color';
 import { Icon, type IconName } from '../components/Icon';
 import { useUnseenUpdateCount } from '../library/libraryUpdates';
 import type { TabKey } from './types';
@@ -39,10 +41,30 @@ interface GlassTabBarProps {
  * cheaper and reads the same.
  */
 const USE_BLUR = Platform.OS === 'ios';
+
+/** The pill behind the active tab's icon. */
+const INDICATOR_WIDTH = 56;
+const INDICATOR_HEIGHT = 32;
+const ROW_PADDING_TOP = 8;
+const SPRING = { damping: 18, stiffness: 220, mass: 0.7 };
+
 export function GlassTabBar({ active, onChange }: GlassTabBarProps) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const unseenUpdates = useUnseenUpdateCount();
+  const activeIndex = Math.max(0, TABS.findIndex(tab => tab.key === active));
+
+  // The indicator slides between tabs rather than jumping, so the eye follows
+  // the switch. Tab widths are equal, so one measurement places it.
+  const [rowWidth, setRowWidth] = useState(0);
+  const position = useSharedValue(activeIndex);
+  useEffect(() => {
+    position.value = withSpring(activeIndex, SPRING);
+  }, [activeIndex, position]);
+  const tabWidth = rowWidth / TABS.length;
+  const indicatorStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: position.value * tabWidth + (tabWidth - INDICATOR_WIDTH) / 2 }],
+  }));
 
   return (
     <View style={[styles.wrap, { paddingBottom: Math.max(insets.bottom, 10) }]} pointerEvents="box-none">
@@ -64,13 +86,23 @@ export function GlassTabBar({ active, onChange }: GlassTabBarProps) {
             reducedTransparencyFallbackColor={theme.colors.surface}
           />
         ) : null}
-        <View style={styles.row}>
+        <View style={styles.row} onLayout={e => setRowWidth(e.nativeEvent.layout.width)}>
+          {rowWidth > 0 ? (
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.indicator,
+                { backgroundColor: withAlpha(theme.colors.accent, theme.scheme === 'dark' ? 0.2 : 0.16) },
+                indicatorStyle,
+              ]}
+            />
+          ) : null}
           {TABS.map(tab => (
             <TabButton
               key={tab.key}
               tab={tab}
               active={tab.key === active}
-              badge={tab.key === 'updates' && unseenUpdates > 0}
+              badge={tab.key === 'updates' ? unseenUpdates : 0}
               onPress={() => onChange(tab.key)}
             />
           ))}
@@ -88,34 +120,50 @@ function TabButton({
 }: {
   tab: { key: TabKey; label: string; icon: IconName };
   active: boolean;
-  badge?: boolean;
+  /** Count shown on the icon; 0 hides it. */
+  badge: number;
   onPress: () => void;
 }) {
   const theme = useTheme();
-  const activeValue = useDerivedValue(() => withTiming(active ? 1 : 0, { duration: 180 }), [active]);
-
-  const labelStyle = useAnimatedStyle(() => ({
-    opacity: 0.55 + activeValue.value * 0.45,
-  }));
-
+  const pressed = useSharedValue(1);
+  const pressStyle = useAnimatedStyle(() => ({ transform: [{ scale: pressed.value }] }));
   const color = active ? theme.colors.accent : theme.colors.textMuted;
+  const badgeText = badge > 99 ? '99+' : String(badge);
 
   return (
-    <Pressable style={styles.tab} onPress={onPress} hitSlop={6}>
-      <View>
-        <Icon name={tab.icon} size={23} color={color} filled={active && tab.icon === 'home'} />
-        {badge ? (
+    <Pressable
+      style={styles.tab}
+      onPress={onPress}
+      onPressIn={() => {
+        pressed.value = withTiming(0.9, { duration: 90 });
+      }}
+      onPressOut={() => {
+        pressed.value = withSpring(1, SPRING);
+      }}
+      hitSlop={6}
+      accessibilityRole="tab"
+      accessibilityState={{ selected: active }}
+      accessibilityLabel={badge > 0 ? `${tab.label}, ${badgeText} new` : tab.label}
+    >
+      <Animated.View style={[styles.iconBox, pressStyle]}>
+        <Icon name={tab.icon} size={22} color={color} filled={active} />
+        {badge > 0 ? (
           <View
             style={[
               styles.badge,
-              { backgroundColor: theme.colors.accent, borderColor: theme.colors.glass },
+              { backgroundColor: theme.colors.accent, borderColor: theme.colors.elevated },
             ]}
-          />
+          >
+            <Text style={[styles.badgeText, { color: theme.colors.onAccent }]}>{badgeText}</Text>
+          </View>
         ) : null}
-      </View>
-      <Animated.View style={labelStyle}>
-        <Text style={[styles.label, { color }]}>{tab.label}</Text>
       </Animated.View>
+      <Text
+        numberOfLines={1}
+        style={[styles.label, active ? styles.labelActive : null, { color }]}
+      >
+        {tab.label}
+      </Text>
     </Pressable>
   );
 }
@@ -145,25 +193,50 @@ const styles = StyleSheet.create({
   },
   row: {
     flexDirection: 'row',
-    paddingVertical: 10,
-    paddingHorizontal: 6,
+    paddingTop: ROW_PADDING_TOP,
+    paddingBottom: 8,
+  },
+  indicator: {
+    position: 'absolute',
+    top: ROW_PADDING_TOP,
+    left: 0,
+    width: INDICATOR_WIDTH,
+    height: INDICATOR_HEIGHT,
+    borderRadius: INDICATOR_HEIGHT / 2,
   },
   tab: {
     flex: 1,
     alignItems: 'center',
-    gap: 3,
+  },
+  iconBox: {
+    width: INDICATOR_WIDTH,
+    height: INDICATOR_HEIGHT,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   label: {
-    fontSize: 10.5,
-    fontWeight: '600',
+    fontSize: 11,
+    fontWeight: '500',
+    marginTop: 3,
+    letterSpacing: 0.1,
+  },
+  labelActive: {
+    fontWeight: '700',
   },
   badge: {
     position: 'absolute',
-    top: -2,
-    right: -4,
-    width: 9,
-    height: 9,
-    borderRadius: 5,
+    top: 0,
+    left: INDICATOR_WIDTH / 2 + 4,
+    minWidth: 17,
+    height: 17,
+    paddingHorizontal: 4,
+    borderRadius: 9,
     borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: {
+    fontSize: 9.5,
+    fontWeight: '800',
   },
 });
