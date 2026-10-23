@@ -1,4 +1,5 @@
-import { fetchRepoExtensions } from '../repoClient';
+import { fetchRepoExtensions, repoSigningKeys } from '../repoClient';
+import type { AvailableExtensionDto } from '../types';
 
 /** UTF-8 encode without depending on Node's Buffer. */
 function utf8(value: string): number[] {
@@ -263,4 +264,17 @@ test('surfaces an error when every candidate fails', async () => {
   await expect(
     fetchRepoExtensions('https://dead.test/repo/index.min.json', NOT_INSTALLED),
   ).rejects.toThrow(/404/);
+});
+
+test('collects each repo signing key once, by the configured repo url', () => {
+  const ext = (repoUrl: string, pkg: string, repoSigningKey?: string) =>
+    ({ repoUrl, pkg, repoSigningKey }) as unknown as AvailableExtensionDto;
+  expect(
+    repoSigningKeys([
+      ext('https://a/index.pb', 'p1', 'aaaa'),
+      ext('https://a/index.pb', 'p2', 'aaaa'),
+      ext('https://b/index.min.json', 'p3'),
+      ext('https://c/repo.json', 'p4', 'cccc'),
+    ]),
+  ).toEqual({ 'https://a/index.pb': 'aaaa', 'https://c/repo.json': 'cccc' });
 });

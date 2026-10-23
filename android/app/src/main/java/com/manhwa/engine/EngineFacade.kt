@@ -110,6 +110,7 @@ class EngineFacade(context: Context) {
                 trusted = ext.trusted,
                 sources = ext.sources.map { Mappers.sourceToDto(it, ext.pkg, ext.isNsfw, icon) },
                 iconUrl = icon,
+                signatureHash = ext.signatureHash,
             )
         }
     }
@@ -165,6 +166,17 @@ class EngineFacade(context: Context) {
     fun trustSignature(pkg: String, certSha256: String) {
         trust.trust(pkg, certSha256)
         reload()
+    }
+
+    /**
+     * Records repo signing keys ([fetched]: repo url to fingerprint) and drops
+     * those of repos no longer [configured]. Reloads extensions when that
+     * changes which signers are trusted. Returns whether it did.
+     */
+    fun updateRepoSigningKeys(fetched: Map<String, String>, configured: Collection<String>): Boolean {
+        val changed = trust.updateRepoKeys(fetched, configured)
+        if (changed) reload()
+        return changed
     }
 
     // Browse/read always goes through the extension-lib 1.6 suspend API. Lib 1.4

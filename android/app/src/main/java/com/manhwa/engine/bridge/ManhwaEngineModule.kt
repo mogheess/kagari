@@ -150,7 +150,16 @@ class ManhwaEngineModule(
     @ReactMethod
     fun removeRepo(url: String, promise: Promise) = resolve(promise) {
         repos.remove(url)
+        // Its signing key no longer vouches for anything.
+        facade.updateRepoSigningKeys(emptyMap(), repos.list().map { it.url })
         ""
+    }
+
+    /** `keysJson`: `{ repoUrl: signingKeyFingerprint }` for the repos just fetched. */
+    @ReactMethod
+    fun setRepoSigningKeys(keysJson: String, promise: Promise) = resolve(promise) {
+        val fetched = json.decodeFromString<Map<String, String>>(keysJson)
+        facade.updateRepoSigningKeys(fetched, repos.list().map { it.url }).toString()
     }
 
     @ReactMethod

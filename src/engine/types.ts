@@ -16,11 +16,16 @@ export interface ExtensionDto {
   libVersion: string;
   lang: string;
   isNsfw: boolean;
-  /** True once the signing cert is trusted by the user. */
+  /**
+   * Whether its code is loaded: its signer is one of the user's repos' keys,
+   * or the user trusted it. Untrusted extensions contribute no sources.
+   */
   trusted: boolean;
   /** Sources contributed by this extension (a SourceFactory can yield many). */
   sources: SourceDto[];
   iconUrl?: string;
+  /** SHA-256 of the signing certificate; what trusting the extension records. */
+  signatureHash?: string | null;
 }
 
 export interface SourceDto {
@@ -179,6 +184,8 @@ export interface AvailableExtensionDto {
   iconUrl?: string;
   sources: { name: string; lang: string; id: string; baseUrl?: string }[];
   repoUrl: string;
+  /** Fingerprint of the key the repo signs its extensions with, when it publishes one. */
+  repoSigningKey?: string;
   installed: boolean;
 }
 
@@ -261,6 +268,12 @@ export interface Engine {
   listExtensions(): Promise<ExtensionDto[]>;
   listSources(): Promise<SourceDto[]>;
   trustSignature(pkg: string, certSha256: string): Promise<void>;
+  /**
+   * Records repos' signing keys (`{ repoUrl: fingerprint }`, from the repos just
+   * fetched) so extensions they sign load without a prompt. Resolves true when
+   * that changed which extensions are trusted (they've been reloaded).
+   */
+  setRepoSigningKeys(keys: Record<string, string>): Promise<boolean>;
 
   // repos & extension installation
   listRepos(): Promise<RepoDto[]>;
