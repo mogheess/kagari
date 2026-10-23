@@ -366,6 +366,8 @@ export interface Engine {
   shareBackup(uri: string, fileName: string): Promise<void>;
 
   // device
+  /** Device ABIs, preferred first (e.g. `["arm64-v8a", "armeabi-v7a"]`). Empty when unknown. */
+  getSupportedAbis(): Promise<string[]>;
   /** Holds the screen awake (reader). Best-effort; no-ops without an Activity. */
   setKeepScreenOn(enabled: boolean): Promise<void>;
 
