@@ -34,6 +34,8 @@ data class ExtensionDto(
     val trusted: Boolean,
     val sources: List<SourceDto>,
     val iconUrl: String? = null,
+    /** SHA-256 of the signing certificate; what trusting the extension records. */
+    val signatureHash: String? = null,
 )
 
 @Serializable
@@ -61,6 +63,15 @@ data class MangaDto(
 data class MangasPageDto(
     val manga: List<MangaDto>,
     val hasNextPage: Boolean,
+)
+
+/** Titles related to one manga, as far as its source can tell. */
+@Serializable
+data class RelatedMangaDto(
+    /** The source's own related list, or null when it doesn't provide one. */
+    val mangas: List<MangaDto>? = null,
+    /** False when the source asks apps not to look for related titles by searching. */
+    val searchAllowed: Boolean = true,
 )
 
 @Serializable

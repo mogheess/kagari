@@ -26,6 +26,8 @@ data class LoadedExtension(
     val lang: String,
     val isNsfw: Boolean,
     val trusted: Boolean,
+    /** SHA-256 of the signing certificate, or null when it couldn't be read. */
+    val signatureHash: String?,
     val sources: List<Source>,
 )
 
@@ -108,17 +110,16 @@ class ExtensionLoader(
         }
 
         val signatureHash = SignatureTrust.signatureHash(pm, pkgInfo.packageName)
-        // This app is sideloaded and the user explicitly installs each extension,
-        // so we auto-trust on first sight (recording the signature) rather than
-        // gating behind a separate prompt the way Mihon does.
-        if (signatureHash != null && !trust.isTrusted(pkgInfo.packageName, signatureHash)) {
-            trust.trust(pkgInfo.packageName, signatureHash)
-            Log.i(TAG, "Auto-trusted ${pkgInfo.packageName}")
-        }
-        val trusted = signatureHash != null
+        // Extensions run arbitrary code in the app. Load one only when a repo
+        // the user added vouches for its signer, or the user trusted it on the
+        // Installed tab (Mihon's rule). Installs from before this check were
+        // recorded as trusted when first seen, so upgrading keeps them.
+        val trusted = signatureHash != null &&
+            (trust.isTrusted(pkgInfo.packageName, signatureHash) || trust.isRepoKey(signatureHash))
+        if (!trusted) Log.i(TAG, "Not loading untrusted ${pkgInfo.packageName}")
 
         val sources = if (!trusted) {
-            // No verifiable signature: surface it but don't run its code.
+            // Unknown signer: surface it but don't run its code.
             emptyList()
         } else {
             val classLoader = ChildFirstPathClassLoader(appInfo.sourceDir, null, context.classLoader)
@@ -142,6 +143,7 @@ class ExtensionLoader(
             },
             isNsfw = isNsfw,
             trusted = trusted,
+            signatureHash = signatureHash,
             sources = sources,
         )
     }

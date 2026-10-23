@@ -196,6 +196,8 @@ function fromLegacyJson(
     pkg: raw.pkg,
     apk: raw.apk,
     apkUrl: `${repoBaseDir(indexUrl)}apk/${raw.apk}`,
+    // The JSON index has no icon field; repos publish them next to the APKs.
+    iconUrl: `${repoBaseDir(indexUrl)}icon/${raw.pkg}.png`,
     lang: raw.lang,
     versionName: raw.version,
     versionCode: raw.code,
@@ -216,7 +218,11 @@ async function loadIndex(
   indexUrl: string,
   repoUrl: string,
   depth = 0,
+  /** From a repo.json descriptor that pointed here. */
+  signingKey?: string,
 ): Promise<AvailableExtensionDto[]> {
+  const withKey = (list: AvailableExtensionDto[], key = signingKey) =>
+    key ? list.map(e => ({ ...e, repoSigningKey: key })) : list;
   let bytes = await fetchBinary(indexUrl);
   if (isGzip(bytes)) bytes = gunzipSync(bytes);
 
@@ -229,13 +235,18 @@ async function loadIndex(
     const descriptor = JSON.parse(decodeText(bytes)) as RepoDescriptor;
     const next = descriptor.index_v2;
     if (!next) throw new Error('Repo descriptor has no index_v2');
-    return loadIndex(resolveIndexUrl(next, indexUrl), repoUrl, depth + 1);
+    return loadIndex(
+      resolveIndexUrl(next, indexUrl),
+      repoUrl,
+      depth + 1,
+      descriptor.meta?.signingKeyFingerprint ?? signingKey,
+    );
   }
 
   // `[` — legacy JSON index.
   if (head === 0x5b) {
     const raw = JSON.parse(decodeText(bytes)) as RawRepoExtension[];
-    return raw.map(e => fromLegacyJson(e, indexUrl, repoUrl));
+    return withKey(raw.map(e => fromLegacyJson(e, indexUrl, repoUrl)));
   }
 
   const decoded = decodeRepoIndexPb(bytes);
@@ -247,12 +258,32 @@ async function loadIndex(
       let listBytes = await fetchBinary(resolveIndexUrl(decoded.extensionListUrl, indexUrl));
       if (isGzip(listBytes)) listBytes = gunzipSync(listBytes);
       const external = decodeRepoExtensionListPb(listBytes);
-      if (external.length > 0) return external.map(e => fromPb(e, repoUrl));
+      if (external.length > 0) {
+        return withKey(
+          external.map(e => fromPb(e, repoUrl)),
+          decoded.signingKeyFingerprint ?? signingKey,
+        );
+      }
     } catch {
       // Fall through to the inline list below.
     }
   }
-  return decoded.extensions.map(e => fromPb(e, repoUrl));
+  return withKey(
+    decoded.extensions.map(e => fromPb(e, repoUrl)),
+    decoded.signingKeyFingerprint ?? signingKey,
+  );
+}
+
+/**
+ * Each fetched repo's signing-key fingerprint, by the repo url the user
+ * configured. Repos that failed to load, or publish no key, are absent.
+ */
+export function repoSigningKeys(available: readonly AvailableExtensionDto[]): Record<string, string> {
+  const keys: Record<string, string> = {};
+  for (const ext of available) {
+    if (ext.repoSigningKey && !keys[ext.repoUrl]) keys[ext.repoUrl] = ext.repoSigningKey;
+  }
+  return keys;
 }
 
 /** Fetches a single repo index and maps it to AvailableExtensionDto[]. */

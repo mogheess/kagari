@@ -7,6 +7,7 @@ import {
   StyleSheet,
   FlatList,
   ActivityIndicator,
+  Alert,
   AppState,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -14,7 +15,9 @@ import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeProvider';
 import { getEngine } from '../engine';
 import { refreshSources } from '../sources/sourcesStore';
+import { syncRepoSigningKeys } from '../sources/repoTrust';
 import { Icon } from '../components/Icon';
+import { ExtensionIcon } from '../components/ExtensionIcon';
 import {
   computeExtensionUpdates,
   getExtensionUpdates,
@@ -87,6 +90,8 @@ export function ExtensionsScreen() {
     try {
       const list = await engine.getAvailableExtensions();
       setAvailable(list);
+      // The repos' signing keys may have just made installed extensions trusted.
+      if (await syncRepoSigningKeys(list)) setInstalledExts(await engine.listExtensions());
     } catch (e) {
       setRepoError(e instanceof Error ? e.message : 'Failed to load repo');
     } finally {
@@ -132,6 +137,8 @@ export function ExtensionsScreen() {
     await engine.removeRepo(url);
     await refreshRepos();
     await refreshAvailable();
+    // Its signing key no longer vouches for its extensions.
+    await Promise.all([refreshInstalled(), refreshSources()]);
   };
 
   const clearFailed = (pkg: string) =>
@@ -211,6 +218,34 @@ export function ExtensionsScreen() {
     await refreshAvailable();
   };
 
+  // An extension no repo of the user's vouches for loads nothing until it's
+  // trusted here; extensions run code inside the app, so say what that means.
+  const onTrust = (ext: ExtensionDto) => {
+    const hash = ext.signatureHash;
+    if (!hash) return;
+    Alert.alert(
+      `Trust ${ext.name}?`,
+      `It isn't signed by any of your repos. Extensions run code inside Kagari, ` +
+        `with network access and access to your library. Only trust it if you know ` +
+        `where it came from.\n\nSigning key: ${hash.slice(0, 16)}\u2026`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Trust',
+          onPress: async () => {
+            setBusyPkg(ext.pkg);
+            try {
+              await engine.trustSignature(ext.pkg, hash);
+              await Promise.all([refreshInstalled(), refreshSources()]);
+            } finally {
+              setBusyPkg(null);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const onUninstall = async (pkg: string) => {
     setBusyPkg(pkg);
     try {
@@ -226,6 +261,13 @@ export function ExtensionsScreen() {
     () => new Set(installedExts.map(e => e.pkg)),
     [installedExts],
   );
+
+  // Repo icons for installed rows whose APK icon couldn't be rendered natively.
+  const repoIcons = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of available) if (a.iconUrl) m.set(a.pkg, a.iconUrl);
+    return m;
+  }, [available]);
 
   // Installed extensions whose repo has a newer version.
   const extUpdates = useMemo(
@@ -256,7 +298,7 @@ export function ExtensionsScreen() {
     () =>
       [...installedExts].sort((a, b) => {
         const rank = (e: ExtensionDto) =>
-          updatesByPkg.has(e.pkg) ? 0 : orphanedPkgs.has(e.pkg) ? 1 : 2;
+          !e.trusted ? 0 : updatesByPkg.has(e.pkg) ? 1 : orphanedPkgs.has(e.pkg) ? 2 : 3;
         return rank(a) - rank(b) || a.name.localeCompare(b.name);
       }),
     [installedExts, updatesByPkg, orphanedPkgs],
@@ -264,8 +306,8 @@ export function ExtensionsScreen() {
 
   // Drives FlatList row re-renders when install state or in-flight pkg changes.
   const listExtra = useMemo(
-    () => ({ installedPkgs, busyPkg, failedPkgs, updatesByPkg, orphanedPkgs }),
-    [installedPkgs, busyPkg, failedPkgs, updatesByPkg, orphanedPkgs],
+    () => ({ installedPkgs, busyPkg, failedPkgs, updatesByPkg, orphanedPkgs, repoIcons }),
+    [installedPkgs, busyPkg, failedPkgs, updatesByPkg, orphanedPkgs, repoIcons],
   );
 
   // Language chips, most common first.
@@ -502,11 +544,7 @@ export function ExtensionsScreen() {
       <View
         style={[styles.extRow, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
       >
-        <View style={[styles.extIcon, { backgroundColor: theme.colors.elevated }]}>
-          <Text style={{ color: theme.colors.textMuted, fontWeight: '800', fontSize: 15 }}>
-            {ext.name.charAt(0).toUpperCase()}
-          </Text>
-        </View>
+        <ExtensionIcon uri={ext.iconUrl} name={ext.name} />
         <View style={{ flex: 1 }}>
           <Text numberOfLines={1} style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
             {ext.name}
@@ -566,14 +604,16 @@ export function ExtensionsScreen() {
       <View
         style={[styles.extRow, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
       >
-        <View style={[styles.extIcon, { backgroundColor: theme.colors.elevated }]}>
-          <Icon name="book" size={18} color={theme.colors.textMuted} />
-        </View>
+        <ExtensionIcon uri={ext.iconUrl ?? repoIcons.get(ext.pkg)} name={ext.name} />
         <View style={{ flex: 1 }}>
           <Text numberOfLines={1} style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
             {ext.name}
           </Text>
-          {update ? (
+          {!ext.trusted ? (
+            <Text style={[styles.rowNote, { color: theme.colors.danger }]}>
+              {`v${ext.versionName} \u00B7 Untrusted \u2014 not signed by your repos, so it isn't loaded`}
+            </Text>
+          ) : update ? (
             <Text style={{ color: theme.colors.accent, fontSize: 11.5, marginTop: 2, fontWeight: '600' }}>
               {update.availableVersionName === ext.versionName
                 ? // Same source, rebuilt with a higher versionCode (keiyoushi now
@@ -588,7 +628,7 @@ export function ExtensionsScreen() {
             </Text>
           ) : (
             <Text style={{ color: theme.colors.textFaint, fontSize: 11.5, marginTop: 2 }}>
-              {`v${ext.versionName} \u00B7 ${ext.lang.toUpperCase()}${ext.trusted ? '' : '  \u00B7  untrusted'}`}
+              {`v${ext.versionName} \u00B7 ${ext.lang.toUpperCase()}`}
             </Text>
           )}
         </View>
@@ -596,7 +636,14 @@ export function ExtensionsScreen() {
           <ActivityIndicator size="small" color={theme.colors.textMuted} />
         ) : (
           <>
-            {update ? (
+            {!ext.trusted && ext.signatureHash ? (
+              <Pressable
+                onPress={() => onTrust(ext)}
+                style={[styles.updatePill, styles.trustPill, { borderColor: theme.colors.danger }]}
+              >
+                <Text style={[styles.pillLabel, { color: theme.colors.danger }]}>Trust</Text>
+              </Pressable>
+            ) : update ? (
               <Pressable
                 onPress={() => onInstall(update.ext)}
                 style={[styles.updatePill, { backgroundColor: theme.colors.accent }]}
@@ -786,6 +833,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 999,
   },
+  trustPill: {
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  rowNote: {
+    fontSize: 11.5,
+    marginTop: 2,
+    fontWeight: '600',
+  },
+  pillLabel: {
+    fontWeight: '700',
+    fontSize: 12.5,
+  },
   extRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -794,13 +853,6 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
     marginBottom: 10,
-  },
-  extIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   installBtn: {
     minWidth: 78,
