@@ -235,8 +235,9 @@ export function ReaderScreen() {
   }, [activeUrl, loadedChapters.length, orderedChapters, ensureChapter]);
 
   const items = useMemo(
-    () => buildReaderItems(loadedChapters, orderedChapters),
-    [loadedChapters, orderedChapters],
+    () =>
+      buildReaderItems(loadedChapters, orderedChapters, { transitionsBetween: isPaged(mode) }),
+    [loadedChapters, orderedChapters, mode],
   );
 
   const activeChapter = useMemo(
@@ -524,8 +525,12 @@ export function ReaderScreen() {
           direction={item.direction}
           from={item.from}
           to={item.to}
-          // In a paged viewer every cell must be one screen tall or
-          // getItemLayout's uniform maths breaks.
+          ready={item.ready}
+          // In a paged viewer every cell must be exactly one screen, tall and
+          // wide, or getItemLayout's uniform maths breaks. Without an explicit
+          // width a transition in the left/right modes shrank to its text and
+          // every page after it was laid out off by the difference.
+          width={width}
           height={paged ? height : CHAPTER_TRANSITION_HEIGHT}
           onPress={() => void openChapter(item.to, item.direction === 'prev')}
         />
@@ -924,20 +929,40 @@ function ChapterTransition({
   direction,
   from,
   to,
+  ready,
+  width,
   height,
   onPress,
 }: {
   direction: 'prev' | 'next';
   from: ChapterDto;
   to?: ChapterDto;
+  /** `to` is loaded and follows straight after (paged modes). */
+  ready?: boolean;
+  width: number;
   height: number;
   onPress: () => void;
 }) {
   const next = direction === 'next';
+  if (ready && to) {
+    return (
+      <Pressable onPress={onPress} style={[styles.transition, { width, height }]}>
+        <Text style={styles.transitionLabel}>Finished</Text>
+        <Text numberOfLines={2} style={styles.transitionHint}>
+          {from.name}
+        </Text>
+        <View style={styles.transitionGap} />
+        <Text style={styles.transitionLabel}>Next</Text>
+        <Text numberOfLines={2} style={styles.transitionName}>
+          {to.name}
+        </Text>
+      </Pressable>
+    );
+  }
   // No neighbour means the end of the series in that direction.
   if (!to) {
     return (
-      <View style={[styles.transition, { height }]}>
+      <View style={[styles.transition, { width, height }]}>
         <Text style={styles.transitionLabel}>
           {next ? 'Last chapter' : 'First chapter'}
         </Text>
@@ -948,7 +973,7 @@ function ChapterTransition({
     );
   }
   return (
-    <Pressable onPress={onPress} style={[styles.transition, { height }]}>
+    <Pressable onPress={onPress} style={[styles.transition, { width, height }]}>
       <Icon name={next ? 'chevronDown' : 'chevronRight'} size={22} color="#6d6d6d" />
       <Text style={styles.transitionLabel}>
         {next ? 'Next chapter' : 'Previous chapter'}
@@ -1380,6 +1405,9 @@ const styles = StyleSheet.create({
     color: '#6d6d6d',
     fontSize: 12,
     marginTop: 2,
+  },
+  transitionGap: {
+    height: 22,
   },
   center: {
     position: 'absolute',
