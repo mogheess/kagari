@@ -181,13 +181,12 @@ class ManhwaEngineModule(
     @ReactMethod
     fun search(sourceId: String, query: String, page: Int, filtersJson: String, promise: Promise) =
         resolve(promise) {
-            json.encodeToString(facade.search(sourceId, query, page))
+            json.encodeToString(facade.search(sourceId, query, page, filtersJson))
         }
 
     @ReactMethod
     fun getFilters(sourceId: String, promise: Promise) = resolve(promise) {
-        // TODO: serialize the source's FilterList into the FilterDto schema.
-        "[]"
+        facade.getFilters(sourceId)
     }
 
     // --- detail / reading ---
