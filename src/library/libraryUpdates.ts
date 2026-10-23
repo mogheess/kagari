@@ -8,9 +8,11 @@
  * renders. The first time a manga is seen it's baselined silently so the backlog
  * doesn't flood the feed.
  *
- * In-app only: the scan runs on launch/foreground/hourly via `UpdateBootstrap`
- * (throttled here) and on manual pull-to-refresh (`force`). It does not run while
- * the app is closed — that would need a native WorkManager job.
+ * The scan runs on launch/foreground/hourly via `UpdateBootstrap` (throttled
+ * here) and on manual pull-to-refresh (`force`). While the app is closed a
+ * native WorkManager job (`LibraryUpdateWorker`) runs the same diff against
+ * these snapshots and leaves what it finds in an inbox;
+ * `mergeBackgroundUpdates` folds that into the feed and snapshots here.
  */
 import { useSyncExternalStore } from 'react';
 import { makePersistence } from '../store/persist';
@@ -73,6 +75,11 @@ function emit(): void {
   for (const l of listeners) l();
 }
 
+let resolveHydrated: () => void = () => {};
+const hydrated = new Promise<void>(resolve => {
+  resolveHydrated = resolve;
+});
+
 async function hydrate(): Promise<void> {
   const [f, s, m] = await Promise.all([feedStore.load(), snapStore.load(), metaStore.load()]);
   if (Array.isArray(f)) feed = f;
@@ -82,7 +89,7 @@ async function hydrate(): Promise<void> {
   // Clean up anything left over from a title removed in a previous session.
   pruneRemovedFavorites();
 }
-void hydrate();
+void hydrate().finally(() => resolveHydrated());
 
 /**
  * Drops feed entries and tracking snapshots for titles no longer in the library.
@@ -295,6 +302,41 @@ export async function checkLibraryUpdates(engine: Engine, opts?: { force?: boole
       }
     }
   }
+}
+
+/**
+ * Folds in what the background check found while the app was closed: its
+ * entries join the feed, and the chapters it saw join the snapshots so the
+ * in-app scan doesn't report them a second time.
+ */
+export async function mergeBackgroundUpdates(engine: Engine): Promise<void> {
+  await hydrated;
+  let inbox;
+  try {
+    inbox = await engine.takeBackgroundUpdates();
+  } catch {
+    return;
+  }
+  const live = new Set(getFavorites().map(f => keyOf(f.sourceId, f.url)));
+  let snapChanged = false;
+  for (const [key, urls] of Object.entries(inbox.snapshots ?? {})) {
+    const prev = snapshots[key];
+    // A title removed since the check ran (or never baselined) isn't tracked.
+    if (!prev || !live.has(key)) continue;
+    const seen = new Set(prev);
+    const added = urls.filter(url => !seen.has(url));
+    if (added.length === 0) continue;
+    snapshots[key] = [...added, ...prev].slice(0, MAX_SNAPSHOT_PER_MANGA);
+    snapChanged = true;
+  }
+  const found: LibraryUpdate[] = (inbox.updates ?? [])
+    .filter(u => live.has(keyOf(u.sourceId, u.mangaUrl)))
+    .map(u => ({ ...u, thumbnailUrl: u.thumbnailUrl ?? undefined, kind: u.kind ?? 'new' }));
+  const before = feed.length;
+  if (found.length > 0) mergeFeed(found);
+  if (feed.length !== before) feedStore.save(feed);
+  if (snapChanged) snapStore.save(snapshots);
+  if (feed.length !== before || snapChanged) emit();
 }
 
 /** Removes one entry from the feed (the per-row dismiss). */

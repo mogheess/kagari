@@ -71,6 +71,26 @@ export interface MangasPageDto {
   hasNextPage: boolean;
 }
 
+/** A new-chapters entry the background check found (same shape as the Updates feed). */
+export interface BackgroundUpdateDto {
+  sourceId: string;
+  mangaUrl: string;
+  title: string;
+  thumbnailUrl?: string | null;
+  newCount: number;
+  latestChapterName: string;
+  latestChapterUrl: string;
+  foundAt: number;
+  kind?: 'new' | 'added';
+}
+
+/** What background checks found since the app last asked. */
+export interface BackgroundInboxDto {
+  updates: BackgroundUpdateDto[];
+  /** New chapter urls per manga, keyed `sourceId\u0000mangaUrl`. */
+  snapshots: Record<string, string[]>;
+}
+
 /** Names a download needs to land in Mihon's folder layout under a picked storage location. */
 export interface DownloadMeta {
   mangaTitle: string;
@@ -364,6 +384,12 @@ export interface Engine {
   }>;
   /** Opens the system share sheet for an exported backup. */
   shareBackup(uri: string, fileName: string): Promise<void>;
+
+  // background updates
+  /** Schedules the closed-app new-chapters check; `intervalHours` 0 turns it off. */
+  setBackgroundUpdates(intervalHours: number, wifiOnly: boolean, chargingOnly: boolean): Promise<void>;
+  /** What background checks found since last asked; empties it. */
+  takeBackgroundUpdates(): Promise<BackgroundInboxDto>;
 
   // device
   /** Holds the screen awake (reader). Best-effort; no-ops without an Activity. */

@@ -20,6 +20,8 @@
       "does not have REQUEST_DELETE_PACKAGES or DELETE_PACKAGES".
     -->
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+    <!-- New-chapter notifications from the background library check (Android 13+ asks). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
       android:name=".MainApplication"

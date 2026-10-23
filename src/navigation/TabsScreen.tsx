@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BackHandler, StyleSheet, View } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { BackHandler, Linking, StyleSheet, View } from 'react-native';
+import { StackActions, useNavigation } from '@react-navigation/native';
 import { GlassTabBar } from './GlassTabBar';
 import { HomeScreen } from '../screens/HomeScreen';
 import { LibraryScreen } from '../screens/LibraryScreen';
@@ -68,6 +68,19 @@ export function TabsScreen() {
       return key;
     });
   }, []);
+
+  // The new-chapters notification opens kagari://updates.
+  useEffect(() => {
+    const open = (url: string | null) => {
+      if (!url?.startsWith('kagari://updates')) return;
+      // A title or the reader may be open on top of the tabs.
+      if (navigation.canGoBack()) navigation.dispatch(StackActions.popToTop());
+      navigateTab('updates');
+    };
+    Linking.getInitialURL().then(open).catch(() => {});
+    const sub = Linking.addEventListener('url', e => open(e.url));
+    return () => sub.remove();
+  }, [navigateTab, navigation]);
 
   // Whether the tab host is the top route. A ref, deliberately: reading this
   // through a hook would re-render the host — and every mounted tab — each

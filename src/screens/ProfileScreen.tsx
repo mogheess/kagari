@@ -1,5 +1,16 @@
-import React, { useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Linking, Alert } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  Pressable,
+  StyleSheet,
+  ScrollView,
+  ActivityIndicator,
+  Linking,
+  Alert,
+  AppState,
+  Switch,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -21,6 +32,12 @@ import {
 } from '../library/storageLocation';
 import { countMigratableDownloads, migrateDownloadsToStorage } from '../library/downloads';
 import type { RootStackParamList } from '../navigation/types';
+import {
+  BACKGROUND_INTERVALS,
+  setBackgroundUpdateSettings,
+  useBackgroundUpdateSettings,
+} from '../library/backgroundUpdates';
+import { notificationsAllowed, requestNotificationPermission } from '../app/notificationPermission';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 const TAB_BAR_SPACE = 110;
@@ -70,6 +87,11 @@ export function ProfileScreen() {
         <Row icon="bookmark" label="Categories" onPress={() => navigation.navigate('Categories')} />
         <Row icon="columns" label="Tier Lists" onPress={() => navigation.navigate('TierLists')} />
         <Row icon="download" label="Downloads" onPress={() => navigation.navigate('Downloads')} />
+
+        <Text style={[styles.sectionLabel, { color: theme.colors.textFaint, marginTop: 28 }]}>
+          NEW CHAPTERS
+        </Text>
+        <BackgroundUpdatesCard />
 
         <Text style={[styles.sectionLabel, { color: theme.colors.textFaint, marginTop: 28 }]}>
           DATA
@@ -208,6 +230,132 @@ function Row({
       ) : null}
       <Icon name="chevronRight" size={18} color={theme.colors.textFaint} />
     </Pressable>
+  );
+}
+
+/**
+ * How often to look for new chapters while Kagari is closed, and on what
+ * conditions. Turning it on is also when we ask to send notifications.
+ */
+function BackgroundUpdatesCard() {
+  const theme = useTheme();
+  const settings = useBackgroundUpdateSettings();
+  const [allowed, setAllowed] = useState(true);
+
+  // Re-check on return from the system settings screen.
+  useEffect(() => {
+    const refresh = () => {
+      notificationsAllowed().then(setAllowed).catch(() => {});
+    };
+    refresh();
+    const sub = AppState.addEventListener('change', state => {
+      if (state === 'active') refresh();
+    });
+    return () => sub.remove();
+  }, []);
+
+  const pick = async (intervalHours: (typeof BACKGROUND_INTERVALS)[number]['value']) => {
+    setBackgroundUpdateSettings({ intervalHours });
+    if (intervalHours > 0) setAllowed(await requestNotificationPermission());
+  };
+
+  const allow = async () => {
+    const granted = await requestNotificationPermission();
+    setAllowed(granted);
+    // Android stops asking after a refusal or two; the setting is the way back.
+    if (!granted) Linking.openSettings().catch(() => {});
+  };
+
+  const on = settings.intervalHours > 0;
+  return (
+    <View
+      style={[
+        styles.card,
+        theme.elevation.card,
+        { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+      ]}
+    >
+      <View style={styles.cardHead}>
+        <Icon name="updates" size={20} color={theme.colors.textMuted} />
+        <View style={styles.flex}>
+          <Text style={[theme.typography.body, { color: theme.colors.text }]}>Check while closed</Text>
+          <Text style={[styles.cardHint, { color: theme.colors.textFaint }]}>
+            Looks for new chapters in your library and notifies you.
+          </Text>
+        </View>
+      </View>
+      <View style={styles.chipRow}>
+        {BACKGROUND_INTERVALS.map(opt => {
+          const selected = opt.value === settings.intervalHours;
+          return (
+            <Pressable
+              key={opt.value}
+              onPress={() => pick(opt.value)}
+              style={[
+                styles.chip,
+                selected
+                  ? { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent }
+                  : { borderColor: theme.colors.border },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.chipLabel,
+                  { color: selected ? theme.colors.onAccent : theme.colors.textMuted },
+                ]}
+              >
+                {opt.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      {on ? (
+        <>
+          <ToggleLine
+            label="Only on Wi-Fi"
+            value={settings.wifiOnly}
+            onChange={wifiOnly => setBackgroundUpdateSettings({ wifiOnly })}
+          />
+          <ToggleLine
+            label="Only while charging"
+            value={settings.chargingOnly}
+            onChange={chargingOnly => setBackgroundUpdateSettings({ chargingOnly })}
+          />
+          {!allowed ? (
+            <Pressable onPress={() => allow()} style={styles.warnLine}>
+              <Text style={[styles.cardHint, styles.flex, { color: theme.colors.danger }]}>
+                Notifications are off, so new chapters only show in Updates.
+              </Text>
+              <Text style={[styles.allowLabel, { color: theme.colors.accent }]}>Allow</Text>
+            </Pressable>
+          ) : null}
+        </>
+      ) : null}
+    </View>
+  );
+}
+
+function ToggleLine({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  const theme = useTheme();
+  return (
+    <View style={styles.toggleLine}>
+      <Text style={[theme.typography.body, styles.flex, { color: theme.colors.text }]}>{label}</Text>
+      <Switch
+        value={value}
+        onValueChange={onChange}
+        trackColor={{ false: theme.colors.elevated, true: theme.colors.accent }}
+        thumbColor={theme.colors.text}
+      />
+    </View>
   );
 }
 
@@ -493,6 +641,54 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
     marginBottom: 10,
+  },
+  card: {
+    paddingHorizontal: 16,
+    paddingVertical: 15,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginBottom: 10,
+    gap: 12,
+  },
+  cardHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  cardHint: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  flex: {
+    flex: 1,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  chip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  chipLabel: {
+    fontSize: 12.5,
+    fontWeight: '700',
+  },
+  toggleLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  warnLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  allowLabel: {
+    fontSize: 13,
+    fontWeight: '700',
   },
   badge: {
     paddingHorizontal: 9,

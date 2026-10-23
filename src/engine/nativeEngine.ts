@@ -13,6 +13,7 @@ import type {
   SourceDto,
   MangaDto,
   MangasPageDto,
+  BackgroundInboxDto,
   ChapterDto,
   PageDto,
   ImageRequestDto,
@@ -62,6 +63,8 @@ interface ManhwaEngineNative {
   shareImage(uri: string): Promise<void>;
   openInWebView(url: string): Promise<void>;
   setKeepScreenOn(enabled: boolean): Promise<void>;
+  setBackgroundUpdates(intervalHours: number, wifiOnly: boolean, chargingOnly: boolean): Promise<string>;
+  takeBackgroundUpdates(): Promise<string>;
   exportMihonBackup(requestJson: string, fileName: string): Promise<string>;
   shareBackup(uri: string, fileName: string): Promise<void>;
 }
@@ -244,6 +247,14 @@ export function createNativeEngine(): Engine | null {
     async shareBackup(uri: string, fileName: string) {
       if (typeof Native.shareBackup !== 'function') return;
       await Native.shareBackup(uri, fileName);
+    },
+    async setBackgroundUpdates(intervalHours: number, wifiOnly: boolean, chargingOnly: boolean) {
+      if (typeof Native.setBackgroundUpdates !== 'function') return;
+      await Native.setBackgroundUpdates(intervalHours, wifiOnly, chargingOnly);
+    },
+    async takeBackgroundUpdates() {
+      if (typeof Native.takeBackgroundUpdates !== 'function') return { updates: [], snapshots: {} };
+      return parse<BackgroundInboxDto>(await Native.takeBackgroundUpdates());
     },
     async setKeepScreenOn(enabled: boolean) {
       // Older builds lack the method; keeping the screen on is optional.

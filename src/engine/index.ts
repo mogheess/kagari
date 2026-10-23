@@ -60,6 +60,8 @@ function createUnavailableEngine(): Engine {
     exportMihonBackup: reject,
     shareBackup: reject,
     setKeepScreenOn: () => Promise.resolve(),
+    setBackgroundUpdates: () => Promise.resolve(),
+    takeBackgroundUpdates: () => Promise.resolve({ updates: [], snapshots: {} }),
     openInWebView: reject,
   };
 }

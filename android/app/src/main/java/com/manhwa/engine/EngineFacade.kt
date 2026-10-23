@@ -69,7 +69,8 @@ import uy.kohesive.injekt.injectLazy
  * suspend call down to the deprecated RxJava `fetch*` method they do implement,
  * so both generations work from one call path.
  */
-class EngineFacade(context: Context) {
+class EngineFacade private constructor(context: Context) {
+
 
     private val appContext = context.applicationContext
     private val trust = SignatureTrust(appContext)
@@ -1120,6 +1121,17 @@ class EngineFacade(context: Context) {
     }
 
     companion object {
+        @Volatile private var instance: EngineFacade? = null
+
+        /**
+         * One engine per process: the bridge and the background update job share
+         * loaded extensions (and their class loaders) instead of loading twice.
+         */
+        fun get(context: Context): EngineFacade =
+            instance ?: synchronized(this) {
+                instance ?: EngineFacade(context.applicationContext).also { instance = it }
+            }
+
         private const val READER_IMAGE_TAG = "KagariReaderImage"
         private const val MAX_TILE_HEIGHT = 4096
         private const val MAX_EXPORT_PIXELS = 12_000_000L
