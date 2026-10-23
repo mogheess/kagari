@@ -10,12 +10,13 @@
  * `theme/themes.ts` shows up here correctly with no changes to this screen.
  */
 import React from 'react';
-import { View, Text, Pressable, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ScrollView, Image } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useTheme, useThemePreference, useAppearance, type ThemePreference } from '../theme/ThemeProvider';
 import { Icon, type IconName } from '../components/Icon';
 import { THEMES } from '../theme/themes';
+import { BACKDROPS, type BackdropId } from '../theme/backdrops';
 
 export function AppearanceScreen() {
   const theme = useTheme();
@@ -123,6 +124,66 @@ export function AppearanceScreen() {
             );
           })}
         </View>
+
+        <Text style={[styles.sectionLabel, styles.sectionGap, { color: theme.colors.textFaint }]}>
+          BACKDROP
+        </Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          // Bleed to the screen edges so the row scrolls under the padding.
+          contentContainerStyle={[styles.backdropRow, { paddingHorizontal: theme.spacing.lg }]}
+          style={{ marginHorizontal: -theme.spacing.lg }}
+        >
+          {[{ id: 'none' as BackdropId, name: 'None', thumb: undefined }, ...BACKDROPS].map(b => {
+            const active = appearance.backdrop === b.id;
+            return (
+              <Pressable
+                key={b.id}
+                onPress={() => setAppearance({ backdrop: b.id })}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`${b.name} backdrop`}
+                style={styles.backdropItem}
+              >
+                <View
+                  style={[
+                    styles.backdropThumb,
+                    active ? styles.backdropThumbActive : null,
+                    {
+                      backgroundColor: theme.colors.bg,
+                      borderColor: active ? theme.colors.accent : theme.colors.border,
+                      borderRadius: theme.radius.md,
+                    },
+                  ]}
+                >
+                  {b.thumb ? (
+                    <Image source={b.thumb} style={styles.backdropImage} resizeMode="cover" />
+                  ) : (
+                    <Icon name="close" size={20} color={theme.colors.textFaint} />
+                  )}
+                  {active ? (
+                    <View style={[styles.backdropCheck, { backgroundColor: theme.colors.accent }]}>
+                      <Icon name="check" size={12} color={theme.colors.onAccent} strokeWidth={3} />
+                    </View>
+                  ) : null}
+                </View>
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.backdropName,
+                    { color: active ? theme.colors.text : theme.colors.textMuted },
+                  ]}
+                >
+                  {b.name}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+        <Text style={[styles.backdropHint, { color: theme.colors.textFaint }]}>
+          Artwork behind Home, Library, Discover, Updates and Profile.
+        </Text>
 
         <Text style={[styles.sectionLabel, { color: theme.colors.textFaint, marginTop: 28 }]}>
           LAYOUT
@@ -274,6 +335,50 @@ function Choice({
 }
 
 const styles = StyleSheet.create({
+  backdropRow: {
+    gap: 12,
+  },
+  backdropItem: {
+    width: 76,
+    alignItems: 'center',
+  },
+  backdropThumb: {
+    width: 76,
+    height: 114,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backdropThumbActive: {
+    borderWidth: 2,
+  },
+  sectionGap: {
+    marginTop: 28,
+  },
+  backdropHint: {
+    fontSize: 12,
+    marginTop: 8,
+  },
+  backdropImage: {
+    width: '100%',
+    height: '100%',
+  },
+  backdropCheck: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backdropName: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 6,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

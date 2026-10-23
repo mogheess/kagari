@@ -389,7 +389,12 @@ When you add a new persisted store, follow the favorites pattern (in-memory stat
   leads) and **Paper** (warmer, higher contrast), each with dark and light
   palettes, plus Pure black (dark only), Density (comfortable/compact) and
   Corners (soft/sharp). Mode defaults to dark. Chosen in `AppearanceScreen`
-  (Profile → Theme); there's deliberately no hue picker.
+  (Profile → Theme); there's deliberately no hue picker. **Backdrops**
+  (`theme/backdrops.ts`): optional original artwork (bundled WebPs) drawn once
+  by `ScreenBackdrop` in TabsScreen as a fixed wallpaper behind every main tab,
+  under an even scrim of the background colour. Tab roots use
+  `useScreenCanvas()` (transparent while a backdrop is on) instead of
+  `colors.bg`; a new main tab must do the same.
 - **Tier lists** (`tierLists.ts` + `TierListsScreen`): S–D rows of library
   titles, exported as an image (rendered natively) to save or share.
 

@@ -20,6 +20,7 @@ import {
   type Density,
   type ThemeId,
 } from './themes';
+import { backdropById, type Backdrop, type BackdropId } from './backdrops';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
 
@@ -33,6 +34,8 @@ export interface Appearance {
   amoled: boolean;
   density: Density;
   corners: Corners;
+  /** Artwork behind the main tabs; see `theme/backdrops.ts`. */
+  backdrop: BackdropId;
 }
 
 const DEFAULT_APPEARANCE: Appearance = {
@@ -40,6 +43,7 @@ const DEFAULT_APPEARANCE: Appearance = {
   amoled: false,
   density: 'comfortable',
   corners: 'soft',
+  backdrop: 'none',
 };
 
 const appearanceStore = makePersistence<Appearance>('@kagari/appearance/v1');
@@ -168,4 +172,22 @@ export function useAppearance(): {
     throw new Error('useAppearance must be used within a ThemeProvider');
   }
   return { appearance: ctx.appearance, setAppearance: ctx.setAppearance };
+}
+
+/** The backdrop the user picked, or undefined for none. */
+export function useBackdrop(): Backdrop | undefined {
+  const ctx = useContext(ThemeContext);
+  if (!ctx) throw new Error('useBackdrop must be used within a ThemeProvider');
+  return backdropById(ctx.appearance.backdrop);
+}
+
+/**
+ * Background for a main tab's root. Transparent while a backdrop is on, so the
+ * artwork TabsScreen draws behind every tab shows through; otherwise the
+ * theme's background, exactly as before.
+ */
+export function useScreenCanvas(): string {
+  const ctx = useContext(ThemeContext);
+  if (!ctx) throw new Error('useScreenCanvas must be used within a ThemeProvider');
+  return backdropById(ctx.appearance.backdrop) ? 'transparent' : ctx.theme.colors.bg;
 }

@@ -13,7 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useTheme } from '../theme/ThemeProvider';
+import { useTheme, useScreenCanvas } from '../theme/ThemeProvider';
 import { Cover } from '../components/Cover';
 import { RemoteImage } from '../components/RemoteImage';
 import { Icon } from '../components/Icon';
@@ -47,6 +47,7 @@ const DOWNLOADED = '__downloaded__';
 
 export function LibraryScreen() {
   const theme = useTheme();
+  const canvas = useScreenCanvas();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const { width } = useWindowDimensions();
@@ -118,7 +119,7 @@ export function LibraryScreen() {
   // --- Empty library: one premium empty state regardless of mode ---
   if (favorites.length === 0) {
     return (
-      <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
+      <View style={{ flex: 1, backgroundColor: canvas }}>
         <View style={{ paddingTop: insets.top + 8, paddingBottom: 12 }}>
           <View style={[styles.header, { paddingHorizontal: sidePad }]}>
             <Text style={[theme.typography.title, { color: theme.colors.text }]}>Library</Text>
@@ -138,7 +139,7 @@ export function LibraryScreen() {
   if (openId && opened) {
     const items = opened.items.map(favoriteToManga);
     return (
-      <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
+      <View style={{ flex: 1, backgroundColor: canvas }}>
         <View style={{ paddingTop: insets.top + 8, paddingBottom: 12 }}>
           <View style={[styles.header, { paddingHorizontal: sidePad }]}>
             <Pressable hitSlop={10} onPress={() => setOpenId(null)} style={styles.backRow}>
@@ -225,7 +226,7 @@ export function LibraryScreen() {
     const cardGap = 12;
     const cardWidth = Math.floor((width - sidePad * 2 - cardGap) / 2);
     return (
-      <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
+      <View style={{ flex: 1, backgroundColor: canvas }}>
         {header}
         <ScrollView
           showsVerticalScrollIndicator={false}
@@ -299,7 +300,7 @@ export function LibraryScreen() {
   const visible = shelfList.map(favoriteToManga);
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
+    <View style={{ flex: 1, backgroundColor: canvas }}>
       {header}
       {chips.length > 1 ? (
         <FlatList

@@ -13,7 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useTheme } from '../theme/ThemeProvider';
+import { useTheme, useScreenCanvas } from '../theme/ThemeProvider';
 import { useAsync } from '../hooks/useAsync';
 import { usePagedCatalog } from '../hooks/usePagedCatalog';
 import { makePersistence } from '../store/persist';
@@ -60,6 +60,7 @@ function emptyText(theme: ReturnType<typeof useTheme>) {
 
 export function DiscoverScreen() {
   const theme = useTheme();
+  const canvas = useScreenCanvas();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const [mode, setMode] = useState<DiscoverMode>('source');
@@ -176,11 +177,11 @@ export function DiscoverScreen() {
   const sidePad = theme.spacing.lg;
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
+    <View style={{ flex: 1, backgroundColor: canvas }}>
       <View
         style={[
           styles.stickyHeader,
-          { paddingTop: insets.top + 8, paddingHorizontal: sidePad, backgroundColor: theme.colors.bg },
+          { paddingTop: insets.top + 8, paddingHorizontal: sidePad, backgroundColor: canvas },
         ]}
       >
         <Text style={[theme.typography.title, { color: theme.colors.text }]}>Discover</Text>
