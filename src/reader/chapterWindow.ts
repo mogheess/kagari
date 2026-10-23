@@ -139,6 +139,14 @@ export function indexOfPage(
  *
  * The window is bounded around the active chapter. This limits retained page
  * metadata and component keys during long continuous-reading sessions.
+ *
+ * With `keepEarlier` (the webtoon strip), chapters before the active one are
+ * never dropped; only those after it are trimmed, keeping the next one. The
+ * strip is a FlatList without fixed item sizes, and removing items above the
+ * viewport moved the reader forward by roughly the dropped chapter's length:
+ * `maintainVisibleContentPosition` tracks the item at `minIndexForVisible`,
+ * and that item is the one being removed. Earlier chapters cost little to
+ * keep — the list already unmounts off-screen pages — so they stay.
  */
 export function insertChapter(
   loaded: readonly LoadedChapter[],
@@ -146,6 +154,7 @@ export function insertChapter(
   ordered: readonly ChapterDto[],
   activeUrl = entry.chapter.url,
   maxChapters = MAX_LOADED_CHAPTERS,
+  keepEarlier = false,
 ): LoadedChapter[] {
   if (loaded.some(l => l.chapter.url === entry.chapter.url)) return loaded as LoadedChapter[];
   const rank = (url: string) => ordered.findIndex(c => c.url === url);
@@ -154,6 +163,10 @@ export function insertChapter(
 
   const activeIndex = sorted.findIndex(item => item.chapter.url === activeUrl);
   const center = activeIndex >= 0 ? activeIndex : sorted.findIndex(item => item === entry);
+  if (keepEarlier) {
+    const after = Math.max(1, maxChapters - center - 1);
+    return sorted.slice(0, center + 1 + after);
+  }
   const half = Math.floor(maxChapters / 2);
   const start = Math.max(0, Math.min(center - half, sorted.length - maxChapters));
   return sorted.slice(start, start + maxChapters);

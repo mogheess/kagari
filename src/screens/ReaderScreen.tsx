@@ -32,6 +32,7 @@ import {
   buildReaderItems,
   indexOfPage,
   insertChapter,
+  MAX_LOADED_CHAPTERS,
   neighboursOf,
   toReadingOrder,
   type LoadedChapter,
@@ -181,6 +182,9 @@ export function ReaderScreen() {
   const inFlight = useRef(new Set<string>());
   const activeUrlRef = useRef(activeUrl);
   activeUrlRef.current = activeUrl;
+  // The webtoon strip keeps earlier chapters loaded; see insertChapter.
+  const keepEarlierRef = useRef(!isPaged(mode));
+  keepEarlierRef.current = !isPaged(mode);
 
   /**
    * Resolves a chapter's pages and slots it into the window. Downloaded
@@ -205,6 +209,8 @@ export function ReaderScreen() {
             { chapter, pages, offline: offlineCount > 0 },
             orderedChapters,
             activeUrlRef.current,
+            MAX_LOADED_CHAPTERS,
+            keepEarlierRef.current,
           ),
         );
       } catch (e) {
