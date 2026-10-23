@@ -2,6 +2,7 @@ package com.manhwa.engine.web
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
@@ -29,6 +30,12 @@ class SourceWebViewActivity : Activity() {
 
     private var webView: WebView? = null
 
+    /** The page this was opened for, so the clearance check looks at the right host. */
+    private var pageUrl: String? = null
+
+    /** `cf_clearance` for [pageUrl] when the activity opened; null when there was none. */
+    private var clearanceAtOpen: String? = null
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -39,6 +46,11 @@ class SourceWebViewActivity : Activity() {
             return
         }
         val ua = intent.getStringExtra(EXTRA_UA)
+        pageUrl = url
+        clearanceAtOpen = clearanceFor(url)
+        // Report "nothing changed" unless closing finds a new clearance, so a
+        // caller never acts on a result it didn't get.
+        setResult(RESULT_OK, Intent().putExtra(RESULT_CLEARED, false))
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -120,7 +132,27 @@ class SourceWebViewActivity : Activity() {
 
     private fun closeAndFlush() {
         CookieManager.getInstance().flush()
+        reportClearance()
         finish()
+    }
+
+    /**
+     * Tells the caller whether the user came back with a new Cloudflare
+     * clearance for the page's host — a cookie that wasn't there, or changed,
+     * since the activity opened. The app retries only then: a retry without a
+     * new cookie would fail exactly as before and flash the error again.
+     */
+    private fun reportClearance() {
+        val url = pageUrl ?: return
+        val now = clearanceFor(url)
+        val cleared = now != null && now != clearanceAtOpen
+        setResult(RESULT_OK, Intent().putExtra(RESULT_CLEARED, cleared))
+    }
+
+    override fun finish() {
+        // Covers every way out (Done, back, the system closing the task).
+        reportClearance()
+        super.finish()
     }
 
     @Deprecated("Deprecated in Java")
@@ -148,6 +180,18 @@ class SourceWebViewActivity : Activity() {
     companion object {
         const val EXTRA_URL = "url"
         const val EXTRA_UA = "ua"
+
+        /** Boolean result extra: a new `cf_clearance` appeared while open. */
+        const val RESULT_CLEARED = "cleared"
+
+        /** The `cf_clearance` value CookieManager would send to [url], if any. */
+        fun clearanceFor(url: String): String? =
+            CookieManager.getInstance().getCookie(url)
+                ?.split(';')
+                ?.map { it.trim() }
+                ?.firstOrNull { it.startsWith("cf_clearance=") }
+                ?.substringAfter('=')
+                ?.takeIf { it.isNotEmpty() }
 
         private const val BG = 0xFF0E0E11.toInt()
         private const val BAR = 0xFF17171C.toInt()

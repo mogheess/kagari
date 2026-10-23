@@ -367,11 +367,13 @@ export function MangaDetailScreen() {
         notify('No web address for this source');
         return;
       }
-      await getEngine().openInWebView(url);
+      const cleared = await getEngine().openInWebView(url);
+      // Passed a Cloudflare check there: refetch without making the user tap Retry.
+      if (cleared) onRefresh();
     } catch (e) {
       notify(e instanceof Error ? e.message : 'Could not open the page');
     }
-  }, [params.sourceId, params.mangaUrl]);
+  }, [params.sourceId, params.mangaUrl, onRefresh]);
 
   // Step 1 of migrate-to-source: search the chosen source and show the matches
   // so the user can pick the correct title (sources often return near-matches,

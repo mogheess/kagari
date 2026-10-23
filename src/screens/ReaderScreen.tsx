@@ -263,11 +263,20 @@ export function ReaderScreen() {
         notify('No web address for this source');
         return;
       }
-      await engine.openInWebView(url);
+      const cleared = await engine.openInWebView(url);
+      // A new clearance means whatever failed is worth another try right away.
+      if (cleared) {
+        if (loadError) {
+          setLoadError(null);
+          void ensureChapter(params.chapter);
+        } else {
+          retryCurrentPage();
+        }
+      }
     } catch (e) {
       notify(e instanceof Error ? e.message : 'Could not open the page');
     }
-  }, [engine, params.sourceId, params.mangaUrl]);
+  }, [engine, params.sourceId, params.mangaUrl, params.chapter, loadError, ensureChapter, retryCurrentPage]);
 
   // Resolve the current page to a local file:// uri (cache-backed, so this is
   // cheap once the page has rendered) for the save/share actions.

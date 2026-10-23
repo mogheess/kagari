@@ -51,6 +51,9 @@ class ManhwaEngineModule(
     /** Resolved by [onActivityResult] when the storage-folder picker returns. */
     private var pickStoragePromise: Promise? = null
 
+    /** Resolved by [onActivityResult] when the in-app WebView closes. */
+    private var webViewPromise: Promise? = null
+
     init {
         reactContext.addActivityEventListener(this)
     }
@@ -61,6 +64,8 @@ class ManhwaEngineModule(
         reactContext.removeActivityEventListener(this)
         pickPromise = null
         pickStoragePromise = null
+        webViewPromise?.resolve(false)
+        webViewPromise = null
         clearKeepScreenOn()
         scope.cancel()
         super.invalidate()
@@ -365,6 +370,11 @@ class ManhwaEngineModule(
                 val uri = if (resultCode == Activity.RESULT_OK) data?.data else null
                 promise.resolve(uri?.toString())
             }
+            WEBVIEW_REQUEST -> {
+                val promise = webViewPromise ?: return
+                webViewPromise = null
+                promise.resolve(data?.getBooleanExtra(SourceWebViewActivity.RESULT_CLEARED, false) == true)
+            }
             PICK_STORAGE_REQUEST -> {
                 val promise = pickStoragePromise ?: return
                 pickStoragePromise = null
@@ -410,6 +420,12 @@ class ManhwaEngineModule(
 
     // --- in-app web view (manual Cloudflare clearance) ---
 
+    /**
+     * Opens the in-app WebView and resolves when the user closes it — with
+     * `true` if they came back with a new Cloudflare clearance for that site, so
+     * the screen can retry on its own. Resolving on open (as this used to) made
+     * the caller retry before the user had done anything.
+     */
     @ReactMethod
     fun openInWebView(url: String, promise: Promise) {
         if (url.isBlank()) {
@@ -419,15 +435,30 @@ class ManhwaEngineModule(
         try {
             val ua = runCatching { facade.userAgent() }.getOrNull()
             val activity = reactContext.currentActivity
-            val ctx = activity ?: reactContext.applicationContext
-            val intent = Intent(ctx, SourceWebViewActivity::class.java).apply {
+            if (activity == null) {
+                // No foreground activity to return to: open it standalone and
+                // report nothing, since we won't hear when it closes.
+                val ctx = reactContext.applicationContext
+                ctx.startActivity(
+                    Intent(ctx, SourceWebViewActivity::class.java).apply {
+                        putExtra(SourceWebViewActivity.EXTRA_URL, url)
+                        if (ua != null) putExtra(SourceWebViewActivity.EXTRA_UA, ua)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    },
+                )
+                promise.resolve(false)
+                return
+            }
+            // One WebView at a time; a stale caller just learns nothing changed.
+            webViewPromise?.resolve(false)
+            webViewPromise = promise
+            val intent = Intent(activity, SourceWebViewActivity::class.java).apply {
                 putExtra(SourceWebViewActivity.EXTRA_URL, url)
                 if (ua != null) putExtra(SourceWebViewActivity.EXTRA_UA, ua)
-                if (activity == null) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            ctx.startActivity(intent)
-            promise.resolve(null)
+            activity.startActivityForResult(intent, WEBVIEW_REQUEST)
         } catch (e: Throwable) {
+            webViewPromise = null
             promise.reject("webview_failed", e.message ?: "Could not open the web view", e)
         }
     }
@@ -461,5 +492,6 @@ class ManhwaEngineModule(
         const val NAME = "ManhwaEngine"
         private const val PICK_BACKUP_REQUEST = 0xBAC0
         private const val PICK_STORAGE_REQUEST = 0xBAC1
+        private const val WEBVIEW_REQUEST = 0xBAC2
     }
 }
