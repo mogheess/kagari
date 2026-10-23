@@ -76,6 +76,8 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 type ReaderRoute = RouteProp<RootStackParamList, 'Reader'>;
 const MAX_IMAGE_FETCHES = 1;
 const IMAGE_FETCH_RETRIES = 3;
+/** A far webtoon jump steps through measured pages; stop after this many. */
+const MAX_SCROLL_RETRIES = 40;
 /** Bottom spacer under the webtoon strip so the last page clears the chrome. */
 const STRIP_FOOTER_HEIGHT = 80;
 /**
@@ -404,6 +406,9 @@ export function ReaderScreen() {
     };
   }, [params.sourceId, params.mangaUrl]);
 
+  /** Steps taken toward an unmeasured index (see onScrollToIndexFailed). */
+  const scrollRetries = useRef(0);
+
   /** Scrolls to a page of the active chapter (used by the slider). */
   const goToPage = useCallback(
     (index: number) => {
@@ -411,6 +416,7 @@ export function ReaderScreen() {
       setActivePage(clamped);
       const target = indexOfPage(items, activeUrl, clamped);
       if (target < 0) return;
+      scrollRetries.current = 0;
       try {
         listRef.current?.scrollToIndex({ index: target, animated: false });
       } catch {
@@ -450,8 +456,12 @@ export function ReaderScreen() {
         },
         chapter,
       );
-      await ensureChapter(chapter);
+      // Queue the jump before loading. A chapter that's already in the window
+      // (the usual case: neighbours are preloaded) doesn't change
+      // `loadedChapters`, so the jump effect is poked directly instead.
       pendingJump.current = { url: chapter.url, atEnd: startAtEnd };
+      setJumpRequest(n => n + 1);
+      await ensureChapter(chapter);
     },
     [ensureChapter, params.sourceId, params.mangaUrl, params.mangaTitle, params.mangaThumbnailUrl],
   );
@@ -459,6 +469,7 @@ export function ReaderScreen() {
   // A jump can only be performed once the target's pages are in `items`, which
   // is a render later than the load resolving.
   const pendingJump = useRef<{ url: string; atEnd: boolean } | null>(null);
+  const [jumpRequest, setJumpRequest] = useState(0);
 
   // In paged modes, preloading an earlier chapter prepends cells. FlatList
   // does not maintain the visible item for horizontal/paged lists, so restore
@@ -496,6 +507,7 @@ export function ReaderScreen() {
     if (target < 0) return;
     setActiveUrl(jump.url);
     setActivePage(page);
+    scrollRetries.current = 0;
     requestAnimationFrame(() => {
       try {
         listRef.current?.scrollToIndex({ index: target, animated: false });
@@ -503,7 +515,7 @@ export function ReaderScreen() {
         // onScrollToIndexFailed recovers.
       }
     });
-  }, [loadedChapters, items]);
+  }, [loadedChapters, items, jumpRequest]);
 
   // Resume: position on the requested page once the opening chapter is in.
   const resumed = useRef(false);
@@ -775,21 +787,19 @@ export function ReaderScreen() {
                   : undefined
               }
               onScrollToIndexFailed={info => {
-                // Webtoon has no getItemLayout, so a far jump can miss: approximate
-                // by average height, then settle on the exact index once measured.
+                // Webtoon has no getItemLayout, so a jump past what's been
+                // measured misses. Step to the furthest measured page, let the
+                // list render and measure around it, then try again. Estimating
+                // from the average page height instead overshot back and forth
+                // across chapters (pages are measured as their images load),
+                // which flipped the active chapter on the way.
                 const list = listRef.current;
                 if (!list) return;
-                list.scrollToOffset({
-                  offset: info.averageItemLength * info.index,
-                  animated: false,
-                });
+                if (++scrollRetries.current > MAX_SCROLL_RETRIES) return;
+                list.scrollToIndex({ index: info.highestMeasuredFrameIndex, animated: false });
                 setTimeout(() => {
-                  try {
-                    list.scrollToIndex({ index: info.index, animated: false });
-                  } catch {
-                    // Give up quietly; the user can keep scrolling manually.
-                  }
-                }, 80);
+                  listRef.current?.scrollToIndex({ index: info.index, animated: false });
+                }, 60);
               }}
               ListFooterComponent={
                 paged ? null : <View style={{ height: STRIP_FOOTER_HEIGHT }} />
@@ -827,7 +837,10 @@ export function ReaderScreen() {
             inverted={inverted}
             onSeek={onSliderSeek}
             onSeekEnd={onSliderSeekEnd}
-            onPrevChapter={() => void openChapter(prevChapter, true)}
+            // Start of the previous chapter, as in Mihon. Landing on its last
+            // page left the next chapter's first page in view, which kept that
+            // chapter active and made the button look dead.
+            onPrevChapter={() => void openChapter(prevChapter)}
             onNextChapter={() => void openChapter(nextChapter)}
             hasPrev={!!prevChapter}
             hasNext={!!nextChapter}
