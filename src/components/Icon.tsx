@@ -83,8 +83,8 @@ function renderPaths(
     case 'library':
       return (
         <>
-          <Path {...c} d="M4 4h6v16H4z" />
-          <Path {...c} d="M14 4h6v16h-6z" />
+          <Path {...f} d="M4 4h6v16H4z" />
+          <Path {...f} d="M14 4h6v16h-6z" />
         </>
       );
     case 'book':
@@ -99,7 +99,7 @@ function renderPaths(
     case 'updates':
       return (
         <>
-          <Path {...c} d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+          <Path {...f} d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
           <Path {...c} d="M13.5 21a2 2 0 0 1-3 0" />
         </>
       );
@@ -113,8 +113,8 @@ function renderPaths(
     case 'profile':
       return (
         <>
-          <Circle {...c} cx={12} cy={8} r={4} />
-          <Path {...c} d="M4 21c0-4 3.5-6 8-6s8 2 8 6" />
+          <Circle {...f} cx={12} cy={8} r={4} />
+          <Path {...f} d="M4 21c0-4 3.5-6 8-6s8 2 8 6" />
         </>
       );
     case 'search':
