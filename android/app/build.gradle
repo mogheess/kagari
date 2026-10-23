@@ -61,6 +61,20 @@ react {
 def enableProguardInReleaseBuilds = false
 
 /**
+ * Release builds ship one APK per ABI plus a universal APK. Nearly every phone
+ * only needs arm64-v8a, and bundling all four ABIs' native libraries roughly
+ * triples the download. Debug builds (and CI) stay a single APK.
+ *
+ * Every APK keeps the same versionCode, as Mihon's do. Per-ABI offsets are only
+ * needed for Play Store multi-APK; for sideloaded builds they'd stop people
+ * moving between the universal APK and a split one, since one of the two would
+ * always count as a downgrade.
+ */
+def abiSplitsEnabled = gradle.startParameter.taskNames.any { it.toLowerCase().contains("release") }
+def splitAbis = (findProperty("reactNativeArchitectures") ?: "armeabi-v7a,arm64-v8a,x86,x86_64")
+    .split(",").collect { it.trim() }.findAll { !it.isEmpty() }
+
+/**
  * The preferred build flavor of JavaScriptCore (JSC)
  *
  * For example, to use the international variant, you can use:
@@ -111,6 +125,14 @@ android {
             }
         }
     }
+    splits {
+        abi {
+            enable abiSplitsEnabled
+            reset()
+            include(*splitAbis)
+            universalApk true
+        }
+    }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
@@ -125,17 +147,29 @@ android {
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
     }
+}
 
-    kotlinOptions {
+kotlin {
+    compilerOptions {
         // The vendored `eu.kanade.tachiyomi` interfaces give bodies to members
         // that extensions may not override (notably the extension-lib 1.6
-        // suspend API). Kotlin's default scheme compiles those to a synthetic
-        // `Interface$DefaultImpls` that only classes compiled against it can
-        // reach — an extension APK built elsewhere would hit AbstractMethodError.
-        // `all` emits real JVM default methods so extensions inherit them;
-        // `-compatibility` also keeps DefaultImpls for anything still expecting
-        // the old scheme.
-        freeCompilerArgs += ["-Xjvm-default=all-compatibility"]
+        // suspend API). Without JVM default methods those bodies only exist in
+        // a synthetic `Interface$DefaultImpls` that only classes compiled
+        // against it can reach, so an extension APK built elsewhere would hit
+        // AbstractMethodError. ENABLE emits real default methods and still
+        // keeps DefaultImpls for anything expecting the old scheme. It is
+        // Kotlin's default since 2.2; it's spelled out because it matters here.
+        jvmDefault = org.jetbrains.kotlin.gradle.dsl.JvmDefaultMode.ENABLE
+    }
+}
+
+// Release APKs are named for the release page: Kagari-v0.7.0-arm64-v8a.apk,
+// Kagari-v0.7.0-universal.apk, ...
+android.applicationVariants.all { variant ->
+    if (variant.buildType.name != "release") return
+    variant.outputs.all { output ->
+        def abi = output.getFilter("ABI") ?: "universal"
+        outputFileName = "Kagari-v${variant.versionName}-${abi}.apk"
     }
 }
 
@@ -149,12 +183,12 @@ android {
 configurations.all {
     resolutionStrategy.eachDependency { details ->
         if (details.requested.group == "com.squareup.okhttp3") {
-            details.useVersion("5.3.2")
+            details.useVersion("5.4.0")
             details.because("Align all OkHttp modules to 5.x (extensions require it; mixed 4.x/5.x crashes)")
         }
         if (details.requested.group == "com.squareup.okio") {
-            details.useVersion("3.16.4")
-            details.because("Okio version compatible with OkHttp 5.3.2")
+            details.useVersion("3.17.0")
+            details.because("The Okio version OkHttp 5.4.0 is built against")
         }
     }
 }
@@ -175,45 +209,43 @@ dependencies {
     // as `compileOnly` and resolve their symbols from the host process.
     // Versions mirror keiyoushi/extensions-source's version catalog so the
     // extension bytecode links against compatible classes.
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-    // Extensions are compiled with a newer serialization plugin whose generated
-    // serializers rely on `GeneratedSerializer.typeParametersSerializers()` being a
-    // JVM default method. 1.7.x still declares it abstract, so every @Serializable
-    // parse in a current extension died with AbstractMethodError. 1.8.1 is the
-    // first release with the default and the last built with Kotlin 2.1, which is
-    // what this app compiles with (a runtime built with a newer Kotlin than the
-    // compiler can read is rejected at build time).
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
+    // Extensions' generated serializers call into this runtime, and a runtime
+    // older than the one they were built against fails at parse time (1.7.x
+    // lacked a default method current serializers rely on, and every list
+    // hung with AbstractMethodError). Keep it at keiyoushi's version; that
+    // needs a Kotlin compiler that can read its metadata (see kotlinVersion).
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
     // Okio integration for kotlinx-serialization. Extensions parse JSON bodies
     // via `Json.decodeFromBufferedSource(...)` (class
     // `kotlinx.serialization.json.okio.OkioStreamsKt`); without this the source
     // throws NoClassDefFoundError at parse time.
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json-okio:1.8.1")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-protobuf:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json-okio:1.11.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-protobuf:1.11.0")
     // OkHttp/Okio must match keiyoushi/extensions-source's catalog: modern
     // extensions are compiled against OkHttp 5.x and reference classes that only
     // exist there (e.g. `okhttp3.internal._UtilCommonKt`). Shipping OkHttp 4.x on
     // the host makes the extension's own dispatcher callback throw
     // NoClassDefFoundError and crash the process when opening a manga.
-    implementation("com.squareup.okhttp3:okhttp:5.3.2")
+    implementation("com.squareup.okhttp3:okhttp:5.4.0")
     // `okhttp3.JavaNetCookieJar` lives in this artifact, not in `okhttp`. React
     // Native's networking/Fresco image stack (ReactCookieJarContainer) loads it,
     // and the 4.x copy references `okhttp3.internal.Util`, which 5.x deleted.
     // Pin it to the same 5.x line as okhttp so the cookie jar links against the
     // 5.x internals that are actually present (otherwise loading uncached covers
     // crashes with NoClassDefFoundError: okhttp3/internal/Util).
-    implementation("com.squareup.okhttp3:okhttp-urlconnection:5.3.2")
+    implementation("com.squareup.okhttp3:okhttp-urlconnection:5.4.0")
     // keiyoushi's `core` module (every current extension inherits its KeiSource
     // base class) compiles against these as app-provided, exactly like Mihon
     // ships them. KeiSource touches Brotli/Zstd while building its client and
     // the first request throws NoClassDefFoundError without them; quickjs is
     // used by sources that evaluate site scripts. Versions follow
     // keiyoushi/extensions-source/gradle/libs.versions.toml.
-    implementation("com.squareup.okhttp3:okhttp-brotli:5.3.2")
-    implementation("com.squareup.okhttp3:okhttp-zstd:5.3.2")
+    implementation("com.squareup.okhttp3:okhttp-brotli:5.4.0")
+    implementation("com.squareup.okhttp3:okhttp-zstd:5.4.0")
     implementation("com.squareup.zstd:zstd-kmp-okio:0.4.0")
     implementation("com.github.zhanghai.quickjs-java:quickjs-android:547f5b1597")
-    implementation("com.squareup.okio:okio:3.16.4")
+    implementation("com.squareup.okio:okio:3.17.0")
     implementation("org.jsoup:jsoup:1.22.2") // keiyoushi compiles against this line
     // RxJava 1 is required by extensions that implement the fetch* Observable
     // methods (Tachiyomi's primary source API).
@@ -232,7 +264,7 @@ dependencies {
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test:rules:1.6.1")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
-    androidTestImplementation("com.squareup.okhttp3:mockwebserver3:5.3.2")
+    androidTestImplementation("com.squareup.okhttp3:mockwebserver3:5.4.0")
     // Storage Access Framework access to the user-chosen download folder.
     implementation("androidx.documentfile:documentfile:1.0.1")
     // Periodic new-chapters check while the app is closed.

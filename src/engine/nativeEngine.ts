@@ -14,6 +14,7 @@ import type {
   MangaDto,
   MangasPageDto,
   BackgroundInboxDto,
+  RelatedMangaDto,
   ChapterDto,
   PageDto,
   ImageRequestDto,
@@ -38,12 +39,19 @@ interface ManhwaEngineNative {
   uninstallExtension(pkg: string): Promise<void>;
   installApk(uri: string): Promise<void>;
   trustSignature(pkg: string, certSha256: string): Promise<void>;
+  setRepoSigningKeys(keysJson: string): Promise<string>;
   getPopular(sourceId: string, page: number): Promise<string>;
   getLatest(sourceId: string, page: number): Promise<string>;
   search(sourceId: string, query: string, page: number, filtersJson: string): Promise<string>;
   getFilters(sourceId: string): Promise<string>;
   getMangaDetails(sourceId: string, mangaUrl: string, memoJson: string | null): Promise<string>;
   getMangaWebUrl(sourceId: string, mangaUrl: string): Promise<string>;
+  getRelatedManga(
+    sourceId: string,
+    mangaUrl: string,
+    title: string,
+    memoJson: string | null,
+  ): Promise<string>;
   getChapters(sourceId: string, mangaUrl: string, memoJson: string | null): Promise<string>;
   getPages(sourceId: string, chapterUrl: string, memoJson: string | null): Promise<string>;
   resolveImage(sourceId: string, pageJson: string): Promise<string>;
@@ -61,7 +69,8 @@ interface ManhwaEngineNative {
   renderTierListImage(exportJson: string): Promise<string>;
   saveImageToGallery(uri: string): Promise<string>;
   shareImage(uri: string): Promise<void>;
-  openInWebView(url: string): Promise<void>;
+  openInWebView(url: string): Promise<boolean | null>;
+  getSupportedAbis(): Promise<string>;
   setKeepScreenOn(enabled: boolean): Promise<void>;
   setBackgroundUpdates(intervalHours: number, wifiOnly: boolean, chargingOnly: boolean): Promise<string>;
   takeBackgroundUpdates(): Promise<string>;
@@ -125,6 +134,11 @@ export function createNativeEngine(): Engine | null {
     trustSignature(pkg: string, certSha256: string) {
       return Native.trustSignature(pkg, certSha256);
     },
+    async setRepoSigningKeys(keys: Record<string, string>) {
+      // An older native build trusts on first sight and has nothing to record.
+      if (typeof Native.setRepoSigningKeys !== 'function') return false;
+      return (await Native.setRepoSigningKeys(JSON.stringify(keys))) === 'true';
+    },
     async getPopular(sourceId, page) {
       return parse<MangasPageDto>(await Native.getPopular(sourceId, page));
     },
@@ -141,6 +155,13 @@ export function createNativeEngine(): Engine | null {
     },
     async getMangaDetails(sourceId, mangaUrl, memo?: string) {
       return parse<MangaDto>(await Native.getMangaDetails(sourceId, mangaUrl, memo ?? null));
+    },
+    async getRelatedManga(sourceId, mangaUrl, title, memo) {
+      // An older native build has no related lookup; searching still works.
+      if (typeof Native.getRelatedManga !== 'function') return { mangas: null, searchAllowed: true };
+      return parse<RelatedMangaDto>(
+        await Native.getRelatedManga(sourceId, mangaUrl, title, memo ?? null),
+      );
     },
     async getMangaWebUrl(sourceId, mangaUrl) {
       if (typeof Native.getMangaWebUrl !== 'function') return '';
@@ -256,6 +277,10 @@ export function createNativeEngine(): Engine | null {
       if (typeof Native.takeBackgroundUpdates !== 'function') return { updates: [], snapshots: {} };
       return parse<BackgroundInboxDto>(await Native.takeBackgroundUpdates());
     },
+    async getSupportedAbis() {
+      if (typeof Native.getSupportedAbis !== 'function') return [];
+      return parse<string[]>(await Native.getSupportedAbis());
+    },
     async setKeepScreenOn(enabled: boolean) {
       // Older builds lack the method; keeping the screen on is optional.
       if (typeof Native.setKeepScreenOn !== 'function') return;
@@ -265,7 +290,8 @@ export function createNativeEngine(): Engine | null {
       if (typeof Native.openInWebView !== 'function') {
         throw new Error('In-app WebView is unavailable on this build.');
       }
-      await Native.openInWebView(url);
+      // Builds before 0.7 resolved with nothing as soon as the WebView opened.
+      return (await Native.openInWebView(url)) === true;
     },
   };
 }

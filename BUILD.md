@@ -144,16 +144,24 @@ so the release APK is self-contained.
    When `KAGARI_STORE_FILE` is set, `android/app/build.gradle` signs release
    builds with it; otherwise it falls back to the debug key (fine for local
    testing, never for distribution).
-3. **Build the APK:**
+3. **Build the APKs:**
    ```sh
    cd android && ./gradlew assembleRelease
-   # output: android/app/build/outputs/apk/release/app-release.apk
+   # output: android/app/build/outputs/apk/release/
+   #   Kagari-vX.Y.Z-arm64-v8a.apk    most phones
+   #   Kagari-vX.Y.Z-armeabi-v7a.apk  older 32-bit phones
+   #   Kagari-vX.Y.Z-x86_64.apk / -x86.apk  emulators, Chromebooks
+   #   Kagari-vX.Y.Z-universal.apk    every ABI, roughly 3x the size
    ```
-4. **Test it on a device:** `adb install -r app-release.apk`.
-5. **Publish:** create a GitHub Release, tag it `vX.Y.Z`, and attach
-   `app-release.apk`. The in-app update check compares the installed version
-   against the latest GitHub Release, so cutting a release is what notifies
-   users. Bump `versionCode` (must increase) and `versionName` in
+   Release builds split by ABI; debug builds stay one APK. All five share one
+   `versionCode`, so any of them installs over any other.
+4. **Test it on a device:** `adb install -r Kagari-vX.Y.Z-arm64-v8a.apk`.
+5. **Publish:** create a GitHub Release, tag it `vX.Y.Z`, and attach all five
+   APKs. Say in the notes that most phones want arm64-v8a and that universal
+   works everywhere. The in-app update check compares the installed
+   version against the latest GitHub Release and links the APK matching the
+   phone's ABI (universal if none matches), so cutting a release is what
+   notifies users. Bump `versionCode` (must increase) and `versionName` in
    `android/app/build.gradle` for each release.
 
 ## Troubleshooting

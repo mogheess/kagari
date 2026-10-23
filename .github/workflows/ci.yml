@@ -1,0 +1,154 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# A newer push to the same branch makes the older run pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  js:
+    name: Typecheck, lint, unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      # Also runs patch-package (postinstall), so a patch that no longer
+      # applies fails here.
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npx eslint .
+
+      - name: Unit tests
+        run: npx jest --ci
+
+  android:
+    name: Android debug build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      # The React Native Gradle plugin and autolinking read node_modules.
+      - run: npm ci
+
+      # JDK 21: newer JDKs break the build in an unrelated-looking module.
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          # Only main writes the cache; PR runs read it.
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
+      # One ABI keeps the build fast. Compiling the instrumented tests here
+      # catches breakage in them even when the emulator job is skipped.
+      - name: Build debug APK and instrumented tests
+        working-directory: android
+        run: >
+          ./gradlew --no-daemon
+          :app:assembleDebug
+          :app:compileDebugAndroidTestKotlin
+          -PreactNativeArchitectures=x86_64
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: kagari-debug-x86_64
+          path: android/app/build/outputs/apk/debug/*.apk
+          retention-days: 7
+
+  instrumented:
+    name: Instrumented tests (emulator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Slower and more prone to emulator flakiness than the other jobs, so
+      # on PRs it only runs when native code or dependencies changed.
+      - name: Check for native changes
+        id: changes
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "native=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "origin/$BASE...HEAD" | grep -qE '^(android/|patches/|package(-lock)?\.json$)'; then
+            echo "native=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "native=false" >> "$GITHUB_OUTPUT"
+            echo "No native changes; skipping the emulator run."
+          fi
+
+      - uses: actions/setup-node@v7
+        if: steps.changes.outputs.native == 'true'
+        with:
+          node-version: 22
+          cache: npm
+
+      - if: steps.changes.outputs.native == 'true'
+        run: npm ci
+
+      - uses: actions/setup-java@v6
+        if: steps.changes.outputs.native == 'true'
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v6
+        if: steps.changes.outputs.native == 'true'
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
+      - name: Enable KVM
+        if: steps.changes.outputs.native == 'true'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run instrumented tests
+        if: steps.changes.outputs.native == 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          working-directory: android
+          script: ./gradlew --no-daemon :app:connectedDebugAndroidTest -PreactNativeArchitectures=x86_64
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: instrumented-test-results
+          path: android/app/build/outputs/androidTest-results/
+          retention-days: 7

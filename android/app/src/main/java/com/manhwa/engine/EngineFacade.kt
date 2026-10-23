@@ -29,7 +29,9 @@ import com.manhwa.engine.dto.ImageRequestDto
 import com.manhwa.engine.dto.MangaDto
 import com.manhwa.engine.dto.MangasPageDto
 import com.manhwa.engine.dto.PageDto
+import com.manhwa.engine.dto.RelatedMangaDto
 import com.manhwa.engine.dto.StorageLocationDto
+import com.manhwa.engine.loader.ExtensionIcons
 import com.manhwa.engine.storage.DownloadNaming
 import com.manhwa.engine.storage.StorageManager
 import com.manhwa.engine.dto.SourceDto
@@ -52,6 +54,8 @@ import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
 import java.io.File
 import java.security.MessageDigest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -93,9 +97,12 @@ class EngineFacade private constructor(context: Context) {
         if (extensions.isEmpty()) reload()
     }
 
+    private val extensionIcons by lazy { ExtensionIcons(appContext) }
+
     fun listExtensions(): List<ExtensionDto> {
         ensureLoaded()
         return extensions.map { ext ->
+            val icon = extensionIcons.uriFor(ext.pkg, ext.versionCode)
             ExtensionDto(
                 pkg = ext.pkg,
                 name = ext.name,
@@ -105,7 +112,9 @@ class EngineFacade private constructor(context: Context) {
                 lang = ext.lang,
                 isNsfw = ext.isNsfw,
                 trusted = ext.trusted,
-                sources = ext.sources.map { Mappers.sourceToDto(it, ext.pkg, ext.isNsfw) },
+                sources = ext.sources.map { Mappers.sourceToDto(it, ext.pkg, ext.isNsfw, icon) },
+                iconUrl = icon,
+                signatureHash = ext.signatureHash,
             )
         }
     }
@@ -113,7 +122,8 @@ class EngineFacade private constructor(context: Context) {
     fun listSources(): List<SourceDto> {
         ensureLoaded()
         return extensions.flatMap { ext ->
-            ext.sources.map { Mappers.sourceToDto(it, ext.pkg, ext.isNsfw) }
+            val icon = extensionIcons.uriFor(ext.pkg, ext.versionCode)
+            ext.sources.map { Mappers.sourceToDto(it, ext.pkg, ext.isNsfw, icon) }
         }
     }
 
@@ -162,6 +172,17 @@ class EngineFacade private constructor(context: Context) {
         reload()
     }
 
+    /**
+     * Records repo signing keys ([fetched]: repo url to fingerprint) and drops
+     * those of repos no longer [configured]. Reloads extensions when that
+     * changes which signers are trusted. Returns whether it did.
+     */
+    fun updateRepoSigningKeys(fetched: Map<String, String>, configured: Collection<String>): Boolean {
+        val changed = trust.updateRepoKeys(fetched, configured)
+        if (changed) reload()
+        return changed
+    }
+
     // Browse/read always goes through the extension-lib 1.6 suspend API. Lib 1.4
     // extensions don't implement it, but `HttpSource` bridges each call down to
     // the Observable `fetch*` method they do implement. Calling `fetch*`
@@ -181,11 +202,65 @@ class EngineFacade private constructor(context: Context) {
         return Mappers.mangasPageToDto(source.id, result)
     }
 
-    suspend fun search(sourceId: String, query: String, page: Int): MangasPageDto {
+    /**
+     * Searches with the source's own filters. [filtersJson] is the UI's edited
+     * copy of [getFilters]' output; it's written onto a fresh filter list, since
+     * the filter objects themselves belong to the source.
+     */
+    suspend fun search(sourceId: String, query: String, page: Int, filtersJson: String? = null): MangasPageDto {
         val source = catalogue(sourceId)
         val filters: FilterList = source.getFilterList()
+        if (!filtersJson.isNullOrBlank()) {
+            val edited = runCatching { Json.parseToJsonElement(filtersJson).jsonArray }.getOrNull()
+            if (edited != null && edited.isNotEmpty()) FilterSerializer.applyTo(edited, filters)
+        }
         val result = source.getSearchManga(page, query, filters)
         return Mappers.mangasPageToDto(source.id, result)
+    }
+
+    /** The source's filters with their default state, as `FilterDto` JSON. */
+    fun getFilters(sourceId: String): String {
+        val source = catalogue(sourceId)
+        return FilterSerializer.toJson(source.getFilterList()).toString()
+    }
+
+    /**
+     * Titles the source itself lists as related to [mangaUrl].
+     *
+     * The related-manga hooks come from Komikku's source API; keiyoushi
+     * extensions build against Mihon's, which has none, so almost no source
+     * overrides them. The vendored default would spend a details request and
+     * return nothing, so it's only called when the extension really overrides
+     * it. Otherwise `mangas` is null and the app falls back to searching.
+     */
+    suspend fun getRelatedManga(
+        sourceId: String,
+        mangaUrl: String,
+        title: String,
+        memoJson: String? = null,
+    ): RelatedMangaDto {
+        val source = source(sourceId) as? CatalogueSource
+            ?: return RelatedMangaDto(mangas = null, searchAllowed = false)
+        if (source.disableRelatedMangas) return RelatedMangaDto(mangas = null, searchAllowed = false)
+        val searchAllowed = !source.disableRelatedMangasBySearch
+        if (!overridesRelated(source)) return RelatedMangaDto(mangas = null, searchAllowed = searchAllowed)
+
+        val stub = SManga.create().apply {
+            url = mangaUrl
+            this.title = title
+            memo = Mappers.memoFromJson(memoJson)
+        }
+        val related = source.fetchRelatedMangaList(stub)
+            .filter { runCatching { it.url }.getOrNull().let { url -> url != null && url != mangaUrl } }
+            .map { Mappers.mangaToDto(source.id, it) }
+        return RelatedMangaDto(mangas = related, searchAllowed = searchAllowed)
+    }
+
+    private fun overridesRelated(source: CatalogueSource): Boolean {
+        val hooks = setOf("fetchRelatedMangaList", "relatedMangaListParse")
+        return generateSequence<Class<*>>(source.javaClass) { it.superclass }
+            .takeWhile { it != HttpSource::class.java && it != Any::class.java }
+            .any { cls -> cls.declaredMethods.any { it.name in hooks } }
     }
 
     /**
@@ -310,7 +385,7 @@ class EngineFacade private constructor(context: Context) {
         if (!finalFile.exists() || finalFile.length() == 0L) {
             val temp = File(cacheDir, "$key.tmp")
             contentType = try {
-                source.fetchImage(model).awaitSingle().use { response ->
+                source.getImage(model).use { response ->
                     writeImageResponse(response, temp)
                 }
             } catch (error: Throwable) {
@@ -502,7 +577,7 @@ class EngineFacade private constructor(context: Context) {
                       else internalChapterDir(sourceId, chapterUrl).apply { mkdirs() }
         val temp = File(scratch, "${hashKey("$sourceId|$chapterUrl")}_${page.index}.tmp")
         val contentType = try {
-            source.fetchImage(model).awaitSingle().use { response -> writeImageResponse(response, temp) }
+            source.getImage(model).use { response -> writeImageResponse(response, temp) }
         } catch (error: Throwable) {
             temp.delete()
             directImageResponse(source, imageUrl).use { response -> writeImageResponse(response, temp) }

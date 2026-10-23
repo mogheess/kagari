@@ -16,11 +16,16 @@ export interface ExtensionDto {
   libVersion: string;
   lang: string;
   isNsfw: boolean;
-  /** True once the signing cert is trusted by the user. */
+  /**
+   * Whether its code is loaded: its signer is one of the user's repos' keys,
+   * or the user trusted it. Untrusted extensions contribute no sources.
+   */
   trusted: boolean;
   /** Sources contributed by this extension (a SourceFactory can yield many). */
   sources: SourceDto[];
   iconUrl?: string;
+  /** SHA-256 of the signing certificate; what trusting the extension records. */
+  signatureHash?: string | null;
 }
 
 export interface SourceDto {
@@ -89,6 +94,14 @@ export interface BackgroundInboxDto {
   updates: BackgroundUpdateDto[];
   /** New chapter urls per manga, keyed `sourceId\u0000mangaUrl`. */
   snapshots: Record<string, string[]>;
+}
+
+/** Titles related to one manga, as far as its source can tell. */
+export interface RelatedMangaDto {
+  /** The source's own related list, or null when it doesn't provide one. */
+  mangas?: MangaDto[] | null;
+  /** False when the source asks apps not to look for related titles by searching. */
+  searchAllowed: boolean;
 }
 
 /** Names a download needs to land in Mihon's folder layout under a picked storage location. */
@@ -199,6 +212,8 @@ export interface AvailableExtensionDto {
   iconUrl?: string;
   sources: { name: string; lang: string; id: string; baseUrl?: string }[];
   repoUrl: string;
+  /** Fingerprint of the key the repo signs its extensions with, when it publishes one. */
+  repoSigningKey?: string;
   installed: boolean;
 }
 
@@ -281,6 +296,12 @@ export interface Engine {
   listExtensions(): Promise<ExtensionDto[]>;
   listSources(): Promise<SourceDto[]>;
   trustSignature(pkg: string, certSha256: string): Promise<void>;
+  /**
+   * Records repos' signing keys (`{ repoUrl: fingerprint }`, from the repos just
+   * fetched) so extensions they sign load without a prompt. Resolves true when
+   * that changed which extensions are trusted (they've been reloaded).
+   */
+  setRepoSigningKeys(keys: Record<string, string>): Promise<boolean>;
 
   // repos & extension installation
   listRepos(): Promise<RepoDto[]>;
@@ -311,6 +332,13 @@ export interface Engine {
   getMangaDetails(sourceId: string, mangaUrl: string, memo?: string): Promise<MangaDto>;
   /** Absolute, browser-openable URL for a manga (source baseUrl + path). */
   getMangaWebUrl(sourceId: string, mangaUrl: string): Promise<string>;
+  /** The source's own related titles for a manga; see `src/library/similar.ts`. */
+  getRelatedManga(
+    sourceId: string,
+    mangaUrl: string,
+    title: string,
+    memo?: string,
+  ): Promise<RelatedMangaDto>;
   getChapters(sourceId: string, mangaUrl: string, memo?: string): Promise<ChapterDto[]>;
   getPages(sourceId: string, chapterUrl: string, memo?: string): Promise<PageDto[]>;
   resolveImage(sourceId: string, page: PageDto): Promise<ImageRequestDto>;
@@ -392,14 +420,17 @@ export interface Engine {
   takeBackgroundUpdates(): Promise<BackgroundInboxDto>;
 
   // device
+  /** Device ABIs, preferred first (e.g. `["arm64-v8a", "armeabi-v7a"]`). Empty when unknown. */
+  getSupportedAbis(): Promise<string[]>;
   /** Holds the screen awake (reader). Best-effort; no-ops without an Activity. */
   setKeepScreenOn(enabled: boolean): Promise<void>;
 
   // web view
   /**
-   * Opens a URL in an in-app WebView that shares the engine's cookie jar, so the
-   * user can clear a Cloudflare challenge manually (the resulting `cf_clearance`
-   * cookie is then reused by the source's HTTP client).
+   * Opens `url` in the in-app WebView, which shares the engine's cookie jar so
+   * a Cloudflare check passed there is reused by the source's HTTP client.
+   * Resolves when the user closes it: `true` when they came back with a new
+   * Cloudflare clearance for that site (worth retrying), `false` otherwise.
    */
-  openInWebView(url: string): Promise<void>;
+  openInWebView(url: string): Promise<boolean>;
 }
