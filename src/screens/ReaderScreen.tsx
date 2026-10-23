@@ -742,6 +742,11 @@ export function ReaderScreen() {
     resetZoom();
   }, [mode, resetZoom]);
 
+  // The remounted list opens on the page being read, not at its top. Read once
+  // per mode (that's all `mode` is doing here); at first there's nothing yet.
+  const reopenKey = useMemo(() => (mode ? currentRef.current : ''), [mode]);
+  const reopenIndex = reopenKey ? items.findIndex(item => item.key === reopenKey) : -1;
+
   const zoomStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: tx.value }, { translateY: ty.value }, { scale: scale.value }],
   }));
@@ -915,6 +920,7 @@ export function ReaderScreen() {
             <FlatList
               ref={listRef}
               key={mode}
+              initialScrollIndex={reopenIndex > 0 ? reopenIndex : undefined}
               data={items}
               keyExtractor={i => i.key}
               renderItem={renderItem}
