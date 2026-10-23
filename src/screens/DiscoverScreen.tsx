@@ -133,6 +133,7 @@ export function DiscoverScreen() {
     setMode('source');
     setSourceId(intent.sourceId);
     setBrowse(intent.browse);
+    setQuery(intent.query ?? '');
   }, [intent]);
 
   // Keep the browse mode coherent: a source that can't do "latest" falls back.
