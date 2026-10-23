@@ -33,10 +33,13 @@ export interface DownloadEntry {
 }
 
 const store = makePersistence<DownloadEntry[]>('@kagari/downloads/v1');
+const pausedStore = makePersistence<boolean>('@kagari/downloads/paused/v1');
 
 let entries: DownloadEntry[] = [];
 let hydrated = false;
 let running = false;
+/** Queue paused by the user. Persisted: a paused queue stays paused after a restart. */
+let paused = false;
 const listeners = new Set<() => void>();
 
 function emit(): void {
@@ -60,6 +63,7 @@ function patch(sourceId: string, chapterUrl: string, changes: Partial<DownloadEn
 }
 
 async function hydrate(): Promise<void> {
+  paused = (await pausedStore.load()) === true;
   const stored = await store.load();
   if (stored && Array.isArray(stored)) {
     // Anything mid-flight when the app died goes back in the queue. Merge-safe:
@@ -116,7 +120,7 @@ export async function migrateDownloadsToStorage(
 
 /** Processes queued chapters one at a time. */
 async function pump(): Promise<void> {
-  if (running || !hydrated) return;
+  if (running || !hydrated || paused) return;
   const next = entries.find(e => e.status === 'queued');
   if (!next) return;
   running = true;
@@ -135,6 +139,12 @@ async function pump(): Promise<void> {
     patch(sourceId, chapterUrl, { pageCount: pages.length });
     for (let i = 0; i < pages.length; i += 1) {
       if (!entries.some(e => sameChapter(e, sourceId, chapterUrl))) return; // cancelled mid-run
+      if (paused) {
+        // Stop after the page in flight. Pages already saved are skipped on
+        // resume (downloadPage is idempotent), so nothing is fetched twice.
+        patch(sourceId, chapterUrl, { status: 'queued' });
+        return;
+      }
       await engine.downloadPage(sourceId, chapterUrl, pages[i], downloadMeta(next));
       patch(sourceId, chapterUrl, { downloaded: i + 1 });
     }
@@ -237,6 +247,59 @@ export function retryDownload(sourceId: string, chapterUrl: string): void {
   void pump();
 }
 
+const sameTitle = (e: DownloadEntry, sourceId: string, mangaUrl: string) =>
+  e.sourceId === sourceId && e.mangaUrl === mangaUrl;
+
+/**
+ * Requeues failed chapters — every one, or only one title's. Finished and
+ * queued chapters are left alone. Returns how many were requeued.
+ */
+export function retryFailed(title?: { sourceId: string; mangaUrl: string }): number {
+  let count = 0;
+  entries = entries.map(e => {
+    if (e.status !== 'error') return e;
+    if (title && !sameTitle(e, title.sourceId, title.mangaUrl)) return e;
+    count += 1;
+    return { ...e, status: 'queued' as const, error: undefined, downloaded: 0 };
+  });
+  if (count === 0) return 0;
+  emit();
+  persist();
+  void pump();
+  return count;
+}
+
+/**
+ * Drops a title's queued and in-progress chapters (and any pages already
+ * written for them). Finished chapters stay downloaded and readable.
+ */
+export function cancelQueued(sourceId: string, mangaUrl: string): number {
+  const cancelled = entries.filter(
+    e => sameTitle(e, sourceId, mangaUrl) && (e.status === 'queued' || e.status === 'downloading'),
+  );
+  for (const e of cancelled) removeDownload(e.sourceId, e.chapterUrl);
+  return cancelled.length;
+}
+
+export function pauseDownloads(): void {
+  if (paused) return;
+  paused = true;
+  pausedStore.save(true);
+  emit();
+}
+
+export function resumeDownloads(): void {
+  if (!paused) return;
+  paused = false;
+  pausedStore.save(false);
+  emit();
+  void pump();
+}
+
+function getPausedSnapshot(): boolean {
+  return paused;
+}
+
 function subscribe(cb: () => void): () => void {
   listeners.add(cb);
   return () => {
@@ -255,6 +318,11 @@ function getHydratedSnapshot(): boolean {
 /** Reactive list of all downloads (newest activity first). */
 export function useDownloads(): DownloadEntry[] {
   return useSyncExternalStore(subscribe, getSnapshot);
+}
+
+/** Whether the user paused the download queue. */
+export function useDownloadsPaused(): boolean {
+  return useSyncExternalStore(subscribe, getPausedSnapshot);
 }
 
 /** True once the persisted queue has been merged into memory. */

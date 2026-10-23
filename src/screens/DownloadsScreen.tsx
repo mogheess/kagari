@@ -7,7 +7,17 @@ import { useTheme } from '../theme/ThemeProvider';
 import { Icon } from '../components/Icon';
 import { RemoteImage } from '../components/RemoteImage';
 import { OptionSheet, type SheetOption } from '../components/OptionSheet';
-import { useDownloads, removeDownload } from '../library/downloads';
+import {
+  useDownloads,
+  useDownloadsPaused,
+  removeDownload,
+  retryDownload,
+  retryFailed,
+  cancelQueued,
+  pauseDownloads,
+  resumeDownloads,
+  type DownloadEntry,
+} from '../library/downloads';
 import { useStorageLocation, describeStorageLocation } from '../library/storageLocation';
 import {
   arrangeGroups,
@@ -50,6 +60,23 @@ export function DownloadsScreen() {
   const sources = useSources();
   const [query, setQuery] = useState('');
   const [sheet, setSheet] = useState<'sort' | 'source' | null>(null);
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const paused = useDownloadsPaused();
+
+  const toggleExpanded = (key: string) =>
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  let queuedChapters = 0;
+  let failedChapters = 0;
+  for (const e of downloads) {
+    if (e.status === 'queued' || e.status === 'downloading') queuedChapters += 1;
+    else if (e.status === 'error') failedChapters += 1;
+  }
 
   const groups = useMemo(() => groupByManga(downloads), [downloads]);
   const sizes = useGroupSizes(groups);
@@ -118,6 +145,37 @@ export function DownloadsScreen() {
   const toolbar =
     groups.length > 0 ? (
       <View style={{ marginBottom: 12 }}>
+        {queuedChapters > 0 || failedChapters > 0 ? (
+          <View style={[styles.queueBar, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+            <Text style={{ color: theme.colors.text, fontSize: 13, flex: 1 }} numberOfLines={2}>
+              {[
+                queuedChapters > 0
+                  ? paused
+                    ? `Paused \u00B7 ${queuedChapters} waiting`
+                    : `Downloading \u00B7 ${queuedChapters} in queue`
+                  : null,
+                failedChapters > 0 ? `${failedChapters} failed` : null,
+              ]
+                .filter(Boolean)
+                .join(' \u00B7 ')}
+            </Text>
+            {queuedChapters > 0 ? (
+              <Pressable
+                onPress={paused ? resumeDownloads : pauseDownloads}
+                style={[styles.barBtn, { borderColor: theme.colors.border }]}
+              >
+                <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 12.5 }}>
+                  {paused ? 'Resume' : 'Pause'}
+                </Text>
+              </Pressable>
+            ) : null}
+            {failedChapters > 0 ? (
+              <Pressable onPress={() => retryFailed()} style={[styles.barBtn, { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent }]}>
+                <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 12.5 }}>Retry failed</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
         <Text numberOfLines={1} style={{ color: theme.colors.textFaint, fontSize: 12, marginBottom: 10 }}>
           {`Saved to ${describeStorageLocation(location)}`}
         </Text>
@@ -203,6 +261,9 @@ export function DownloadsScreen() {
           <MangaGroupRow
             group={item}
             size={sizes.get(item.key)}
+            paused={paused}
+            expanded={expanded.has(item.key)}
+            onToggle={() => toggleExpanded(item.key)}
             onOpen={() =>
               navigation.navigate('MangaDetail', {
                 sourceId: item.sourceId,
@@ -246,18 +307,32 @@ function groupToManga(g: DownloadGroup): MangaDto {
   };
 }
 
-function MangaGroupRow({ group, size, onOpen }: { group: DownloadGroup; size?: number; onOpen: () => void }) {
+function MangaGroupRow({
+  group,
+  size,
+  paused,
+  expanded,
+  onToggle,
+  onOpen,
+}: {
+  group: DownloadGroup;
+  size?: number;
+  paused: boolean;
+  expanded: boolean;
+  onToggle: () => void;
+  onOpen: () => void;
+}) {
   const theme = useTheme();
   const total = group.chapters.length;
 
   let subtitle: string;
   let subtitleColor = theme.colors.textFaint;
   if (group.active > 0) {
-    subtitle = `Downloading \u00B7 ${group.done}/${total} chapters`;
-    subtitleColor = theme.colors.accent;
+    subtitle = `${paused ? 'Paused' : 'Downloading'} \u00B7 ${group.done}/${total} chapters`;
+    subtitleColor = paused ? theme.colors.textMuted : theme.colors.accent;
   } else if (group.errored > 0) {
     subtitle = `${group.errored} failed \u00B7 ${group.done}/${total} saved`;
-    subtitleColor = '#E5604D';
+    subtitleColor = theme.colors.danger;
   } else {
     subtitle = `${total} ${total === 1 ? 'chapter' : 'chapters'} \u00B7 Saved offline`;
   }
@@ -281,43 +356,129 @@ function MangaGroupRow({ group, size, onOpen }: { group: DownloadGroup; size?: n
       ],
     );
 
+  const chapters = [...group.chapters].sort((a, b) => a.createdAt - b.createdAt);
+
   return (
-    <Pressable
-      onPress={onOpen}
-      style={({ pressed }) => [
-        styles.row,
-        { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, opacity: pressed ? 0.7 : 1 },
+    <View
+      style={[
+        styles.card,
+        { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
       ]}
     >
-      <View style={[styles.thumb, { backgroundColor: theme.colors.elevated }]}>
-        {group.thumbnailUrl ? (
-          <RemoteImage
-            uri={group.thumbnailUrl}
-            sourceId={group.sourceId}
-            style={StyleSheet.absoluteFill}
-            resizeMode="cover"
-          />
-        ) : null}
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]} numberOfLines={1}>
-          {group.title}
-        </Text>
-        <Text style={{ color: subtitleColor, fontSize: 12, marginTop: 3 }} numberOfLines={1}>
-          {subtitle}
-        </Text>
-        {group.active > 0 ? (
-          <View style={[styles.track, { backgroundColor: theme.colors.border }]}>
-            <View style={[styles.fill, { backgroundColor: theme.colors.accent, width: `${pct}%` }]} />
-          </View>
-        ) : null}
-      </View>
+      <Pressable
+        onPress={onToggle}
+        accessibilityState={{ expanded }}
+        style={({ pressed }) => [styles.row, { opacity: pressed ? 0.7 : 1 }]}
+      >
+        <View style={[styles.thumb, { backgroundColor: theme.colors.elevated }]}>
+          {group.thumbnailUrl ? (
+            <RemoteImage
+              uri={group.thumbnailUrl}
+              sourceId={group.sourceId}
+              style={StyleSheet.absoluteFill}
+              resizeMode="cover"
+            />
+          ) : null}
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]} numberOfLines={1}>
+            {group.title}
+          </Text>
+          <Text style={{ color: subtitleColor, fontSize: 12, marginTop: 3 }} numberOfLines={1}>
+            {subtitle}
+          </Text>
+          {group.active > 0 ? (
+            <View style={[styles.track, { backgroundColor: theme.colors.border }]}>
+              <View style={[styles.fill, { backgroundColor: theme.colors.accent, width: `${pct}%` }]} />
+            </View>
+          ) : null}
+        </View>
 
-      <Pressable hitSlop={10} onPress={confirmDelete} style={styles.trash}>
-        <Icon name="trash" size={18} color={theme.colors.textFaint} />
+        <Pressable hitSlop={10} onPress={confirmDelete} style={styles.trash}>
+          <Icon name="trash" size={18} color={theme.colors.textFaint} />
+        </Pressable>
+        <Icon name={expanded ? 'chevronDown' : 'chevronRight'} size={18} color={theme.colors.textFaint} />
       </Pressable>
-      <Icon name="chevronRight" size={18} color={theme.colors.textFaint} />
-    </Pressable>
+
+      {expanded ? (
+        <View style={[styles.chapters, { borderColor: theme.colors.border }]}>
+          {chapters.map(c => (
+            <ChapterLine key={c.chapterUrl} entry={c} paused={paused} />
+          ))}
+          <View style={styles.groupActions}>
+            <Pressable onPress={onOpen} hitSlop={6}>
+              <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 13 }}>Open title</Text>
+            </Pressable>
+            {group.errored > 0 ? (
+              <Pressable onPress={() => retryFailed({ sourceId: group.sourceId, mangaUrl: group.mangaUrl })} hitSlop={6}>
+                <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 13 }}>Retry failed</Text>
+              </Pressable>
+            ) : null}
+            {group.active > 0 ? (
+              <Pressable onPress={() => cancelQueued(group.sourceId, group.mangaUrl)} hitSlop={6}>
+                <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 13 }}>Cancel queued</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/** One chapter inside an expanded title: its state and the action that fits it. */
+function ChapterLine({ entry, paused }: { entry: DownloadEntry; paused: boolean }) {
+  const theme = useTheme();
+  let status: string;
+  let color = theme.colors.textFaint;
+  switch (entry.status) {
+    case 'done':
+      status = `Saved \u00B7 ${entry.pageCount} pages`;
+      break;
+    case 'downloading':
+      status = entry.pageCount > 0 ? `Downloading ${entry.downloaded}/${entry.pageCount}` : 'Starting\u2026';
+      color = theme.colors.accent;
+      break;
+    case 'error':
+      status = `Failed: ${entry.error ?? 'unknown error'}`;
+      color = theme.colors.danger;
+      break;
+    default:
+      status = paused ? 'Paused' : 'Queued';
+  }
+
+  const confirmDelete = () =>
+    Alert.alert('Delete chapter', `Delete the downloaded "${entry.chapterName}"?`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => removeDownload(entry.sourceId, entry.chapterUrl) },
+    ]);
+
+  const action =
+    entry.status === 'error'
+      ? { icon: 'refresh' as const, label: 'Retry', onPress: () => retryDownload(entry.sourceId, entry.chapterUrl) }
+      : entry.status === 'done'
+        ? { icon: 'trash' as const, label: 'Delete', onPress: confirmDelete }
+        : { icon: 'close' as const, label: 'Cancel', onPress: () => removeDownload(entry.sourceId, entry.chapterUrl) };
+
+  return (
+    <View style={styles.chapterLine}>
+      <View style={{ flex: 1 }}>
+        <Text style={{ color: theme.colors.text, fontSize: 13.5 }} numberOfLines={1}>
+          {entry.chapterName}
+        </Text>
+        <Text style={{ color, fontSize: 12, marginTop: 2 }} numberOfLines={2}>
+          {status}
+        </Text>
+      </View>
+      <Pressable
+        hitSlop={10}
+        onPress={action.onPress}
+        accessibilityLabel={`${action.label} ${entry.chapterName}`}
+        style={styles.trash}
+      >
+        <Icon name={action.icon} size={17} color={entry.status === 'error' ? theme.colors.accent : theme.colors.textFaint} />
+      </Pressable>
+    </View>
   );
 }
 
@@ -330,14 +491,51 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
+  card: {
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginBottom: 10,
+    overflow: 'hidden',
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
     padding: 10,
+  },
+  chapters: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 14,
+    paddingTop: 4,
+    paddingBottom: 10,
+  },
+  chapterLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 8,
+  },
+  groupActions: {
+    flexDirection: 'row',
+    gap: 22,
+    paddingTop: 8,
+  },
+  queueBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 12,
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
-    marginBottom: 10,
+    marginBottom: 12,
+  },
+  barBtn: {
+    paddingHorizontal: 12,
+    height: 32,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   thumb: {
     width: 46,
