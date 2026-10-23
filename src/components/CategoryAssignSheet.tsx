@@ -76,7 +76,9 @@ export function CategoryAssignSheet({
                       },
                     ]}
                   >
-                    {on ? <Icon name="check" size={14} color={theme.colors.onAccent} /> : null}
+                    {on ? (
+                      <Icon name="check" size={14} color={theme.colors.onAccent} strokeWidth={3} />
+                    ) : null}
                   </View>
                   <Text style={[theme.typography.body, { color: theme.colors.text, flex: 1 }]}>
                     {item.name}
