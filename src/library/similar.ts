@@ -9,17 +9,20 @@
  * only match it against titles, so it returns noise.
  *
  * Search hits must share key words with the title (see sharesKeywords), so
- * a title with no relatives on its source shows no rail rather than noise.
- * At most two searches per title, run after the chapter list has loaded, and
- * results are cached for the session so revisiting a title costs nothing.
+ * a title with no relatives on its source finds nothing rather than noise.
+ * At most two searches per title, only once the section is opened. Answers are
+ * cached for the session so revisiting a title costs nothing; failures aren't,
+ * so a dropped connection doesn't hide the section until the app restarts.
  */
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { getEngine } from '../engine';
-import type { MangaDto } from '../engine/types';
+import type { MangaDto, RelatedMangaDto } from '../engine/types';
 
 const MAX_RESULTS = 20;
 /** With fewer hits than this from the first query, try the single best word. */
 const ENOUGH_RESULTS = 4;
+/** How long one request to the source may take before it counts as failed. */
+export const REQUEST_TIMEOUT_MS = 15_000;
 
 const STOPWORDS = new Set([
   'the', 'and', 'for', 'with', 'from', 'into', 'that', 'this', 'are', 'was', 'not',
@@ -117,88 +120,148 @@ export function rankSimilar(
     .map(h => h.manga);
 }
 
-const cache = new Map<string, MangaDto[]>();
-const inFlight = new Map<string, Promise<MangaDto[]>>();
+/**
+ * - `ok`: looked; `items` may be empty when nothing related turned up.
+ * - `unsupported`: the source lists nothing itself and asks apps not to search.
+ * - `failed`: the source couldn't be reached or took too long.
+ */
+export type SimilarStatus = 'ok' | 'unsupported' | 'failed';
+
+export interface SimilarResult {
+  status: SimilarStatus;
+  items: MangaDto[];
+}
+
+/** Settled answers only; see loadSimilar. */
+const cache = new Map<string, SimilarResult>();
+const inFlight = new Map<string, Promise<SimilarResult>>();
 
 function keyOf(manga: Pick<MangaDto, 'sourceId' | 'url'>): string {
   return `${manga.sourceId}\u0000${manga.url}`;
 }
 
-/** Similar titles for `manga` on its own source. Never throws; empty on failure. */
-export async function loadSimilar(manga: MangaDto): Promise<MangaDto[]> {
+function withTimeout<T>(task: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error('The source took too long to answer')),
+      REQUEST_TIMEOUT_MS,
+    );
+    task.then(
+      value => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      error => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+/** What a search turned up, and whether every request it needed got answered. */
+async function findSimilar(manga: MangaDto): Promise<{ result: SimilarResult; complete: boolean }> {
+  const engine = getEngine();
+  let related: RelatedMangaDto;
+  try {
+    related = await withTimeout(
+      engine.getRelatedManga(manga.sourceId, manga.url, manga.title, manga.memo),
+    );
+  } catch {
+    return { result: { status: 'failed', items: [] }, complete: false };
+  }
+  if (related.mangas && related.mangas.length > 0) {
+    return { result: { status: 'ok', items: rankSimilar(manga, [related.mangas]) }, complete: true };
+  }
+  if (!related.searchAllowed) {
+    return { result: { status: 'unsupported', items: [] }, complete: true };
+  }
+
+  const keywords = titleKeywords(manga.title);
+  const batches: MangaDto[][] = [];
+  let failed = false;
+  for (const query of similarQueries(manga.title)) {
+    try {
+      const page = await withTimeout(engine.search(manga.sourceId, query, 1));
+      batches.push(page.manga.filter(m => sharesKeywords(m.title, keywords)));
+    } catch {
+      failed = true;
+      break;
+    }
+    if (rankSimilar(manga, batches).length >= ENOUGH_RESULTS) break;
+  }
+  const items = rankSimilar(manga, batches);
+  // Hits from a search that did answer are still worth showing when a later
+  // one failed; with none at all, it's a failure the reader can retry.
+  if (failed && items.length === 0) return { result: { status: 'failed', items }, complete: false };
+  return { result: { status: 'ok', items }, complete: !failed };
+}
+
+/**
+ * Similar titles for `manga` on its own source. Never throws. Complete
+ * answers are cached for the session; failures and partial answers are not,
+ * so the next try asks the source again.
+ */
+export function loadSimilar(manga: MangaDto): Promise<SimilarResult> {
   const key = keyOf(manga);
   const cached = cache.get(key);
-  if (cached) return cached;
+  if (cached) return Promise.resolve(cached);
   const pending = inFlight.get(key);
   if (pending) return pending;
 
-  const task = (async () => {
-    const engine = getEngine();
-    let result: MangaDto[] = [];
-    try {
-      const related = await engine.getRelatedManga(
-        manga.sourceId,
-        manga.url,
-        manga.title,
-        manga.memo,
-      );
-      if (related.mangas && related.mangas.length > 0) {
-        result = rankSimilar(manga, [related.mangas]);
-      } else if (related.searchAllowed) {
-        const keywords = titleKeywords(manga.title);
-        const batches: MangaDto[][] = [];
-        for (const query of similarQueries(manga.title)) {
-          const page = await engine.search(manga.sourceId, query, 1);
-          batches.push(page.manga.filter(m => sharesKeywords(m.title, keywords)));
-          if (rankSimilar(manga, batches).length >= ENOUGH_RESULTS) break;
-        }
-        result = rankSimilar(manga, batches);
-      }
-    } catch {
-      result = [];
-    }
-    cache.set(key, result);
+  const task = findSimilar(manga).then(({ result, complete }) => {
+    if (complete) cache.set(key, result);
     inFlight.delete(key);
     return result;
-  })();
+  });
   inFlight.set(key, task);
   return task;
 }
 
+export interface SimilarTitlesState {
+  /** `idle` until asked for, then `loading` until the source answers. */
+  status: 'idle' | 'loading' | SimilarStatus;
+  items: MangaDto[];
+  /** Asks the source again (after a failure). */
+  retry: () => void;
+}
+
 /**
- * Similar titles for the title page. Waits for `enabled` (the chapter list
- * having loaded) so the extra searches never compete with what the user
- * opened the page for.
+ * Similar titles for the title page, looked up once `active` (the section is
+ * open and the chapter list has loaded, so the extra searches never compete
+ * with what the user opened the page for). A cached answer shows straight
+ * away even while inactive.
  */
-export function useSimilarTitles(
-  manga: MangaDto | undefined,
-  enabled: boolean,
-): { items: MangaDto[]; loading: boolean } {
+export function useSimilarTitles(manga: MangaDto | undefined, active: boolean): SimilarTitlesState {
   const key = manga ? keyOf(manga) : '';
-  const [state, setState] = useState<{ key: string; items: MangaDto[]; loading: boolean }>(() => ({
-    key,
-    items: manga ? cache.get(key) ?? [] : [],
-    loading: false,
-  }));
+  const [state, setState] = useState<{ key: string; result: SimilarResult | null; loading: boolean }>(
+    () => ({ key, result: manga ? cache.get(key) ?? null : null, loading: false }),
+  );
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => setAttempt(n => n + 1), []);
 
   useEffect(() => {
-    if (!manga || !enabled || !manga.title) return;
+    if (!manga) return;
     const hit = cache.get(key);
     if (hit) {
-      setState({ key, items: hit, loading: false });
+      setState({ key, result: hit, loading: false });
       return;
     }
+    if (!active || !manga.title) return;
     let live = true;
-    setState({ key, items: [], loading: true });
-    loadSimilar(manga).then(items => {
-      if (live) setState({ key, items, loading: false });
+    setState({ key, result: null, loading: true });
+    loadSimilar(manga).then(result => {
+      if (live) setState({ key, result, loading: false });
     });
     return () => {
       live = false;
     };
     // `manga` is keyed by `key`; its other fields don't change the lookup.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, enabled, manga?.title]);
+  }, [key, active, manga?.title, attempt]);
 
-  return state.key === key ? { items: state.items, loading: state.loading } : { items: [], loading: false };
+  if (state.key !== key) return { status: 'idle', items: [], retry };
+  if (state.loading) return { status: 'loading', items: [], retry };
+  if (!state.result) return { status: 'idle', items: [], retry };
+  return { status: state.result.status, items: state.result.items, retry };
 }
