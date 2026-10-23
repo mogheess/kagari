@@ -521,7 +521,9 @@ With no extensions installed you'll see empty states. Install a repo + extension
   painted it for a frame, so pressing back flashed the screen you'd just left.
   The patch skips drawing a removing screen whose animation has ended. Re-check
   it when bumping react-native-screens. For the same reason the tab bar uses no
-  BlurView on Android.
+  BlurView on Android: its glass is faked (`AndroidGlass` in GlassTabBar), a
+  blurred thumbnail of the fixed backdrop cut to the bar's position, plus a
+  frost, sheen, rim streak and depth gradient. No per-frame cost.
 - **Release vs debug installs:** they're signed with different keys, so one
   won't install over the other (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`).
   Uninstalling wipes app data, including the repo list.

@@ -40,6 +40,8 @@ const FAR_FAR_AWAY = 30000;
 export function TabsScreen() {
   const navigation = useNavigation();
   const theme = useTheme();
+  // The area the backdrop covers, so the tab bar can frost the right slice of it.
+  const [stage, setStage] = useState<{ width: number; height: number }>();
   const [active, setActive] = useState<TabKey>('home');
   const [mounted, setMounted] = useState<Set<TabKey>>(() => new Set<TabKey>(['home']));
 
@@ -119,7 +121,13 @@ export function TabsScreen() {
 
   return (
     <TabNavProvider active={active} navigateTab={navigateTab}>
-      <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
+      <View
+        style={{ flex: 1, backgroundColor: theme.colors.bg }}
+        onLayout={e => {
+          const { width, height } = e.nativeEvent.layout;
+          setStage(prev => (prev?.width === width && prev?.height === height ? prev : { width, height }));
+        }}
+      >
         <ScreenBackdrop />
         <View style={{ flex: 1 }}>
           {TAB_ORDER.map(key => {
@@ -139,7 +147,7 @@ export function TabsScreen() {
             );
           })}
         </View>
-        <GlassTabBar active={active} onChange={navigateTab} />
+        <GlassTabBar active={active} onChange={navigateTab} stage={stage} />
       </View>
     </TabNavProvider>
   );
