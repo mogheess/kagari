@@ -53,6 +53,8 @@ import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
 import java.io.File
 import java.security.MessageDigest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -198,11 +200,26 @@ class EngineFacade(context: Context) {
         return Mappers.mangasPageToDto(source.id, result)
     }
 
-    suspend fun search(sourceId: String, query: String, page: Int): MangasPageDto {
+    /**
+     * Searches with the source's own filters. [filtersJson] is the UI's edited
+     * copy of [getFilters]' output; it's written onto a fresh filter list, since
+     * the filter objects themselves belong to the source.
+     */
+    suspend fun search(sourceId: String, query: String, page: Int, filtersJson: String? = null): MangasPageDto {
         val source = catalogue(sourceId)
         val filters: FilterList = source.getFilterList()
+        if (!filtersJson.isNullOrBlank()) {
+            val edited = runCatching { Json.parseToJsonElement(filtersJson).jsonArray }.getOrNull()
+            if (edited != null && edited.isNotEmpty()) FilterSerializer.applyTo(edited, filters)
+        }
         val result = source.getSearchManga(page, query, filters)
         return Mappers.mangasPageToDto(source.id, result)
+    }
+
+    /** The source's filters with their default state, as `FilterDto` JSON. */
+    fun getFilters(sourceId: String): String {
+        val source = catalogue(sourceId)
+        return FilterSerializer.toJson(source.getFilterList()).toString()
     }
 
     /**

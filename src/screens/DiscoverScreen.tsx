@@ -26,6 +26,8 @@ import { ExtensionIcon } from '../components/ExtensionIcon';
 import { SwipeTabs } from '../components/SwipeTabs';
 import { SourcePickerSheet } from '../components/SourcePickerSheet';
 import { GlobalSourcesSheet } from '../components/GlobalSourcesSheet';
+import { FilterSheet } from '../components/FilterSheet';
+import { countChanged } from '../sources/filters';
 import { usePinnedSources } from '../sources/pinned';
 import { useSourceHealth, unhealthyIds, recordSourceResult } from '../sources/sourceHealth';
 import { useDiscoverIntent, type BrowseMode } from '../sources/discoverIntent';
@@ -34,7 +36,7 @@ import { needsHumanCheck } from '../engine/errors';
 import { useSources } from '../sources/sourcesStore';
 import { pickDefaultSource, sortSourcesForPicker } from '../utils/sourceSelect';
 import type { RootStackParamList } from '../navigation/types';
-import type { MangaDto, MangasPageDto, SourceDto } from '../engine/types';
+import type { FilterDto, MangaDto, MangasPageDto, SourceDto } from '../engine/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type DiscoverMode = 'source' | 'global';
@@ -68,6 +70,11 @@ export function DiscoverScreen() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [chooserOpen, setChooserOpen] = useState(false);
   const [restored, setRestored] = useState(false);
+  // Search filters belong to one source; both the defaults and what the user
+  // applied are tagged with it so switching sources never carries them over.
+  const [filterDefaults, setFilterDefaults] = useState<{ sourceId: string; filters: FilterDto[] } | null>(null);
+  const [appliedFilters, setAppliedFilters] = useState<{ sourceId: string; filters: FilterDto[] } | null>(null);
+  const [filterOpen, setFilterOpen] = useState(false);
   const [fetching, setFetching] = useState(false);
 
   const allSources = useSources();
@@ -138,6 +145,29 @@ export function DiscoverScreen() {
     const t = setTimeout(() => setDebounced(query), 350);
     return () => clearTimeout(t);
   }, [query]);
+
+  useEffect(() => {
+    if (mode !== 'source' || !sourceId) return;
+    let alive = true;
+    getEngine()
+      .getFilters(sourceId)
+      .then(filters => {
+        if (alive) setFilterDefaults({ sourceId, filters });
+      })
+      .catch(() => {
+        if (alive) setFilterDefaults({ sourceId, filters: [] });
+      });
+    return () => {
+      alive = false;
+    };
+  }, [mode, sourceId]);
+
+  const defaultFilters = filterDefaults?.sourceId === sourceId ? filterDefaults.filters : [];
+  const activeFilters =
+    appliedFilters?.sourceId === sourceId && countChanged(appliedFilters.filters, defaultFilters) > 0
+      ? appliedFilters.filters
+      : null;
+  const activeFilterCount = activeFilters ? countChanged(activeFilters, defaultFilters) : 0;
 
   const openManga = (m: MangaDto) =>
     navigation.navigate('MangaDetail', { sourceId: m.sourceId, mangaUrl: m.url, preview: m });
@@ -210,12 +240,44 @@ export function DiscoverScreen() {
               visible={sources.length > 0}
               onPress={() => setPickerOpen(true)}
             />
-            {sources.length > 0 && !query.trim() ? (
-              <BrowseToggle
-                browse={browse}
-                supportsLatest={!!sources.find(s => s.id === sourceId)?.supportsLatest}
-                onChange={setBrowse}
-              />
+            {sources.length > 0 ? (
+              <View style={styles.browseBar}>
+                <View style={{ flex: 1 }}>
+                  {activeFilters ? (
+                    <Pressable
+                      onPress={() => setAppliedFilters(null)}
+                      style={[styles.browseChip, styles.clearChip, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+                    >
+                      <Text style={{ color: theme.colors.textMuted, fontWeight: '700', fontSize: 13 }}>Filtered</Text>
+                      <Icon name="close" size={14} color={theme.colors.textMuted} />
+                    </Pressable>
+                  ) : !query.trim() ? (
+                    <BrowseToggle
+                      browse={browse}
+                      supportsLatest={!!sources.find(s => s.id === sourceId)?.supportsLatest}
+                      onChange={setBrowse}
+                    />
+                  ) : null}
+                </View>
+                {defaultFilters.length > 0 ? (
+                  <Pressable
+                    onPress={() => setFilterOpen(true)}
+                    accessibilityLabel="Filters"
+                    style={[
+                      styles.browseChip,
+                      styles.clearChip,
+                      activeFilters
+                        ? { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent }
+                        : { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+                    ]}
+                  >
+                    <Icon name="filter" size={14} color={activeFilters ? theme.colors.onAccent : theme.colors.textMuted} />
+                    <Text style={{ color: activeFilters ? theme.colors.onAccent : theme.colors.textMuted, fontWeight: '700', fontSize: 13 }}>
+                      {activeFilterCount > 0 ? `Filters ${activeFilterCount}` : 'Filters'}
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </View>
             ) : null}
           </>
         ) : (
@@ -246,6 +308,7 @@ export function DiscoverScreen() {
             source={sources.find(s => s.id === sourceId)}
             query={debounced}
             browse={browse}
+            filters={activeFilters}
             sourcesCount={sources.length}
             onOpenManga={openManga}
             onAddExtensions={() => navigation.navigate('Extensions')}
@@ -274,6 +337,14 @@ export function DiscoverScreen() {
         onClose={() => setPickerOpen(false)}
       />
       <GlobalSourcesSheet visible={chooserOpen} sources={sources} onClose={() => setChooserOpen(false)} />
+      <FilterSheet
+        visible={filterOpen}
+        sourceName={sources.find(s => s.id === sourceId)?.name}
+        current={activeFilters ?? defaultFilters}
+        defaults={defaultFilters}
+        onApply={filters => setAppliedFilters({ sourceId, filters })}
+        onClose={() => setFilterOpen(false)}
+      />
     </View>
   );
 }
@@ -373,6 +444,7 @@ function SourceBrowse({
   source,
   query,
   browse,
+  filters,
   sourcesCount,
   onOpenManga,
   onAddExtensions,
@@ -382,6 +454,8 @@ function SourceBrowse({
   source?: SourceDto;
   query: string;
   browse: BrowseMode;
+  /** Applied search filters, or null for the plain Popular/Latest lists. */
+  filters: FilterDto[] | null;
   sourcesCount: number;
   onOpenManga: (m: MangaDto) => void;
   onAddExtensions: () => void;
@@ -399,8 +473,10 @@ function SourceBrowse({
     async (page: number): Promise<MangasPageDto> => {
       if (!sourceId) return { manga: [], hasNextPage: false };
       try {
-        const res = q
-          ? await engine.search(sourceId, q, page)
+        // Filters only exist on search, so applied filters turn a plain
+        // browse into a search with an empty query (what Mihon does too).
+        const res = q || filters
+          ? await engine.search(sourceId, q, page, filters ?? undefined)
           : wantsLatest
             ? await engine.getLatest(sourceId, page)
             : await engine.getPopular(sourceId, page);
@@ -411,12 +487,13 @@ function SourceBrowse({
         throw e;
       }
     },
-    [engine, sourceId, q, wantsLatest],
+    [engine, sourceId, q, wantsLatest, filters],
   );
 
+  const filtersKey = filters ? JSON.stringify(filters) : '';
   const { items, loading, loadingMore, refreshing, error, reload, loadMore } = usePagedCatalog(
     fetchPage,
-    [sourceId, q, wantsLatest],
+    [sourceId, q, wantsLatest, filtersKey],
   );
   const humanCheck = needsHumanCheck(error);
 
@@ -764,7 +841,17 @@ const styles = StyleSheet.create({
   browseRow: {
     flexDirection: 'row',
     gap: 8,
+  },
+  browseBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     marginTop: 12,
+  },
+  clearChip: {
+    flexDirection: 'row',
+    gap: 6,
+    alignSelf: 'flex-start',
   },
   browseChip: {
     paddingHorizontal: 16,
