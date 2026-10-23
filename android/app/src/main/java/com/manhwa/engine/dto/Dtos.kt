@@ -162,3 +162,10 @@ data class StorageLocationDto(
     /** False when the grant was lost or the folder was removed. */
     val writable: Boolean,
 )
+
+/** Identifies one chapter's download. */
+@Serializable
+data class ChapterKeyDto(
+    val sourceId: String,
+    val chapterUrl: String,
+)

@@ -13,6 +13,7 @@ import com.manhwa.engine.EngineException
 import com.manhwa.engine.EngineFacade
 import com.manhwa.updates.BackgroundUpdates
 import com.manhwa.engine.backup.ExportRequest
+import com.manhwa.engine.dto.ChapterKeyDto
 import com.manhwa.engine.dto.DownloadMetaDto
 import com.manhwa.engine.dto.PageDto
 import com.manhwa.engine.dto.StorageLocationDto
@@ -290,6 +291,11 @@ class ManhwaEngineModule(
         val page = json.decodeFromString<PageDto>(pageJson)
         val meta = metaJson?.takeIf { it.isNotBlank() }?.let { json.decodeFromString<DownloadMetaDto>(it) }
         facade.downloadPage(sourceId, chapterUrl, page, meta)
+    }
+
+    @ReactMethod
+    fun getDownloadedSizes(keysJson: String, promise: Promise) = resolve(promise) {
+        json.encodeToString(facade.downloadedSizes(json.decodeFromString<List<ChapterKeyDto>>(keysJson)))
     }
 
     @ReactMethod

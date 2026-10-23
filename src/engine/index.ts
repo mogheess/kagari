@@ -49,6 +49,7 @@ function createUnavailableEngine(): Engine {
     fetchCover: (_sourceId: string, url: string) => Promise.resolve(url),
     downloadPage: reject,
     migrateDownloadedChapter: () => Promise.resolve(0),
+    getDownloadedSizes: (keys: readonly unknown[]) => Promise.resolve(keys.map(() => 0)),
     fetchDownloadedImage: reject,
     deleteDownloadedChapter: () => Promise.resolve(),
     getStorageLocation: () => Promise.resolve(null),
