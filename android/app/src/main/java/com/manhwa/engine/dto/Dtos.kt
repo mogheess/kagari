@@ -34,6 +34,8 @@ data class ExtensionDto(
     val trusted: Boolean,
     val sources: List<SourceDto>,
     val iconUrl: String? = null,
+    /** SHA-256 of the signing certificate; what trusting the extension records. */
+    val signatureHash: String? = null,
 )
 
 @Serializable

@@ -37,6 +37,7 @@ interface ManhwaEngineNative {
   uninstallExtension(pkg: string): Promise<void>;
   installApk(uri: string): Promise<void>;
   trustSignature(pkg: string, certSha256: string): Promise<void>;
+  setRepoSigningKeys(keysJson: string): Promise<string>;
   getPopular(sourceId: string, page: number): Promise<string>;
   getLatest(sourceId: string, page: number): Promise<string>;
   search(sourceId: string, query: string, page: number, filtersJson: string): Promise<string>;
@@ -121,6 +122,11 @@ export function createNativeEngine(): Engine | null {
     },
     trustSignature(pkg: string, certSha256: string) {
       return Native.trustSignature(pkg, certSha256);
+    },
+    async setRepoSigningKeys(keys: Record<string, string>) {
+      // An older native build trusts on first sight and has nothing to record.
+      if (typeof Native.setRepoSigningKeys !== 'function') return false;
+      return (await Native.setRepoSigningKeys(JSON.stringify(keys))) === 'true';
     },
     async getPopular(sourceId, page) {
       return parse<MangasPageDto>(await Native.getPopular(sourceId, page));

@@ -27,6 +27,7 @@ function createUnavailableEngine(): Engine {
     listExtensions: () => Promise.resolve([]),
     listSources: () => Promise.resolve([]),
     trustSignature: reject,
+    setRepoSigningKeys: () => Promise.resolve(false),
     listRepos: () => Promise.resolve([]),
     addRepo: reject,
     removeRepo: () => Promise.resolve(),
