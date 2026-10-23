@@ -43,6 +43,8 @@ export type ReaderItem =
       from: ChapterDto;
       /** Absent at the ends of the series. */
       to?: ChapterDto;
+      /** `to` is loaded and its pages follow straight after. */
+      ready?: boolean;
     };
 
 /**
@@ -76,11 +78,19 @@ export function neighboursOf(
  *
  * `loaded` must already be in reading order and contiguous. A transition is
  * emitted before the first chapter and after the last one; between two loaded
- * chapters nothing is emitted, which is what makes the boundary invisible.
+ * chapters nothing is emitted, which is what makes the boundary invisible in
+ * the webtoon strip.
+ *
+ * Paged modes pass `transitionsBetween`: a page flip gives no sense of where a
+ * chapter ends, so, like Mihon's pager, a transition page ("finished X, next
+ * Y") sits between chapters even when both are loaded. It keeps the key the
+ * end-of-window transition had (`next:<url>`), so loading the next chapter
+ * doesn't move the reader off it.
  */
 export function buildReaderItems(
   loaded: readonly LoadedChapter[],
   ordered: readonly ChapterDto[],
+  options: { transitionsBetween?: boolean } = {},
 ): ReaderItem[] {
   if (loaded.length === 0) return [];
   const items: ReaderItem[] = [];
@@ -95,7 +105,18 @@ export function buildReaderItems(
     to: before,
   });
 
-  for (const entry of loaded) {
+  loaded.forEach((entry, i) => {
+    if (options.transitionsBetween && i > 0) {
+      const previous = loaded[i - 1].chapter;
+      items.push({
+        kind: 'transition',
+        key: `next:${previous.url}`,
+        direction: 'next',
+        from: previous,
+        to: entry.chapter,
+        ready: true,
+      });
+    }
     const pageCount = entry.pages.length;
     entry.pages.forEach((page, pageIndex) => {
       items.push({
@@ -108,7 +129,7 @@ export function buildReaderItems(
         pageCount,
       });
     });
-  }
+  });
 
   const last = loaded[loaded.length - 1].chapter;
   const after = neighboursOf(ordered, last.url).next;

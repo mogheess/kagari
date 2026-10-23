@@ -181,3 +181,32 @@ describe('neighboursOf', () => {
     expect(neighboursOf(ordered, '/m/ch-3').next).toBeUndefined();
   });
 });
+
+describe('buildReaderItems with transitionsBetween', () => {
+  test('puts a ready transition between loaded chapters, keyed like the window end', () => {
+    const ordered = [chapter(1), chapter(2), chapter(3)];
+    const one = buildReaderItems([loaded(1, 2)], ordered, { transitionsBetween: true });
+    const two = buildReaderItems([loaded(1, 2), loaded(2, 1)], ordered, {
+      transitionsBetween: true,
+    });
+
+    expect(two.map(i => i.key)).toEqual([
+      'prev:/m/ch-1',
+      '/m/ch-1:0',
+      '/m/ch-1:1',
+      'next:/m/ch-1',
+      '/m/ch-2:0',
+      'next:/m/ch-2',
+    ]);
+    const between = two[3];
+    expect(between.kind === 'transition' && between.ready).toBe(true);
+    // Before chapter 2 loaded, the same key ended the window.
+    expect(one[one.length - 1].key).toBe('next:/m/ch-1');
+  });
+
+  test('webtoon keeps chapters back to back', () => {
+    const ordered = [chapter(1), chapter(2)];
+    const items = buildReaderItems([loaded(1, 1), loaded(2, 1)], ordered);
+    expect(items.filter(i => i.kind === 'transition')).toHaveLength(2);
+  });
+});
