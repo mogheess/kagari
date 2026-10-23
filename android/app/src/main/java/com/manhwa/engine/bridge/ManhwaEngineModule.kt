@@ -2,6 +2,7 @@ package com.manhwa.engine.bridge
 
 import android.app.Activity
 import android.content.Intent
+import android.os.Build
 import android.view.WindowManager
 import com.facebook.react.bridge.ActivityEventListener
 import com.facebook.react.bridge.Promise
@@ -78,6 +79,12 @@ class ManhwaEngineModule(
      * must be set on the UI thread and cleared when the reader closes —
      * otherwise the screen stays on for the rest of the session.
      */
+    /** The device's ABIs, preferred first, so the app updater can offer the matching APK. */
+    @ReactMethod
+    fun getSupportedAbis(promise: Promise) {
+        promise.resolve(json.encodeToString(Build.SUPPORTED_ABIS.toList()))
+    }
+
     @ReactMethod
     fun setKeepScreenOn(enabled: Boolean, promise: Promise) {
         val activity: Activity? = reactContext.currentActivity
