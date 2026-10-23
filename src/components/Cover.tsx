@@ -11,6 +11,7 @@ import { useTheme } from '../theme/ThemeProvider';
 import { RemoteImage } from './RemoteImage';
 import { Skeleton } from './Skeleton';
 import { Icon } from './Icon';
+import { withAlpha } from '../utils/color';
 import type { MangaDto } from '../engine/types';
 
 interface CoverProps {
@@ -22,6 +23,8 @@ interface CoverProps {
   progress?: number;
   /** Unread count badge. */
   badge?: number;
+  /** Chapters downloaded for offline reading; shown as a badge when above 0. */
+  downloaded?: number;
   /** Marks the cover as already saved in the library (corner check + dim). */
   inLibrary?: boolean;
   onPress?: () => void;
@@ -31,7 +34,17 @@ interface CoverProps {
 const RATIO = 1.46; // standard manga cover aspect (h / w)
 
 /** A single cover card: artwork, optional title/subtitle, progress, badge. */
-export function Cover({ manga, width, subtitle, progress, badge, inLibrary, onPress, style }: CoverProps) {
+export function Cover({
+  manga,
+  width,
+  subtitle,
+  progress,
+  badge,
+  downloaded,
+  inLibrary,
+  onPress,
+  style,
+}: CoverProps) {
   const theme = useTheme();
   const [loaded, setLoaded] = useState(false);
   const height = Math.round(width * RATIO);
@@ -82,6 +95,19 @@ export function Cover({ manga, width, subtitle, progress, badge, inLibrary, onPr
               <Icon name="check" size={12} color={theme.colors.onAccent} strokeWidth={2.6} />
             </View>
           </>
+        ) : null}
+
+        {downloaded != null && downloaded > 0 ? (
+          <View
+            style={[
+              styles.downloadedBadge,
+              { backgroundColor: withAlpha(theme.colors.bg, 0.82), top: inLibrary ? 34 : 6 },
+            ]}
+            accessibilityLabel={`${downloaded} downloaded`}
+          >
+            <Icon name="download" size={11} color={theme.colors.text} strokeWidth={2.4} />
+            <Text style={[styles.badgeText, { color: theme.colors.text }]}>{downloaded}</Text>
+          </View>
         ) : null}
 
         {badge != null && badge > 0 ? (
@@ -158,6 +184,16 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: 'rgba(0,0,0,0.38)',
+  },
+  downloadedBadge: {
+    position: 'absolute',
+    left: 6,
+    height: 20,
+    paddingHorizontal: 6,
+    borderRadius: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
   },
   inLibBadge: {
     position: 'absolute',

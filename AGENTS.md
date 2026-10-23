@@ -200,8 +200,20 @@ natively in `RepoManager`.
 
 - **Queue:** `src/library/downloads.ts` is a persisted single-worker queue
   (re-queues anything mid-download on launch). MangaDetail multi-select and the
-  bulk sheet (All / Unread) enqueue in batches; `DownloadsScreen` lists them per
-  title.
+  bulk sheet (All / Unread) enqueue in batches. `DownloadQueueScreen` (Profile →
+  Download queue, or the pill in the Library header while it runs) shows only
+  what's waiting or failed.
+- **Downloads live with their titles (Mihon-style):** there's no screen of
+  downloaded chapters. Library covers carry a download badge and a virtual
+  "Downloaded" collection (folders card / shelf chip) lists library titles with
+  downloads. The title page marks downloaded chapters, can filter to them, and
+  deletes them from multi-select. When the source can't list chapters
+  (offline, blocked, extension not installed) the title page falls back to its
+  downloaded chapters (`downloadedChapterList`), so they read on in order
+  without it. Downloading from a title outside the library offers to add it
+  (`downloadsLibrary.ts`); removing a title with downloads asks whether to
+  delete them. Entries keep `chapterNumber`/`dateUpload` for that ordering;
+  older ones fall back to parsing the chapter name.
 - **Default location:** app-private `filesDir/downloads/<sourceId>/<sha256(chapterUrl)>/<page>.<ext>`.
   Removed on uninstall.
 - **Storage location (opt-in):** Profile → Storage location picks a folder via
@@ -364,8 +376,8 @@ When you add a new persisted store, follow the favorites pattern (in-memory stat
   flagged **Orphaned** (only once some repo has answered), since it won't get
   updates. Installed sources reach every screen through `sourcesStore.ts`
   without a restart.
-- **Downloads**: see *Downloads and storage* above. `DownloadsScreen` is under
-  Profile.
+- **Downloads**: see *Downloads and storage* above. They show in the Library
+  and on title pages; Profile → Download queue holds what's still to download.
 - **Theming** (`src/theme/`): two looks, **Ink** (default, neutral so cover art
   leads) and **Paper** (warmer, higher contrast), each with dark and light
   palettes, plus Pure black (dark only), Density (comfortable/compact) and
@@ -389,6 +401,8 @@ src/
   library/       favorites, categories, collections (library view), history,
                  chapterProgress (read flags + resume), libraryUpdates
                  (new-chapters scan/feed), recentlyAdded, downloads (queue),
+                 downloadQueue (queue grouping), downloadsLibrary (library
+                 side of downloads),
                  storageLocation, collectionCovers, migrate (cross-source +
                  history transfer), mihonImport / mihonExport (.tachibk),
                  tierLists
@@ -410,7 +424,7 @@ src/
   navigation/    RootNavigator (native stack), TabsScreen (local-state tabs,
                  kept alive), TabNav, GlassTabBar, types
   screens/       Home, Library, Discover, Updates, Profile, MangaDetail, Reader,
-                 CustomizeHome, Extensions, Categories, Downloads, Appearance,
+                 CustomizeHome, Extensions, Categories, DownloadQueue, Appearance,
                  Changelog, TierLists
 android/app/src/main/java/
   eu/kanade/tachiyomi/   Vendored runtime: source/ (extension-lib 1.6 API),
@@ -574,8 +588,10 @@ With no extensions installed you'll see empty states. Install a repo + extension
       "What's new" release notes
 - [x] In-app **library updates** feed: per-favorite chapter snapshot + diff scan,
       grouped feed with unseen tab badge (`libraryUpdates.ts`)
-- [x] Per-chapter read state, multi-select (mark read/unread, download), bulk
-      download, Downloads screen
+- [x] Per-chapter read state, multi-select (mark read/unread, download, delete
+      download), bulk download, download queue
+- [x] Downloads live with their titles: library badges + Downloaded collection,
+      offline chapter list from downloads
 - [x] Continuous reading across chapters in webtoon mode (5-chapter window)
 - [x] Storage location (SAF folder, Mihon's download layout)
 - [x] Theming: Ink / Paper looks, light/dark/system, pure black, density, corners

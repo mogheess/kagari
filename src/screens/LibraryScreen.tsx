@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -21,6 +21,7 @@ import { CollectionCard } from '../components/CollectionCard';
 import { SwipeTabs } from '../components/SwipeTabs';
 import { useFavorites, favoriteToManga, reloadFavorites } from '../library/favorites';
 import { useCategories } from '../library/categories';
+import { downloadTitleKey, useDownloadCounts, useQueueCounts } from '../library/downloads';
 import {
   useLibraryCollections,
   useLibraryViewMode,
@@ -42,6 +43,7 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 const TAB_BAR_SPACE = 110;
 const ALL = '__all__';
 const UNCATEGORIZED = '__uncat__';
+const DOWNLOADED = '__downloaded__';
 
 export function LibraryScreen() {
   const theme = useTheme();
@@ -63,6 +65,15 @@ export function LibraryScreen() {
   const [selected, setSelected] = useState<string>(ALL);
   const [refreshing, setRefreshing] = useState(false);
   const [coverPickerFor, setCoverPickerFor] = useState<LibraryCollection | null>(null);
+
+  // Downloads live with their titles here, as in Mihon: a badge on each cover
+  // and a "Downloaded" collection, rather than a screen of their own.
+  const downloadCounts = useDownloadCounts();
+  const queue = useQueueCounts();
+  const downloaded = useMemo<LibraryCollection | null>(() => {
+    const items = favorites.filter(f => downloadCounts.has(downloadTitleKey(f.sourceId, f.url)));
+    return items.length > 0 ? { id: 'downloaded', label: 'Downloaded', kind: 'downloaded', items } : null;
+  }, [favorites, downloadCounts]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -94,9 +105,14 @@ export function LibraryScreen() {
 
   const renderCover = useCallback(
     ({ item }: { item: MangaDto }) => (
-      <Cover manga={item} width={coverWidth} onPress={() => openManga(item)} />
+      <Cover
+        manga={item}
+        width={coverWidth}
+        downloaded={downloadCounts.get(downloadTitleKey(item.sourceId, item.url))}
+        onPress={() => openManga(item)}
+      />
     ),
-    [coverWidth, openManga],
+    [coverWidth, openManga, downloadCounts],
   );
 
   // --- Empty library: one premium empty state regardless of mode ---
@@ -114,7 +130,11 @@ export function LibraryScreen() {
   }
 
   // --- Opened folder: filtered cover grid with a back affordance ---
-  const opened = openId ? findCollection(collections, openId) : undefined;
+  const opened = openId
+    ? openId === 'downloaded'
+      ? downloaded ?? undefined
+      : findCollection(collections, openId)
+    : undefined;
   if (openId && opened) {
     const items = opened.items.map(favoriteToManga);
     return (
@@ -158,6 +178,36 @@ export function LibraryScreen() {
       <View style={[styles.header, { paddingHorizontal: sidePad }]}>
         <Text style={[theme.typography.title, { color: theme.colors.text }]}>Library</Text>
         <View style={styles.headerActions}>
+          {queue.active > 0 || queue.failed > 0 ? (
+            <Pressable
+              hitSlop={8}
+              onPress={() => navigation.navigate('DownloadQueue')}
+              accessibilityLabel={
+                queue.active > 0 ? `${queue.active} chapters downloading` : `${queue.failed} downloads failed`
+              }
+              style={[
+                styles.queuePill,
+                {
+                  backgroundColor: theme.colors.surface,
+                  borderColor: queue.active > 0 ? theme.colors.accent : theme.colors.danger,
+                },
+              ]}
+            >
+              <Icon
+                name="download"
+                size={14}
+                color={queue.active > 0 ? theme.colors.accent : theme.colors.danger}
+              />
+              <Text
+                style={[
+                  styles.queueCount,
+                  { color: queue.active > 0 ? theme.colors.accent : theme.colors.danger },
+                ]}
+              >
+                {queue.active > 0 ? queue.active : queue.failed}
+              </Text>
+            </Pressable>
+          ) : null}
           <View style={[styles.viewSeg, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
             <ViewToggle active={viewMode === 'folders'} icon="grid" onPress={() => setLibraryViewMode('folders')} />
             <ViewToggle active={viewMode === 'shelf'} icon="library" onPress={() => setLibraryViewMode('shelf')} />
@@ -198,6 +248,16 @@ export function LibraryScreen() {
                 onLongPress={() => setCoverPickerFor(collections.all)}
               />
             ) : null}
+            {downloaded ? (
+              <CollectionCard
+                label={downloaded.label}
+                items={downloaded.items}
+                width={cardWidth}
+                coverUri={covers.downloaded}
+                onPress={() => setOpenId('downloaded')}
+                onLongPress={() => setCoverPickerFor(downloaded)}
+              />
+            ) : null}
             {collections.manual.map(c => (
               <CollectionCard
                 key={c.id}
@@ -222,6 +282,7 @@ export function LibraryScreen() {
   if (includeAll) chips.push({ id: ALL, label: 'All' });
   for (const c of categories) chips.push({ id: c.id, label: c.name });
   if (hasUncategorized && categories.length > 0) chips.push({ id: UNCATEGORIZED, label: 'Uncategorized' });
+  if (downloaded) chips.push({ id: DOWNLOADED, label: 'Downloaded' });
 
   // Fall back to the first chip when the current selection isn't available
   // (e.g. "All" was just hidden).
@@ -232,7 +293,9 @@ export function LibraryScreen() {
       ? favorites
       : activeId === UNCATEGORIZED
         ? favorites.filter(f => f.categoryIds.length === 0)
-        : favorites.filter(f => f.categoryIds.includes(activeId));
+        : activeId === DOWNLOADED
+          ? downloaded?.items ?? []
+          : favorites.filter(f => f.categoryIds.includes(activeId));
   const visible = shelfList.map(favoriteToManga);
 
   return (
@@ -484,6 +547,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+  },
+  queuePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    height: 30,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  queueCount: {
+    fontSize: 12.5,
+    fontWeight: '800',
   },
   backRow: {
     flexDirection: 'row',

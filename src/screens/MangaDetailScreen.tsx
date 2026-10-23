@@ -52,11 +52,14 @@ import {
 } from '../library/chapterProgress';
 import {
   useDownloadEntry,
+  useDownloads,
+  downloadedChapterList,
   enqueueDownload,
   enqueueDownloads,
   removeDownload,
   retryDownload,
 } from '../library/downloads';
+import { offerToAddToLibrary } from '../library/downloadsLibrary';
 import { FastScroller, type FastScrollerHandle } from '../components/FastScroller';
 import type { RootStackParamList } from '../navigation/types';
 import type { MangaDto, ChapterDto } from '../engine/types';
@@ -163,7 +166,7 @@ export function MangaDetailScreen() {
     cached.details,
   );
   const {
-    data: chapters,
+    data: liveChapters,
     loading: chaptersLoading,
     error: chaptersError,
     reload: reloadChapters,
@@ -216,12 +219,29 @@ export function MangaDetailScreen() {
   const sourceMissing = sources != null && !sources.some(s => s.id === params.sourceId);
   const otherSourceCount = (sources ?? []).filter(s => s.id !== params.sourceId).length;
 
+  // Downloaded chapters belong to the title, as in Mihon. When the source can't
+  // list chapters (offline, blocked, or its extension isn't installed) the
+  // downloaded ones stand in, so they stay readable, in order, without it.
+  const allDownloads = useDownloads();
+  const downloadedHere = useMemo(
+    () => downloadedChapterList(allDownloads, params.sourceId, params.mangaUrl),
+    [allDownloads, params.sourceId, params.mangaUrl],
+  );
+  const downloadedUrls = useMemo(() => new Set(downloadedHere.map(c => c.url)), [downloadedHere]);
+  const offlineOnly =
+    !liveChapters && (!!chaptersError || sourceMissing) && downloadedHere.length > 0;
+  const chapters = liveChapters ?? (offlineOnly ? downloadedHere : undefined);
+  const [downloadedOnly, setDownloadedOnly] = useState(false);
+  const filterDownloaded = downloadedOnly && !offlineOnly && downloadedHere.length > 0;
+
   // Chapters come from the source newest-first; sort toggle flips the display
   // only — resume always walks true reading order.
-  const displayedChapters = useMemo(
-    () => (sortAsc ? [...(chapters ?? [])].reverse() : chapters ?? []),
-    [chapters, sortAsc],
-  );
+  const displayedChapters = useMemo(() => {
+    const list = filterDownloaded
+      ? (chapters ?? []).filter(c => downloadedUrls.has(c.url))
+      : chapters ?? [];
+    return sortAsc ? [...list].reverse() : list;
+  }, [chapters, sortAsc, filterDownloaded, downloadedUrls]);
   const resume = useMemo(
     () => pickResume(chapters ?? [], progressMap, params.sourceId),
     [chapters, progressMap, params.sourceId],
@@ -332,9 +352,33 @@ export function MangaDetailScreen() {
           ? `All ${label} are already downloaded or queued`
           : `Queued ${added} chapter${added === 1 ? '' : 's'}`,
       );
+      if (added > 0) offerToAddToLibrary(manga);
     },
     [manga],
   );
+
+  const deleteSelectedDownloads = useCallback(() => {
+    const doomed = displayedChapters.filter(c => selected.has(c.url) && downloadedUrls.has(c.url));
+    if (doomed.length === 0) {
+      notify('None of these are downloaded');
+      return;
+    }
+    Alert.alert(
+      'Delete downloads',
+      `Delete ${doomed.length} downloaded chapter${doomed.length === 1 ? '' : 's'}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            for (const c of doomed) removeDownload(c.sourceId, c.url);
+            clearSelection();
+          },
+        },
+      ],
+    );
+  }, [displayedChapters, selected, downloadedUrls, clearSelection]);
 
   const downloadSelected = useCallback(() => {
     const urls = selected;
@@ -491,6 +535,33 @@ export function MangaDetailScreen() {
     const nowFav = toggleFavorite(manga);
     if (nowFav && categories.length > 0) setCatSheet(true);
   }, [manga, categories.length]);
+
+  // Mihon asks what to do with a title's downloads when it leaves the library;
+  // otherwise they'd sit on the device with nothing pointing at them.
+  const removeFromLibrary = useCallback(() => {
+    if (!manga) return;
+    const count = downloadedHere.length;
+    if (count === 0) {
+      toggleFavorite(manga);
+      return;
+    }
+    Alert.alert(
+      'Remove from library',
+      `"${manga.title}" has ${count} downloaded chapter${count === 1 ? '' : 's'}.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Keep downloads', onPress: () => toggleFavorite(manga) },
+        {
+          text: 'Delete them',
+          style: 'destructive',
+          onPress: () => {
+            for (const c of downloadedHere) removeDownload(c.sourceId, c.url);
+            toggleFavorite(manga);
+          },
+        },
+      ],
+    );
+  }, [manga, downloadedHere]);
 
   const onDupAddBoth = useCallback(() => {
     setDupPrompt(null);
@@ -698,7 +769,7 @@ export function MangaDetailScreen() {
                 onPress={() => {
                   if (!manga) return;
                   if (favorited) {
-                    toggleFavorite(manga);
+                    removeFromLibrary();
                   } else {
                     addToLibrary();
                   }
@@ -755,18 +826,72 @@ export function MangaDetailScreen() {
 
             <SimilarTitles
               manga={manga}
-              enabled={!!chapters}
+              enabled={!!liveChapters}
               onOpen={m =>
                 navigation.push('MangaDetail', { sourceId: m.sourceId, mangaUrl: m.url, preview: m })
               }
             />
 
+            {offlineOnly ? (
+              <View
+                style={[
+                  styles.offlineNote,
+                  { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+                ]}
+              >
+                <Icon name="download" size={18} color={theme.colors.accent} />
+                <Text style={[styles.offlineText, { color: theme.colors.textMuted }]}>
+                  {sourceMissing
+                    ? `Showing your ${downloadedHere.length} downloaded chapters. The extension for this title isn't installed.`
+                    : `Showing your ${downloadedHere.length} downloaded chapters. The source couldn't be reached.`}
+                </Text>
+                {sourceMissing ? null : (
+                  <Pressable onPress={reloadChapters} hitSlop={8}>
+                    <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 13 }}>Retry</Text>
+                  </Pressable>
+                )}
+              </View>
+            ) : null}
+
             {/* Chapters */}
             <View style={styles.chaptersHeader}>
               <Text style={[theme.typography.heading, { color: theme.colors.text }]}>
-                Chapters{chapters ? ` (${chapters.length})` : ''}
+                Chapters
+                {chapters ? ` (${filterDownloaded ? displayedChapters.length : chapters.length})` : ''}
               </Text>
               <View style={styles.chapterHeaderActions}>
+                {downloadedHere.length > 0 && !offlineOnly ? (
+                  <Pressable
+                    onPress={() => setDownloadedOnly(on => !on)}
+                    hitSlop={6}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: filterDownloaded }}
+                    accessibilityLabel={
+                      filterDownloaded ? 'Show all chapters' : 'Show only downloaded chapters'
+                    }
+                    style={[
+                      styles.downloadedChip,
+                      filterDownloaded
+                        ? { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent }
+                        : { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+                    ]}
+                  >
+                    <Icon
+                      name="check"
+                      size={12}
+                      color={filterDownloaded ? theme.colors.onAccent : theme.colors.textMuted}
+                      strokeWidth={2.6}
+                    />
+                    <Text
+                      style={[
+                        styles.downloadedChipText,
+                        { color: filterDownloaded ? theme.colors.onAccent : theme.colors.textMuted },
+                      ]}
+                    >
+                      {`${downloadedHere.length} downloaded`}
+                    </Text>
+                  </Pressable>
+                ) : null}
                 <Pressable
                   onPress={() => setBulkSheet(true)}
                   hitSlop={8}
@@ -831,6 +956,11 @@ export function MangaDetailScreen() {
           onMarkRead={() => markSelected(true)}
           onMarkUnread={() => markSelected(false)}
           onDownload={downloadSelected}
+          onDeleteDownloads={
+            displayedChapters.some(c => selected.has(c.url) && downloadedUrls.has(c.url))
+              ? deleteSelectedDownloads
+              : undefined
+          }
         />
       ) : null}
 
@@ -926,6 +1056,7 @@ function SelectionBar({
   onMarkRead,
   onMarkUnread,
   onDownload,
+  onDeleteDownloads,
 }: {
   count: number;
   total: number;
@@ -934,6 +1065,8 @@ function SelectionBar({
   onMarkRead: () => void;
   onMarkUnread: () => void;
   onDownload: () => void;
+  /** Present when some selected chapters are downloaded. */
+  onDeleteDownloads?: () => void;
 }) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -942,6 +1075,9 @@ function SelectionBar({
     { key: 'unread', icon: 'book', label: 'Unread', onPress: onMarkUnread },
     { key: 'download', icon: 'download', label: 'Download', onPress: onDownload },
   ];
+  if (onDeleteDownloads) {
+    actions.push({ key: 'delete', icon: 'trash', label: 'Delete', onPress: onDeleteDownloads });
+  }
   return (
     <View
       style={[
@@ -1585,7 +1721,10 @@ function ChapterDownloadButton({
 
   const onPress = () => {
     if (!status) {
-      if (manga) enqueueDownload(manga, chapter);
+      if (manga) {
+        enqueueDownload(manga, chapter);
+        offerToAddToLibrary(manga);
+      }
       return;
     }
     if (status === 'error') {
@@ -1639,6 +1778,34 @@ function ChapterDownloadButton({
 }
 
 const styles = StyleSheet.create({
+  offlineNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginHorizontal: 16,
+    marginTop: 16,
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  offlineText: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  downloadedChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    height: 26,
+    paddingHorizontal: 9,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  downloadedChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
   backBtn: {
     position: 'absolute',
     left: 14,
