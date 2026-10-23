@@ -33,12 +33,13 @@ React Native UI (TypeScript)
  └───────────────────────┬──────────────────────┘
                          ▼
               EngineFacade (Kotlin, suspend API)
-              ExtensionLoader + SignatureTrust + ChildFirstClassLoader
+              ExtensionLoader + SignatureTrust + ChildFirstPathClassLoader
               RepoManager + ApkInstaller
                          ▼
         Vendored Tachiyomi runtime (Apache 2.0): source-api,
-        HttpSource, NetworkHelper (OkHttp + Cloudflare + cookies),
-        Injekt DI, Jsoup, RxJava1->suspend, kotlinx.serialization
+        extension-lib 1.4-1.6 (suspend API + Rx bridges), HttpSource,
+        NetworkHelper (OkHttp + Cloudflare + cookies), Injekt DI,
+        Jsoup, RxJava1, kotlinx.serialization
                          ▼
               Extension APKs (user-supplied)
 ```
@@ -90,35 +91,128 @@ classloader). So the host must *provide* that runtime. We vendor it under
 `android/app/src/main/java/eu/kanade/tachiyomi/`:
 
 - `source/`: `Source`, `CatalogueSource`, `ConfigurableSource`, `HttpSource`,
-  the `model/` types (`SManga`, `SChapter`, `Page`, `FilterList`, …). RxJava1
-  `Observable`-based `fetch*` methods (matching real extensions).
+  the `model/` types (`SManga`, `SChapter`, `SMangaUpdate`, `Page`,
+  `FilterList`, …). This is the **extension-lib 1.6** surface: suspend
+  `getPopularManga` / `getLatestUpdates` / `getSearchManga` /
+  `getMangaUpdate` / `getPageList` / `getImageUrl`, with default bodies that
+  bridge to the older RxJava1 `fetch*` methods. 1.6 has no separate
+  details/chapter-list calls; both go through `getMangaUpdate`. Request/parse
+  methods are `open`, not abstract, so 1.6-only extensions still link.
+  `android/app/build.gradle` compiles with `-Xjvm-default=all-compatibility` so
+  extensions inherit those interface default bodies.
 - `network/`: `NetworkHelper` (base OkHttp client), `AndroidCookieJar` (shares
-  cookies with the system WebView), `interceptor/UserAgentInterceptor`,
-  `interceptor/CloudflareInterceptor` (solves challenges in a headless/in-app
-  WebView — `com/manhwa/engine/web/SourceWebViewActivity` via
-  `interceptor/WebViewActivityHolder` — then reuses the resulting `cf_clearance`
-  cookie **and the matching WebView User-Agent** on the OkHttp client, so
-  protected sources load in-app, not only when you manually open the WebView),
+  cookies with the system WebView), `interceptor/` (`UncaughtExceptionInterceptor`,
+  `UserAgentInterceptor`, `CloudflareInterceptor`, `WebViewActivityHolder`),
   `Requests.kt`, `OkHttpExtensions.kt` (RxJava bridge with crash-guarding).
+  `JavaScriptEngine` is a stub that throws.
 - `util/JsoupExtensions`, `AppInfo`, etc.
 
 `com/manhwa/engine/`:
-- `EngineFacade.kt`: the single entry the bridge calls; loads sources, converts
-  RxJava `Observable` → `suspend` (`RxBridge.kt` / `awaitSingle`), maps to DTOs.
+- `EngineFacade.kt`: the single entry the bridge calls. It calls **only the
+  suspend API** (some current sources ship no Rx `fetchPopularManga` at all)
+  and maps results to DTOs. Images still go through the source's
+  `fetchImage(page)`, which is Rx.
 - `EngineInjektModule.kt`: registers Injekt singletons (`Application`,
   `NetworkHelper`, `Json`) that extensions expect via `uy.kohesive.injekt`.
-- `loader/`: `ExtensionLoader` (discovers/loads APKs, auto-trusts explicitly
-  installed ones), `ChildFirstPathClassLoader`, `SignatureTrust`.
+- `loader/`: `ExtensionLoader` (discovers/loads APKs, accepts lib versions
+  `1.4` to `1.6`, reads `tachiyomix.contentWarning` before the legacy `nsfw`
+  flag, auto-trusts explicitly installed ones), `ChildFirstPathClassLoader`,
+  `SignatureTrust`.
+- `storage/`: `StorageManager` (the user-picked SAF folder) and
+  `DownloadNaming` (Mihon's folder layout). See *Downloads and storage*.
+- `backup/`: `MihonBackup` (import) and `MihonBackupExporter` (export).
 - `Mappers.kt`: DTO mapping. Uses a `safe { }` helper to tolerate extensions
   that leave `lateinit` fields (e.g. `SManga.url`) uninitialized.
 
-Gotchas already paid for:
-- Extensions need `kotlinx-serialization-json-okio` + `okio` (MangaFire decodes
-  JSON from an Okio buffer). Both are in `android/app/build.gradle`.
-- RxJava1 treats `LinkageError`/`NoClassDefFoundError` as **fatal**; downstream
-  parser throws are caught in `OkHttpExtensions` so a missing "provided" lib
-  reports a clean error instead of killing the process.
+### What current keiyoushi extensions require of the host
+
+Extensions built on keiyoushi's `KeiSource` base check the host at their first
+request and fail every call if something is missing. Each of these was a
+separate outage; diff against KeiSource before blaming a site.
+
+- **Interceptors, by simple class name.** `NetworkHelper.client` must contain
+  `UncaughtExceptionInterceptor`, `UserAgentInterceptor` and
+  `CloudflareInterceptor` (in that order today). Don't rename or wrap them.
+  `cloudflareClient` is an alias of `client`.
+- **App-provided libraries** (extensions compile against them `compileOnly`;
+  versions in `android/app/build.gradle`): OkHttp 5.3.2 with `okhttp-brotli`
+  and `okhttp-zstd`, `zstd-kmp-okio`, `quickjs-android`, Okio 3.16.4,
+  kotlinx-serialization `json` / `json-okio` / `protobuf`, kotlinx-coroutines,
+  Jsoup, RxJava 1.3.8, Injekt. A `resolutionStrategy` pins every OkHttp module
+  to 5.3.2 and Okio to 3.16.4; mixed 4.x/5.x crashes at runtime.
+- **kotlinx-serialization ≥ 1.8.1.** Serializers generated by newer Kotlin
+  plugins rely on `GeneratedSerializer.typeParametersSerializers()` having a
+  default body; 1.7.x made every `@Serializable` parse throw
+  `AbstractMethodError`. 1.8.1 is the newest runtime built with Kotlin 2.1,
+  which React Native 0.86 pins (`android/build.gradle`); 1.9+ needs Kotlin
+  2.2+. Coroutines is held at 1.8.1 for the same reason.
+- **`memo`.** `SManga.memo` / `SChapter.memo` are `JsonObject`s that extensions
+  read back on later calls. They cross the bridge as JSON text
+  (`MangaDto.memo` / `ChapterDto.memo`), are persisted on favorites and
+  download entries, and are passed back to details, chapters and pages.
+- **No concurrent `getMangaUpdate` for one title.** KeiSource throws if it
+  happens. `EngineFacade` serializes both calls per `sourceId|mangaUrl`.
+- **Fatal errors must still surface.** RxJava 1 treats `LinkageError` and
+  friends as fatal and never delivers them to `onError`, so the awaiting
+  coroutine would hang forever. `OkHttpExtensions.asReportable()` turns them
+  into `IllegalStateException("Extension is incompatible with this app build: …")`.
+
+Other gotchas already paid for:
+- MangaFire decodes JSON from an Okio buffer, hence `json-okio` + `okio`.
 - `QUERY_ALL_PACKAGES` is required (Android 11+) to discover installed APKs.
+
+### Cloudflare
+
+`CloudflareInterceptor` treats a response as a challenge when the `Server` is
+Cloudflare and either `cf-mitigated: challenge` is set or an **image** request
+got a 403/503. A plain 403 on a page is returned as-is. For a challenge it:
+
+1. retries if a `cf_clearance` cookie already exists;
+2. otherwise loads the host in an invisible in-app WebView and polls for
+   `cf_clearance` (20 s timeout, at most once per host per 15 s), then retries
+   with that cookie **and the WebView's User-Agent**;
+3. if the page starts an **interactive** check (Turnstile posts
+   `interactiveBegin`), gives up at once with
+   `CloudflareBypassException(interactive = true)`, as Mihon does;
+4. otherwise falls back to fetching the bytes through the WebView itself.
+
+The bridge maps these to error codes `cloudflare_interactive` / `cloudflare`.
+`src/engine/errors.ts` (`engineErrorKind`, `needsHumanCheck`) lets Discover and
+MangaDetail lead with "Open in WebView" when a person has to solve it. A toast
+warns when Android System WebView is older than 118.
+
+### Repositories
+
+`src/engine/repoClient.ts` reads **`index.pb` first** (Mihon's protobuf index,
+decoded in `repoIndexPb.ts`), and falls back to `index.min.json`. A repo URL
+ending in `.json` or a bare directory is tried as `<dir>/index.pb` before the
+JSON. The payload is sniffed, not trusted by its extension: gzip, a `repo.json`
+descriptor (followed to `index_v2`), a legacy JSON array, or protobuf (with an
+optional external extension list). keiyoushi's `index.min.json` is now a
+tombstone of placeholder entries for old apps; reading `index.pb` first keeps
+it out of the UI (`repoClient.test.ts` guards this). Repo URLs themselves live
+natively in `RepoManager`.
+
+### Downloads and storage
+
+- **Queue:** `src/library/downloads.ts` is a persisted single-worker queue
+  (re-queues anything mid-download on launch). MangaDetail multi-select and the
+  bulk sheet (All / Unread) enqueue in batches; `DownloadsScreen` lists them per
+  title.
+- **Default location:** app-private `filesDir/downloads/<sourceId>/<sha256(chapterUrl)>/<page>.<ext>`.
+  Removed on uninstall.
+- **Storage location (opt-in):** Profile → Storage location picks a folder via
+  SAF (`StorageManager`, persisted tree URI). Downloads then use Mihon's
+  layout from `DownloadNaming`:
+  `<root>/downloads/<Source (LANG)>/<Title>/<[scanlator_]Chapter_<md5(url):6>>/001.jpg`,
+  with the same FAT-safe names and length cap, plus `.nomedia`. Exported
+  backups are also copied to `<root>/backups/`. Pages are staged in
+  `cacheDir/download_tmp` and verified before they're committed. Reads check
+  the folder first, then app storage; existing app-storage downloads can be
+  moved over from the same row.
+- **Other locations:** gallery saves go to MediaStore `Pictures/Kagari`; caches
+  under `cacheDir` (`reader_images/`, `covers/`, `shared/`, `tier_exports/`,
+  `network_cache`).
 
 ---
 
@@ -136,6 +230,12 @@ Local state persists via `@react-native-async-storage/async-storage`, wrapped by
   persisted, reactive). Deleting a category strips it from every favorite.
 - **`src/home/HomeConfig.tsx`**: home block layout + per-block source choice are
   persisted here too.
+- Others follow the same pattern: `history.ts`, `chapterProgress.ts` (per-chapter
+  read flag + last page), `downloads.ts`, `libraryUpdates.ts`, `tierLists.ts`,
+  `collections.ts` (library view), `recentlyAdded.ts`, `storageLocation.ts`,
+  `src/sources/` (`pinned`, `languageFilter`, `sourceHealth`), `src/reader/readerSettings.ts`,
+  and the theme/appearance prefs in `ThemeProvider`. `src/engine/mangaCache.ts`
+  is a persisted LRU of recent details + chapter lists so revisits open instantly.
 
 When you add a new persisted store, follow the favorites pattern (in-memory state
 + listeners + `makePersistence`); don't sprinkle `AsyncStorage` calls in screens.
@@ -159,8 +259,12 @@ When you add a new persisted store, follow the favorites pattern (in-memory stat
     description/rating to rank "editorially" by without extra detail fetches.
 - **Discover**: a **Source | Global** segmented toggle.
   - **Source** mode: single-source picker (`SourcePickerSheet`, grouped by
-    extension with language + NSFW tags), debounced search, popular browse,
-    typed error/empty states.
+    extension with language + NSFW tags, filtered by the enabled languages in
+    `languageFilter.ts`), debounced search, a **Popular | Latest** toggle (Latest
+    hidden when the source can't), infinite scroll, typed error/empty states.
+    The chosen source + browse mode persist; Home's "See all" opens a source
+    here via `discoverIntent.ts`. Default-source picking skips sources that
+    recently failed (`sourceHealth.ts`).
   - **Global** mode: fans the query out to the user's **pinned sources**
     (`src/sources/pinned.ts`, persisted) and renders one horizontal rail per
     source, each loading independently (tap a rail header to jump into that
@@ -177,13 +281,24 @@ When you add a new persisted store, follow the favorites pattern (in-memory stat
   title came from** with a **Migrate** action (`src/library/migrate.ts` — moves a
   title to another source and carries over history; prompts on a duplicate).
   **Resume** jumps to where you left off (`src/library/chapterProgress.ts`), and
-  chapters can be sorted **newest/oldest first**. When the source isn't installed
+  chapters can be sorted **newest/oldest first**. Read chapters are dimmed and a
+  half-read one shows its page. Long-press starts **multi-select** (a second
+  long-press selects the range) with Read / Unread / Download; the download
+  icon in the header queues All or Unread. A fast-scroll thumb sits on the
+  right edge for long lists. When the source isn't installed
   or a live fetch fails, a notice offers **Retry / Open in WebView / Migrate**
   instead of a silent empty list (covers + chapters are live-fetched, never stored
   in a backup, so a missing extension means no chapters).
 - **Reader** (`ReaderScreen` + `src/reader/readerSettings.ts`): four modes,
   **webtoon** (continuous long strip), **vertical** (one page/swipe), **ltr**,
-  **rtl** (paged). Mode is selectable from the reader's settings sheet. Pages
+  **rtl** (paged). Mode is per series, with the last pick as the default, and
+  is selectable from the reader's settings sheet. **Continuous reading**
+  (`src/reader/chapterWindow.ts`): neighbouring chapters are preloaded and
+  flattened into one list, so scrolling past the end of a chapter runs straight
+  into the next; at most `MAX_LOADED_CHAPTERS` (5) stay loaded around the
+  current one, and scrolling past a chapter marks it read. Downloaded chapters
+  read from storage. An optional **keep screen on** toggle holds the display
+  awake while reading. Pages
   load via the native `fetchImage` cache (queued, retried) and render tall
   webtoon images as stitched tiles. A failed page shows a **Retry** button and any
   page can be **long-pressed to refresh** it; retry passes `forceRefresh` to
@@ -199,10 +314,14 @@ When you add a new persisted store, follow the favorites pattern (in-memory stat
   `getItemLayout`) commits on release and relies on `onScrollToIndexFailed` to land
   the exact index. The slider mirrors itself in **rtl** mode, and the chapter
   buttons walk true reading order (chapters sorted ascending by number).
-- **Mihon import** (`src/library/mihonImport.ts` ⇄ native `backup/MihonBackup.kt`):
-  restores a `.tachibk` (gzipped protobuf) backup — favorites, categories, and
-  read history — merged non-destructively into the local stores. Surfaced as
-  **Import from Mihon (beta)** in Profile. Category names are matched
+- **Mihon backup** (`src/library/mihonImport.ts` ⇄ native `backup/MihonBackup.kt`,
+  `mihonExport.ts` ⇄ `MihonBackupExporter.kt`): **Import** restores a `.tachibk`
+  (gzipped protobuf) backup — favorites, categories, read history and
+  per-chapter read state — merged non-destructively into the local stores.
+  **Export** writes a `.tachibk` Mihon can restore (favorites, categories,
+  per-chapter progress from cached chapter lists, history) and opens the share
+  sheet; a copy also goes to the storage folder when one is set. Both are in
+  Profile. Category names are matched
   trim+case-insensitively so they aren't silently dropped, and an imported cover
   is kept when live details omit one. Chapters are **not** in the backup; they're
   live-fetched, so a title from a not-installed source shows the MangaDetail
@@ -214,25 +333,43 @@ When you add a new persisted store, follow the favorites pattern (in-memory stat
   `src/library/libraryUpdates.ts` (see *Update checks*): each favorite's chapter
   list is snapshotted per source, diffed on scan, and new chapters land here
   (grouped by day, per-row dismiss, clear-all, pull-to-refresh to force a scan).
-  A first-seen manga is baselined silently so the backlog doesn't flood. The
-  Updates tab shows an unseen badge on the bottom nav. Per-chapter read state on
-  MangaDetail is still TODO.
+  A first-seen manga is baselined silently so the backlog doesn't flood (a title
+  you just added by hand is the exception, via `recentlyAdded.ts`). The Updates
+  tab shows an unseen badge on the bottom nav. Read chapters don't drop off the
+  feed yet.
 - **Update checks** (`App.tsx` `UpdateBootstrap`): two checkers run on launch
   (+2.5s), on return to foreground (`AppState`), and hourly — both internally
   throttled, plus a manual **Check** in Profile (`force: true`):
   - **App version** (`src/app/appUpdate.ts`): polls the latest GitHub Release and
     compares its tag to `APP_VERSION` (`src/app/version.ts`); 6h TTL. Surfaces an
-    "update available" banner reactively.
+    "update available" banner reactively, and `updatePrompt.ts` shows a sheet
+    once per new version.
   - **Extensions** (`src/sources/extensionUpdates.ts`): diffs installed vs repo
     `versionCode`; 30m TTL. Drives per-row Update buttons and badges.
   - **What's new** (`src/app/whatsNew.ts` + `changelog.ts`): shows release notes
-    once after an upgrade. Bump `version.ts` **and** `build.gradle` together and
+    once after an upgrade; `ChangelogScreen` (Profile → What's new) lists every
+    version. Bump `version.ts` **and** `build.gradle` together and
     add a `CHANGELOG` entry when shipping user-facing changes.
   - **Library new chapters** (`src/library/libraryUpdates.ts`): scans each
     favorite via `engine.getChapters`, diffs against a persisted per-manga url
     snapshot, and records new chapters into the Updates feed; 6h TTL, concurrency
     3, best-effort (a not-installed/offline source is skipped). In-app only — runs
     while the app is open; a true background job would need Android WorkManager.
+- **Extensions** (`ExtensionsScreen`): Browse (repo catalogue, language chips,
+  search, install with per-package error + retry) and Installed (update badges,
+  **Update all**, uninstall). An installed extension no repo offers any more is
+  flagged **Orphaned** (only once some repo has answered), since it won't get
+  updates. Installed sources reach every screen through `sourcesStore.ts`
+  without a restart.
+- **Downloads**: see *Downloads and storage* above. `DownloadsScreen` is under
+  Profile.
+- **Theming** (`src/theme/`): two looks, **Ink** (default, neutral so cover art
+  leads) and **Paper** (warmer, higher contrast), each with dark and light
+  palettes, plus Pure black (dark only), Density (comfortable/compact) and
+  Corners (soft/sharp). Mode defaults to dark. Chosen in `AppearanceScreen`
+  (Profile → Theme); there's deliberately no hue picker.
+- **Tier lists** (`tierLists.ts` + `TierListsScreen`): S–D rows of library
+  titles, exported as an image (rendered natively) to save or share.
 
 ---
 
@@ -240,32 +377,47 @@ When you add a new persisted store, follow the favorites pattern (in-memory stat
 
 ```
 src/
-  engine/        Engine contract (types.ts), nativeEngine, repoClient
-                 (fetch/parse real index.min.json), index (selector),
-                 coverCache (url->file cover cache for RemoteImage)
+  engine/        Engine contract (types.ts), nativeEngine, index (selector),
+                 repoClient + repoIndexPb (index.pb first, JSON fallback),
+                 errors (Cloudflare error kinds), mangaCache (persisted LRU),
+                 pageCache, coverCache (url->file cover cache for RemoteImage)
   store/         persist.ts (AsyncStorage wrapper)
-  library/       favorites.ts, categories.ts, history.ts, chapterProgress.ts
-                 (resume), libraryUpdates.ts (new-chapters scan/feed),
-                 collectionCovers.ts, migrate.ts (cross-source + history
-                 transfer), mihonImport.ts (.tachibk restore)
-  sources/       pinned.ts (global search), extensionUpdates.ts (repo version diff)
-  app/           version.ts, appUpdate.ts (GitHub release check), changelog.ts +
-                 whatsNew.ts (one-time release-notes sheet)
-  reader/        readerSettings.ts (reading modes)
-  theme/         Design tokens (tokens.ts) + ThemeProvider (dark/light/system)
+  hooks/         useAsync, usePagedCatalog (infinite scroll)
+  library/       favorites, categories, collections (library view), history,
+                 chapterProgress (read flags + resume), libraryUpdates
+                 (new-chapters scan/feed), recentlyAdded, downloads (queue),
+                 storageLocation, collectionCovers, migrate (cross-source +
+                 history transfer), mihonImport / mihonExport (.tachibk),
+                 tierLists
+  sources/       sourcesStore (installed sources), pinned (global search),
+                 languageFilter, sourceHealth, discoverIntent,
+                 extensionUpdates (repo version diff)
+  app/           version, appUpdate (GitHub release check), updatePrompt,
+                 changelog + whatsNew (one-time release-notes sheet), community
+  reader/        readerSettings (modes, keep screen on), chapterWindow
+                 (continuous reading)
+  theme/         tokens.ts, themes.ts (Ink / Paper), ThemeProvider
   home/          Configurable, persisted home-block model (HomeConfig + universal source)
   utils/         lang.ts (lang labels), sourceSelect.ts (default/sort), color.ts
   components/    Cover, RemoteImage (cover loader w/ native fallback), FeaturedHero,
-                 CoverRail, SectionHeader, Icon, Skeleton, HomeBlockView,
-                 SourcePickerSheet, GlobalSourcesSheet, CategoryAssignSheet, ...
-  navigation/    RootNavigator, TabsScreen (local-state tabs), GlassTabBar, types
+                 FeaturedCarousel, CoverRail, SectionHeader, Icon, Skeleton,
+                 HomeBlockView, SourcePickerSheet, GlobalSourcesSheet,
+                 CategoryAssignSheet, FastScroller, PageSlider, SwipeTabs,
+                 WhatsNewSheet, UpdateAvailableSheet, ConfirmDialog, ...
+  navigation/    RootNavigator (native stack), TabsScreen (local-state tabs,
+                 kept alive), TabNav, GlassTabBar, types
   screens/       Home, Library, Discover, Updates, Profile, MangaDetail, Reader,
-                 CustomizeHome, Extensions, Categories
+                 CustomizeHome, Extensions, Categories, Downloads, Appearance,
+                 Changelog, TierLists
 android/app/src/main/java/
-  eu/kanade/tachiyomi/   Vendored runtime: source/, network/ (Cloudflare WebView
-                         solver), util/ (Apache 2.0)
-  com/manhwa/engine/     loader/, repo/, bridge/, dto/, facade, mappers, injekt,
-                         web/ (SourceWebViewActivity), backup/ (MihonBackup)
+  eu/kanade/tachiyomi/   Vendored runtime: source/ (extension-lib 1.6 API),
+                         network/ (interceptors, Cloudflare WebView solver),
+                         util/ (Apache 2.0)
+  com/manhwa/engine/     loader/, repo/, bridge/, dto/, storage/, backup/,
+                         web/ (SourceWebViewActivity), EngineFacade, Mappers,
+                         EngineInjektModule
+android/app/src/androidTest/   On-device tests (see Testing)
+patches/                       patch-package patches (react-native-screens)
 ```
 
 ---
@@ -274,8 +426,9 @@ android/app/src/main/java/
 
 - **Theme everything.** No hardcoded colors in screens/components. Pull from
   `useTheme()` (`theme.colors.*`, `theme.spacing.*`, `theme.typography.*`). The
-  signature accent is **teal** (`#19B79E` dark / `#0C8E79` light), *not* purple.
-  Add/use a token in `src/theme/tokens.ts`.
+  accent is a restrained **brass** (`#E0A548` dark / `#A96410` light in the Ink
+  look; Paper has its own), used sparingly. Add/use a token in
+  `src/theme/tokens.ts` and give it a value in every palette in `themes.ts`.
 - **TypeScript strict, no `any`.** Use the DTO types in `src/engine/types.ts`.
 - **Engine access only via `getEngine()`.** Don't import `nativeEngine` from UI.
 - **DTO changes are two-sided.** Editing `types.ts` usually means editing
@@ -301,8 +454,13 @@ android/app/src/main/java/
 ```sh
 npm install
 npm start                         # Metro (ONE instance only, see gotchas)
-npm run android                   # build + launch (needs Android SDK + JDK 17)
+npm run android                   # build + launch (needs Android SDK + JDK 17 or 21)
 ```
+
+Use JDK 17 or 21; Android Studio's bundled JBR 21 works. Newer JDKs fail in an
+unrelated-looking module. Debug builds for every ABI are huge; pass
+`-PreactNativeArchitectures=arm64-v8a` (or `x86_64`) to build just the one you
+run on.
 
 With no extensions installed you'll see empty states. Install a repo + extension
 (Profile → Extensions & Repos) to get content. See **BUILD.md** for toolchain setup.
@@ -325,34 +483,61 @@ With no extensions installed you'll see empty states. Install a repo + extension
 - **Native (Kotlin/Gradle) changes need `npm run android`**, not Fast Refresh.
   Adding a native dep (e.g. AsyncStorage) requires a rebuild. JS-only changes
   hot-reload.
+- **Keep the react-native-screens patch** (`patches/react-native-screens+*.patch`,
+  applied by `postinstall`). The fragment framework keeps a dismissed screen as
+  a "disappearing child" after its exit animation, and any extra draw pass
+  painted it for a frame, so pressing back flashed the screen you'd just left.
+  The patch skips drawing a removing screen whose animation has ended. Re-check
+  it when bumping react-native-screens. For the same reason the tab bar uses no
+  BlurView on Android.
+- **Release vs debug installs:** they're signed with different keys, so one
+  won't install over the other (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`).
+  Uninstalling wipes app data, including the repo list.
+
+## Testing
+
+- **JS:** `npm test` (jest). Suites live in `__tests__/` next to the code in
+  `src/engine`, `src/library`, `src/reader`, `src/app`, `src/components` and
+  `src/sources`. Also run `npx tsc --noEmit` and `npm run lint` (warnings are
+  tolerated; don't add new ones).
+- **On-device:** `android/app/src/androidTest` runs on a device or emulator
+  against a `MockWebServer` (`mockwebserver3`). Today it covers the Cloudflare
+  interceptor: interactive challenge fails fast, an issued clearance is retried
+  with the cookie, a plain 403 isn't a challenge, a clean root stops the solve
+  early. Run:
+  ```sh
+  cd android && ./gradlew :app:connectedDebugAndroidTest -PreactNativeArchitectures=arm64-v8a
+  ```
+  Results land in `android/app/build/outputs/androidTest-results/connected/`.
 
 ---
 
 ## Known gaps / next up
 
-- **Suspend (extension-lib 1.6) source API not mirrored.** `ExtensionLoader`
-  accepts lib versions up to `1.6`, but the vendored `Source`/`CatalogueSource`
-  expose only the deprecated RxJava `fetch*` methods, and `EngineFacade` calls
-  those. Most keiyoushi `ParsedHttpSource` extensions override request/parse so
-  the Rx path works; sources that override *only* the suspend `getPopularManga`/
-  `getPageList`/etc. will not. Fix: add the suspend methods (with Rx-bridging
-  defaults) to the vendored API and call them preferentially, or cap
-  `LIB_VERSION_MAX` lower and say so.
 - **Search filters are declared but unused.** TS has the full `FilterDto` schema,
   but native `getFilters` returns `[]` and `search(...)` ignores `filtersJson`
   (`ManhwaEngineModule.kt`). Wire `FilterList` ⇄ `FilterDto` (de)serialization so
   sources with genre/sort/status filters work.
-- **Background library updates + per-chapter read-state.** The in-app
-  new-chapters scan exists (`libraryUpdates.ts`, wired into `UpdateBootstrap` and
-  pull-to-refresh). Still missing: running it **while the app is closed** (Android
-  **WorkManager**) with **new-chapter notifications**, and **per-chapter
-  read/unread state** on MangaDetail (which would also let read chapters drop off
-  the Updates feed, Mihon-style). *Don't reintroduce faked update data.*
-- **Per-source descramble interceptors.** `fetchImage` routes through the source
-  OkHttp client, but a few sources (e.g. MangaFire/MangaPlus) need custom
-  image-descramble interceptors; verify those render correctly.
-- Untrusted-extension trust-prompt UI (we currently **auto-trust** explicitly
-  installed extensions; `trustSignature` exists if you want Mihon's boundary).
+- **Background library updates.** The in-app new-chapters scan exists
+  (`libraryUpdates.ts`, wired into `UpdateBootstrap` and pull-to-refresh). Still
+  missing: running it **while the app is closed** (Android **WorkManager**) with
+  **new-chapter notifications**, and dropping read chapters off the Updates
+  feed. *Don't reintroduce faked update data.*
+- **Kotlin 2.1 pins the extension runtime.** React Native 0.86 holds Kotlin at
+  2.1.20, which caps kotlinx-serialization and coroutines at 1.8.1 while
+  keiyoushi builds against newer ones. The next extension that calls a newer API
+  breaks the same way 1.7.3 did (see *What current keiyoushi extensions
+  require*). Unpinning needs a React Native release on Kotlin 2.2+.
+- **Per-source descramble interceptors.** `fetchImage` goes through the source's
+  own client (and the HTTP/1.1 fallback builds from it), so sources that
+  unscramble images in an interceptor (MangaFire, MANGA Plus) should work, but
+  reading them end to end hasn't been checked.
+- **Trust prompt.** Explicitly installed extensions are **auto-trusted** on first
+  sight (`ExtensionLoader`); only an APK with no signature is held back.
+  `trustSignature` exists in the bridge but no screen uses it.
+- **Continuous reading in paged modes.** Crossing into the next chapter by
+  scrolling works in webtoon mode; vertical/LTR/RTL still use the chapter
+  buttons.
 
 ---
 
@@ -361,9 +546,12 @@ With no extensions installed you'll see empty states. Install a repo + extension
 - [x] Extensions-only engine (mock data fully removed); empty states everywhere
 - [x] Native runtime that **actually runs** installed sources: `HttpSource`,
       `NetworkHelper` + Cloudflare/cookie/UA interceptors, Injekt, `FilterList`,
-      RxJava1→suspend
-- [x] Repo management (add/remove), real `index.min.json` parsing; APK
-      install/uninstall (FileProvider + system installer)
+      extension-lib 1.6 suspend API (called directly, with Rx bridges)
+- [x] keiyoushi `KeiSource` host requirements (interceptor names, app-provided
+      libs, serialization 1.8.1, `memo`, serialized `getMangaUpdate`)
+- [x] Repo management (add/remove), `index.pb` with JSON fallback; APK
+      install/uninstall (FileProvider + system installer), Update all, Orphaned
+      state
 - [x] Discover browse/search; grouped `SourcePickerSheet`
 - [x] Global search across pinned sources (per-source rails; `GlobalSourcesSheet`)
 - [x] Reading history (persisted) in a Updates | History segmented tab
@@ -374,23 +562,32 @@ With no extensions installed you'll see empty states. Install a repo + extension
 - [x] OkHttp-backed native reader image (`fetchImage` → cached `file://`, with
       webtoon tiling) routed through the source's client
 - [x] In-app Cloudflare solver: WebView clearance cookie + UA reused on OkHttp,
-      so protected sources load in-app (not only via manual WebView)
+      so protected sources load in-app; interactive checks fail fast and send
+      the user to the WebView
 - [x] Robust covers: `RemoteImage`/`coverCache` + native `fetchCover` for
       Referer/Cloudflare-gated cover CDNs
 - [x] MangaDetail: source attribution, Resume (`chapterProgress`), chapter sort,
       source-missing/error notices (Retry / WebView / Migrate)
 - [x] Source migration (cross-source + history transfer) with duplicate prompt
-- [x] Mihon `.tachibk` import (favorites + categories + history) — beta
+- [x] Mihon `.tachibk` import and export (favorites, categories, history,
+      per-chapter read state)
 - [x] Reader pinch/double-tap zoom + per-page actions (save to gallery album)
 - [x] App + extension update checks (launch/foreground/hourly, throttled) +
       "What's new" release notes
 - [x] In-app **library updates** feed: per-favorite chapter snapshot + diff scan,
       grouped feed with unseen tab badge (`libraryUpdates.ts`)
-- [ ] Suspend (extension-lib 1.6) source API mirrored + called preferentially
+- [x] Per-chapter read state, multi-select (mark read/unread, download), bulk
+      download, Downloads screen
+- [x] Continuous reading across chapters in webtoon mode (5-chapter window)
+- [x] Storage location (SAF folder, Mihon's download layout)
+- [x] Theming: Ink / Paper looks, light/dark/system, pure black, density, corners
+- [x] On-device Cloudflare interceptor tests
 - [ ] Search filters wired (`FilterList` ⇄ `FilterDto`)
-- [ ] Background library updates (WorkManager + notifications) + per-chapter
-      read-state on MangaDetail
+- [ ] Background library updates (WorkManager + notifications); read chapters
+      dropping off the Updates feed
 - [ ] Untrusted-extension trust prompt UI (auto-trust today)
+- [ ] Continuous chapter transitions in paged modes
+- [ ] Kotlin 2.2+ so serialization/coroutines can match keiyoushi
 
 ---
 
