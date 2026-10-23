@@ -41,6 +41,7 @@ function createUnavailableEngine(): Engine {
     getFilters: () => Promise.resolve([]),
     getMangaDetails: reject,
     getMangaWebUrl: () => Promise.resolve(''),
+    getRelatedManga: () => Promise.resolve({ mangas: null, searchAllowed: false }),
     getChapters: () => Promise.resolve([]),
     getPages: () => Promise.resolve([]),
     resolveImage: reject,

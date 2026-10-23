@@ -13,6 +13,7 @@ import type {
   SourceDto,
   MangaDto,
   MangasPageDto,
+  RelatedMangaDto,
   ChapterDto,
   PageDto,
   ImageRequestDto,
@@ -44,6 +45,12 @@ interface ManhwaEngineNative {
   getFilters(sourceId: string): Promise<string>;
   getMangaDetails(sourceId: string, mangaUrl: string, memoJson: string | null): Promise<string>;
   getMangaWebUrl(sourceId: string, mangaUrl: string): Promise<string>;
+  getRelatedManga(
+    sourceId: string,
+    mangaUrl: string,
+    title: string,
+    memoJson: string | null,
+  ): Promise<string>;
   getChapters(sourceId: string, mangaUrl: string, memoJson: string | null): Promise<string>;
   getPages(sourceId: string, chapterUrl: string, memoJson: string | null): Promise<string>;
   resolveImage(sourceId: string, pageJson: string): Promise<string>;
@@ -145,6 +152,13 @@ export function createNativeEngine(): Engine | null {
     },
     async getMangaDetails(sourceId, mangaUrl, memo?: string) {
       return parse<MangaDto>(await Native.getMangaDetails(sourceId, mangaUrl, memo ?? null));
+    },
+    async getRelatedManga(sourceId, mangaUrl, title, memo) {
+      // An older native build has no related lookup; searching still works.
+      if (typeof Native.getRelatedManga !== 'function') return { mangas: null, searchAllowed: true };
+      return parse<RelatedMangaDto>(
+        await Native.getRelatedManga(sourceId, mangaUrl, title, memo ?? null),
+      );
     },
     async getMangaWebUrl(sourceId, mangaUrl) {
       if (typeof Native.getMangaWebUrl !== 'function') return '';

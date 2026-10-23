@@ -218,6 +218,17 @@ class ManhwaEngineModule(
     }
 
     @ReactMethod
+    fun getRelatedManga(
+        sourceId: String,
+        mangaUrl: String,
+        title: String,
+        memoJson: String?,
+        promise: Promise,
+    ) = resolve(promise) {
+        json.encodeToString(facade.getRelatedManga(sourceId, mangaUrl, title, memoJson))
+    }
+
+    @ReactMethod
     fun getMangaWebUrl(sourceId: String, mangaUrl: String, promise: Promise) = resolve(promise) {
         facade.getMangaWebUrl(sourceId, mangaUrl)
     }

@@ -65,6 +65,15 @@ data class MangasPageDto(
     val hasNextPage: Boolean,
 )
 
+/** Titles related to one manga, as far as its source can tell. */
+@Serializable
+data class RelatedMangaDto(
+    /** The source's own related list, or null when it doesn't provide one. */
+    val mangas: List<MangaDto>? = null,
+    /** False when the source asks apps not to look for related titles by searching. */
+    val searchAllowed: Boolean = true,
+)
+
 @Serializable
 data class ChapterDto(
     val sourceId: String,

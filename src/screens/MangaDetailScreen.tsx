@@ -28,6 +28,7 @@ import { Skeleton } from '../components/Skeleton';
 import { RemoteImage } from '../components/RemoteImage';
 import { CategoryAssignSheet } from '../components/CategoryAssignSheet';
 import { SourcePickerSheet } from '../components/SourcePickerSheet';
+import { SimilarTitles } from '../components/SimilarTitles';
 import { seededColor, withAlpha } from '../utils/color';
 import {
   toggleFavorite,
@@ -686,6 +687,14 @@ export function MangaDetailScreen() {
             <Icon name={expanded ? 'chevronDown' : 'chevronRight'} size={16} color={theme.colors.textFaint} />
           </Pressable>
         ) : null}
+
+        <SimilarTitles
+          manga={manga}
+          enabled={!!chapters}
+          onOpen={m =>
+            navigation.push('MangaDetail', { sourceId: m.sourceId, mangaUrl: m.url, preview: m })
+          }
+        />
 
         {/* Chapters */}
         <View style={styles.chaptersHeader}>
