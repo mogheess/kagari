@@ -31,8 +31,11 @@ function extLabel(pkg: string): string {
   return seg.charAt(0).toUpperCase() + seg.slice(1);
 }
 
+/** Icon size in the source rows, shared by both source sheets. */
+export const ICON_SIZE = 36;
+
 type Row =
-  | { kind: 'group'; key: string; label: string; count: number; iconUrl?: string }
+  | { kind: 'group'; key: string; label: string; count: number }
   | { kind: 'source'; key: string; source: SourceDto };
 
 /**
@@ -82,13 +85,11 @@ export function SourcePickerSheet({
           a.lang.localeCompare(b.lang) ||
           a.name.localeCompare(b.name),
       );
-      out.push({
-        kind: 'group',
-        key: `g:${pkg}`,
-        label: extLabel(pkg),
-        count: list.length,
-        iconUrl: list.find(s => s.iconUrl)?.iconUrl,
-      });
+      // Every row carries its extension's icon, so a header is only worth
+      // showing when one extension has several sources (one per language).
+      if (list.length > 1) {
+        out.push({ kind: 'group', key: `g:${pkg}`, label: extLabel(pkg), count: list.length });
+      }
       for (const s of list) out.push({ kind: 'source', key: s.id, source: s });
     }
     return out;
@@ -143,12 +144,9 @@ export function SourcePickerSheet({
           renderItem={({ item }) => {
             if (item.kind === 'group') {
               return (
-                <View style={styles.groupRow}>
-                  <ExtensionIcon uri={item.iconUrl} name={item.label} size={22} />
-                  <Text style={[styles.groupLabel, { color: theme.colors.textFaint }]}>
-                    {item.label.toUpperCase()} · {item.count}
-                  </Text>
-                </View>
+                <Text style={[styles.groupLabel, { color: theme.colors.textFaint }]}>
+                  {item.label.toUpperCase()} · {item.count}
+                </Text>
               );
             }
             const s = item.source;
@@ -164,8 +162,9 @@ export function SourcePickerSheet({
                   { backgroundColor: pressed ? theme.colors.surface : 'transparent' },
                 ]}
               >
+                <ExtensionIcon uri={s.iconUrl} name={s.name} size={ICON_SIZE} />
                 <View style={{ flex: 1 }}>
-                  <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
+                  <Text numberOfLines={1} style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
                     {s.name}
                   </Text>
                   <View style={styles.tags}>
@@ -239,23 +238,20 @@ const styles = StyleSheet.create({
     fontSize: 15,
     padding: 0,
   },
-  groupRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 14,
-    marginBottom: 4,
-  },
   groupLabel: {
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 1.2,
+    marginTop: 14,
+    marginBottom: 2,
+    // Lines up with the icons in the rows below.
+    paddingHorizontal: 8,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingVertical: 12,
+    paddingVertical: 10,
     paddingHorizontal: 8,
     borderRadius: 10,
   },
