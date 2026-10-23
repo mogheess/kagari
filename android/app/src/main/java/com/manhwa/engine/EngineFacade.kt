@@ -309,7 +309,7 @@ class EngineFacade(context: Context) {
         if (!finalFile.exists() || finalFile.length() == 0L) {
             val temp = File(cacheDir, "$key.tmp")
             contentType = try {
-                source.fetchImage(model).awaitSingle().use { response ->
+                source.getImage(model).use { response ->
                     writeImageResponse(response, temp)
                 }
             } catch (error: Throwable) {
@@ -501,7 +501,7 @@ class EngineFacade(context: Context) {
                       else internalChapterDir(sourceId, chapterUrl).apply { mkdirs() }
         val temp = File(scratch, "${hashKey("$sourceId|$chapterUrl")}_${page.index}.tmp")
         val contentType = try {
-            source.fetchImage(model).awaitSingle().use { response -> writeImageResponse(response, temp) }
+            source.getImage(model).use { response -> writeImageResponse(response, temp) }
         } catch (error: Throwable) {
             temp.delete()
             directImageResponse(source, imageUrl).use { response -> writeImageResponse(response, temp) }
