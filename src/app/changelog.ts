@@ -27,6 +27,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       'Previous and next chapter buttons always jump, and each reader page now loads with one request instead of two.',
       'A new look: artwork behind the main tabs, with colours to match. Ink is on by default. Pick Screentone, Neon rain, Sakura dusk or None in Profile → Theme.',
       'A glass tab bar, with a pill that slides to the tab you pick and filled icons for the active tab.',
+      'Bottom sheets close with a swipe down, and the dim behind them fades instead of sliding away with them.',
       'Extensions and sources show their real icons.',
       'Safer extensions: an extension only runs when one of your repos signed it, or after you tap Trust on it in Extensions → Installed. Extensions you sideloaded wait for that tap.',
       'Extensions built with the newest keiyoushi toolchain work, and MANGA Plus no longer closes the app.',
