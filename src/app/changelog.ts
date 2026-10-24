@@ -12,6 +12,31 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.7',
+    date: '2026-10-24',
+    highlights: [
+      'Home is now a feed: pick up where you left off, see which titles have new chapters, and browse a rail from each of your sources instead of just one or two.',
+      'New chapters are found in the background, even when Kagari is closed, and a notification tells you when they land.',
+      'Downloads live with their titles. Library covers show how many chapters are downloaded, a Downloaded collection gathers them, and a title page can show only its downloaded chapters or delete them. They still read in order when you are offline or the source is gone.',
+      'The download queue can be paused, and stays paused after a restart. Failed chapters say why and can be retried, and anything still waiting can be cancelled.',
+      'Search filters: sources that offer genre, status, type or sort filters can now use them in Discover.',
+      'Similar titles: a section on the title page finds titles like the one you are viewing. It only searches when you open it, and tells you when nothing turns up or the source fails.',
+      'Reader zoom was rebuilt. Pinch follows your fingers and stays where you leave it, double-tap zooms in on that spot and double-tap again zooms out, and pinching no longer turns the page. A zoomed webtoon keeps scrolling.',
+      'In the page-by-page modes, a page between chapters shows the one you finished and the one coming next.',
+      'The webtoon strip keeps its place while pages load and when earlier chapters unload. The page counter moves through very tall pages, and switching reading mode stays on the same page.',
+      'Previous and next chapter buttons always jump, and each reader page now loads with one request instead of two.',
+      'A new look: artwork behind the main tabs, with colours to match. Ink is on by default. Pick Screentone, Neon rain, Sakura dusk or None in Profile → Theme.',
+      'A glass tab bar, with a pill that slides to the tab you pick and filled icons for the active tab.',
+      'Bottom sheets close with a swipe down, and the dim behind them fades instead of sliding away with them.',
+      'Extensions and sources show their real icons.',
+      'Safer extensions: an extension only runs when one of your repos signed it, or after you tap Trust on it in Extensions → Installed. Extensions you sideloaded wait for that tap.',
+      'Extensions built with the newest keiyoushi toolchain work, and MANGA Plus no longer closes the app.',
+      'After you pass a Cloudflare check in the WebView, the list reloads on its own. No need to tap Retry.',
+      'Long chapter lists open and scroll faster, and the fast-scroll thumb can be dragged.',
+      'Fixed taps taking seconds to register while loading placeholders were on screen, a frozen screen after closing a dialog with Esc on a keyboard, and a crash in the Home carousel.',
+    ],
+  },
+  {
     version: '0.6.1',
     date: '2026-09-16',
     highlights: [
