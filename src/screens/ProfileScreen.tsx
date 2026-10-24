@@ -122,6 +122,10 @@ export function ProfileScreen() {
             <Text style={[styles.sectionLabel, { color: theme.colors.textFaint, marginTop: 28 }]}>
               COMMUNITY
             </Text>
+            <Text style={[styles.note, { color: theme.colors.textMuted }]}>
+              Got feedback or a suggestion? Feel free to join and share it. Bug reports and
+              ideas are always welcome.
+            </Text>
             {DISCORD_INVITE_URL ? (
               <Row
                 icon="globe"
@@ -630,6 +634,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 1.4,
     marginBottom: 10,
+  },
+  note: {
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 12,
   },
   segment: {
     flexDirection: 'row',
