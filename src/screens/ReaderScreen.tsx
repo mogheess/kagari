@@ -9,7 +9,6 @@ import {
   Image,
   FlatList,
   Pressable,
-  Modal,
   StyleSheet,
   ActivityIndicator,
   useWindowDimensions,
@@ -59,6 +58,7 @@ import {
 import { offerToAddToLibrary } from '../library/downloadsLibrary';
 import { Icon, type IconName } from '../components/Icon';
 import { PageSlider } from '../components/PageSlider';
+import { BottomSheet } from '../components/BottomSheet';
 import { useTheme } from '../theme/ThemeProvider';
 import {
   READER_MODES,
@@ -1599,87 +1599,86 @@ function ReaderSettingsSheet({
   const insets = useSafeAreaInsets();
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.sheetBackdrop} onPress={onClose} />
-      <View
-        style={[
-          styles.sheet,
-          { backgroundColor: theme.colors.bg, paddingBottom: insets.bottom + 10, borderColor: theme.colors.border },
-        ]}
-      >
-        <View style={styles.grabber} />
-        <Text style={[theme.typography.heading, { color: theme.colors.text, marginBottom: 6 }]}>
-          Reading mode
-        </Text>
-        {READER_MODES.map(opt => {
-          const active = opt.mode === mode;
-          return (
-            <Pressable
-              key={opt.mode}
-              onPress={() => onSelect(opt.mode)}
-              style={({ pressed }) => [
-                styles.modeRow,
-                { backgroundColor: pressed ? theme.colors.surface : 'transparent' },
-              ]}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
-                  {opt.label}
-                </Text>
-                <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginTop: 2 }}>
-                  {opt.hint}
-                </Text>
-              </View>
-              {active ? <Icon name="check" size={20} color={theme.colors.accent} /> : null}
-            </Pressable>
-          );
-        })}
-
-        <Text
-          style={[
-            theme.typography.heading,
-            { color: theme.colors.text, marginTop: 18, marginBottom: 6 },
-          ]}
-        >
-          Behaviour
-        </Text>
-        <Pressable
-          onPress={onToggleKeepScreenOn}
-          style={({ pressed }) => [
-            styles.modeRow,
-            { backgroundColor: pressed ? theme.colors.surface : 'transparent' },
-          ]}
-        >
-          <View style={{ flex: 1 }}>
-            <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
-              Keep screen on
-            </Text>
-            <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginTop: 2 }}>
-              Stop the display sleeping while the reader is open
-            </Text>
-          </View>
-          <View
-            style={[
-              styles.toggle,
-              {
-                backgroundColor: keepScreenOn ? theme.colors.accent : theme.colors.surface,
-                borderColor: keepScreenOn ? theme.colors.accent : theme.colors.border,
-              },
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      style={[
+        styles.sheet,
+        { backgroundColor: theme.colors.bg, paddingBottom: insets.bottom + 10, borderColor: theme.colors.border },
+      ]}
+    >
+      <View style={styles.grabber} />
+      <Text style={[theme.typography.heading, { color: theme.colors.text, marginBottom: 6 }]}>
+        Reading mode
+      </Text>
+      {READER_MODES.map(opt => {
+        const active = opt.mode === mode;
+        return (
+          <Pressable
+            key={opt.mode}
+            onPress={() => onSelect(opt.mode)}
+            style={({ pressed }) => [
+              styles.modeRow,
+              { backgroundColor: pressed ? theme.colors.surface : 'transparent' },
             ]}
           >
-            <View
-              style={[
-                styles.toggleKnob,
-                {
-                  backgroundColor: keepScreenOn ? theme.colors.onAccent : theme.colors.textFaint,
-                  alignSelf: keepScreenOn ? 'flex-end' : 'flex-start',
-                },
-              ]}
-            />
-          </View>
-        </Pressable>
-      </View>
-    </Modal>
+            <View style={{ flex: 1 }}>
+              <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
+                {opt.label}
+              </Text>
+              <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginTop: 2 }}>
+                {opt.hint}
+              </Text>
+            </View>
+            {active ? <Icon name="check" size={20} color={theme.colors.accent} /> : null}
+          </Pressable>
+        );
+      })}
+
+      <Text
+        style={[
+          theme.typography.heading,
+          { color: theme.colors.text, marginTop: 18, marginBottom: 6 },
+        ]}
+      >
+        Behaviour
+      </Text>
+      <Pressable
+        onPress={onToggleKeepScreenOn}
+        style={({ pressed }) => [
+          styles.modeRow,
+          { backgroundColor: pressed ? theme.colors.surface : 'transparent' },
+        ]}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
+            Keep screen on
+          </Text>
+          <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginTop: 2 }}>
+            Stop the display sleeping while the reader is open
+          </Text>
+        </View>
+        <View
+          style={[
+            styles.toggle,
+            {
+              backgroundColor: keepScreenOn ? theme.colors.accent : theme.colors.surface,
+              borderColor: keepScreenOn ? theme.colors.accent : theme.colors.border,
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.toggleKnob,
+              {
+                backgroundColor: keepScreenOn ? theme.colors.onAccent : theme.colors.textFaint,
+                alignSelf: keepScreenOn ? 'flex-end' : 'flex-start',
+              },
+            ]}
+          />
+        </View>
+      </Pressable>
+    </BottomSheet>
   );
 }
 
@@ -1748,44 +1747,43 @@ function ReaderMenuSheet({
   ];
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.sheetBackdrop} onPress={onClose} />
-      <View
-        style={[
-          styles.sheet,
-          { backgroundColor: theme.colors.bg, paddingBottom: insets.bottom + 10, borderColor: theme.colors.border },
-        ]}
-      >
-        <View style={styles.grabber} />
-        <Text style={[theme.typography.heading, { color: theme.colors.text, marginBottom: 6 }]}>
-          Page options
-        </Text>
-        {items.map(item => (
-          <Pressable
-            key={item.key}
-            onPress={item.onPress}
-            disabled={item.disabled}
-            style={({ pressed }) => [
-              styles.modeRow,
-              {
-                backgroundColor: pressed ? theme.colors.surface : 'transparent',
-                opacity: item.disabled ? 0.45 : 1,
-              },
-            ]}
-          >
-            <Icon name={item.icon} size={20} color={theme.colors.text} />
-            <View style={{ flex: 1 }}>
-              <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
-                {item.label}
-              </Text>
-              <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginTop: 2 }}>
-                {item.hint}
-              </Text>
-            </View>
-          </Pressable>
-        ))}
-      </View>
-    </Modal>
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      style={[
+        styles.sheet,
+        { backgroundColor: theme.colors.bg, paddingBottom: insets.bottom + 10, borderColor: theme.colors.border },
+      ]}
+    >
+      <View style={styles.grabber} />
+      <Text style={[theme.typography.heading, { color: theme.colors.text, marginBottom: 6 }]}>
+        Page options
+      </Text>
+      {items.map(item => (
+        <Pressable
+          key={item.key}
+          onPress={item.onPress}
+          disabled={item.disabled}
+          style={({ pressed }) => [
+            styles.modeRow,
+            {
+              backgroundColor: pressed ? theme.colors.surface : 'transparent',
+              opacity: item.disabled ? 0.45 : 1,
+            },
+          ]}
+        >
+          <Icon name={item.icon} size={20} color={theme.colors.text} />
+          <View style={{ flex: 1 }}>
+            <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
+              {item.label}
+            </Text>
+            <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginTop: 2 }}>
+              {item.hint}
+            </Text>
+          </View>
+        </Pressable>
+      ))}
+    </BottomSheet>
   );
 }
 
@@ -1971,14 +1969,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 13,
     fontWeight: '600',
-  },
-  sheetBackdrop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.5)',
   },
   sheet: {
     position: 'absolute',

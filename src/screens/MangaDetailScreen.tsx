@@ -11,7 +11,6 @@ import {
   ActivityIndicator,
   Alert,
   BackHandler,
-  Modal,
   RefreshControl,
   ToastAndroid,
   useWindowDimensions,
@@ -61,6 +60,7 @@ import {
 } from '../library/downloads';
 import { offerToAddToLibrary } from '../library/downloadsLibrary';
 import { FastScroller, type FastScrollerHandle } from '../components/FastScroller';
+import { BottomSheet } from '../components/BottomSheet';
 import type { RootStackParamList } from '../navigation/types';
 import type { MangaDto, ChapterDto } from '../engine/types';
 
@@ -1158,44 +1158,43 @@ function BulkDownloadSheet({
     },
   ];
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.sheetBackdrop} onPress={onClose} />
-      <View
-        style={[
-          styles.sheet,
-          { backgroundColor: theme.colors.bg, paddingBottom: insets.bottom + 10, borderColor: theme.colors.border },
-        ]}
-      >
-        <View style={styles.grabber} />
-        <Text style={[theme.typography.heading, { color: theme.colors.text, marginBottom: 2 }]}>
-          Download chapters
-        </Text>
-        <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginBottom: 8 }}>
-          Chapters already downloaded or queued are skipped. Downloads run one at a time
-          in the background.
-        </Text>
-        {items.map(item => (
-          <Pressable
-            key={item.key}
-            onPress={item.onPress}
-            style={({ pressed }) => [
-              styles.actionRow,
-              { backgroundColor: pressed ? theme.colors.surface : 'transparent' },
-            ]}
-          >
-            <Icon name={item.icon} size={20} color={theme.colors.text} />
-            <View style={{ flex: 1 }}>
-              <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
-                {item.label}
-              </Text>
-              <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginTop: 2 }}>
-                {item.hint}
-              </Text>
-            </View>
-          </Pressable>
-        ))}
-      </View>
-    </Modal>
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      style={[
+        styles.sheet,
+        { backgroundColor: theme.colors.bg, paddingBottom: insets.bottom + 10, borderColor: theme.colors.border },
+      ]}
+    >
+      <View style={styles.grabber} />
+      <Text style={[theme.typography.heading, { color: theme.colors.text, marginBottom: 2 }]}>
+        Download chapters
+      </Text>
+      <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginBottom: 8 }}>
+        Chapters already downloaded or queued are skipped. Downloads run one at a time
+        in the background.
+      </Text>
+      {items.map(item => (
+        <Pressable
+          key={item.key}
+          onPress={item.onPress}
+          style={({ pressed }) => [
+            styles.actionRow,
+            { backgroundColor: pressed ? theme.colors.surface : 'transparent' },
+          ]}
+        >
+          <Icon name={item.icon} size={20} color={theme.colors.text} />
+          <View style={{ flex: 1 }}>
+            <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
+              {item.label}
+            </Text>
+            <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginTop: 2 }}>
+              {item.hint}
+            </Text>
+          </View>
+        </Pressable>
+      ))}
+    </BottomSheet>
   );
 }
 
@@ -1231,43 +1230,42 @@ function SourceActionsSheet({
     },
   ];
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.sheetBackdrop} onPress={onClose} />
-      <View
-        style={[
-          styles.sheet,
-          { backgroundColor: theme.colors.bg, paddingBottom: insets.bottom + 10, borderColor: theme.colors.border },
-        ]}
-      >
-        <View style={styles.grabber} />
-        <Text style={[theme.typography.heading, { color: theme.colors.text, marginBottom: 2 }]}>
-          {sourceName ?? 'Source'}
-        </Text>
-        <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginBottom: 8 }}>
-          If a source stops loading, open it in the browser to clear a block, or migrate the title.
-        </Text>
-        {items.map(item => (
-          <Pressable
-            key={item.key}
-            onPress={item.onPress}
-            style={({ pressed }) => [
-              styles.actionRow,
-              { backgroundColor: pressed ? theme.colors.surface : 'transparent' },
-            ]}
-          >
-            <Icon name={item.icon} size={20} color={theme.colors.text} />
-            <View style={{ flex: 1 }}>
-              <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
-                {item.label}
-              </Text>
-              <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginTop: 2 }}>
-                {item.hint}
-              </Text>
-            </View>
-          </Pressable>
-        ))}
-      </View>
-    </Modal>
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      style={[
+        styles.sheet,
+        { backgroundColor: theme.colors.bg, paddingBottom: insets.bottom + 10, borderColor: theme.colors.border },
+      ]}
+    >
+      <View style={styles.grabber} />
+      <Text style={[theme.typography.heading, { color: theme.colors.text, marginBottom: 2 }]}>
+        {sourceName ?? 'Source'}
+      </Text>
+      <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginBottom: 8 }}>
+        If a source stops loading, open it in the browser to clear a block, or migrate the title.
+      </Text>
+      {items.map(item => (
+        <Pressable
+          key={item.key}
+          onPress={item.onPress}
+          style={({ pressed }) => [
+            styles.actionRow,
+            { backgroundColor: pressed ? theme.colors.surface : 'transparent' },
+          ]}
+        >
+          <Icon name={item.icon} size={20} color={theme.colors.text} />
+          <View style={{ flex: 1 }}>
+            <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
+              {item.label}
+            </Text>
+            <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginTop: 2 }}>
+              {item.hint}
+            </Text>
+          </View>
+        </Pressable>
+      ))}
+    </BottomSheet>
   );
 }
 
@@ -1295,61 +1293,60 @@ function MigrateConfirmSheet({
   const fromName = fromSourceName ?? 'the current source';
   const duplicate = target?.plan.targetDuplicate ?? false;
   return (
-    <Modal visible={target != null} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.sheetBackdrop} onPress={onClose} />
-      <View
-        style={[
-          styles.sheet,
-          { backgroundColor: theme.colors.bg, paddingBottom: insets.bottom + 12, borderColor: theme.colors.border },
+    <BottomSheet
+      visible={target != null}
+      onClose={onClose}
+      style={[
+        styles.sheet,
+        { backgroundColor: theme.colors.bg, paddingBottom: insets.bottom + 12, borderColor: theme.colors.border },
+      ]}
+    >
+      <View style={styles.grabber} />
+      <Text style={[theme.typography.heading, { color: theme.colors.text, marginBottom: 2 }]}>
+        Migrate to {toName}?
+      </Text>
+      <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginBottom: 14, lineHeight: 18 }}>
+        {duplicate
+          ? `"${target?.to.title}" is already in your library on ${toName}. Your reading progress, history and categories from ${fromName} will be copied onto it.`
+          : `Your reading progress, history and categories will be copied to ${toName}.`}
+      </Text>
+
+      <Pressable
+        onPress={onReplace}
+        style={({ pressed }) => [
+          styles.migrateChoice,
+          { backgroundColor: theme.colors.accent, opacity: pressed ? 0.9 : 1 },
         ]}
       >
-        <View style={styles.grabber} />
-        <Text style={[theme.typography.heading, { color: theme.colors.text, marginBottom: 2 }]}>
-          Migrate to {toName}?
-        </Text>
-        <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginBottom: 14, lineHeight: 18 }}>
-          {duplicate
-            ? `"${target?.to.title}" is already in your library on ${toName}. Your reading progress, history and categories from ${fromName} will be copied onto it.`
-            : `Your reading progress, history and categories will be copied to ${toName}.`}
-        </Text>
+        <Icon name="arrowRight" size={18} color={theme.colors.onAccent} />
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 14 }}>Replace</Text>
+          <Text style={{ color: theme.colors.onAccent, opacity: 0.8, fontSize: 11.5, marginTop: 1 }}>
+            Move here and remove the original from {fromName}
+          </Text>
+        </View>
+      </Pressable>
 
-        <Pressable
-          onPress={onReplace}
-          style={({ pressed }) => [
-            styles.migrateChoice,
-            { backgroundColor: theme.colors.accent, opacity: pressed ? 0.9 : 1 },
-          ]}
-        >
-          <Icon name="arrowRight" size={18} color={theme.colors.onAccent} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 14 }}>Replace</Text>
-            <Text style={{ color: theme.colors.onAccent, opacity: 0.8, fontSize: 11.5, marginTop: 1 }}>
-              Move here and remove the original from {fromName}
-            </Text>
-          </View>
-        </Pressable>
+      <Pressable
+        onPress={onKeepBoth}
+        style={({ pressed }) => [
+          styles.migrateChoice,
+          { borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border, opacity: pressed ? 0.7 : 1 },
+        ]}
+      >
+        <Icon name="bookmark" size={18} color={theme.colors.text} />
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>Keep both</Text>
+          <Text style={{ color: theme.colors.textMuted, fontSize: 11.5, marginTop: 1 }}>
+            Copy progress, keep the original too
+          </Text>
+        </View>
+      </Pressable>
 
-        <Pressable
-          onPress={onKeepBoth}
-          style={({ pressed }) => [
-            styles.migrateChoice,
-            { borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border, opacity: pressed ? 0.7 : 1 },
-          ]}
-        >
-          <Icon name="bookmark" size={18} color={theme.colors.text} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>Keep both</Text>
-            <Text style={{ color: theme.colors.textMuted, fontSize: 11.5, marginTop: 1 }}>
-              Copy progress, keep the original too
-            </Text>
-          </View>
-        </Pressable>
-
-        <Pressable onPress={onClose} hitSlop={8} style={styles.migrateCancel}>
-          <Text style={{ color: theme.colors.textMuted, fontSize: 13.5, fontWeight: '600' }}>Cancel</Text>
-        </Pressable>
-      </View>
-    </Modal>
+      <Pressable onPress={onClose} hitSlop={8} style={styles.migrateCancel}>
+        <Text style={{ color: theme.colors.textMuted, fontSize: 13.5, fontWeight: '600' }}>Cancel</Text>
+      </Pressable>
+    </BottomSheet>
   );
 }
 
@@ -1380,77 +1377,77 @@ function DuplicateAddSheet({
   const visible = list.length > 0;
   const multiple = list.length > 1;
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.sheetBackdrop} onPress={onClose} />
-      <View
-        style={[
-          styles.sheet,
-          { backgroundColor: theme.colors.bg, paddingBottom: insets.bottom + 12, borderColor: theme.colors.border },
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      scrollable
+      style={[
+        styles.sheet,
+        { backgroundColor: theme.colors.bg, paddingBottom: insets.bottom + 12, borderColor: theme.colors.border },
+      ]}
+    >
+      <View style={styles.grabber} />
+      <Text style={[theme.typography.heading, { color: theme.colors.text, marginBottom: 2 }]}>
+        Already in your library
+      </Text>
+      <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginBottom: 12, lineHeight: 18 }}>
+        {multiple
+          ? `"${title ?? 'This title'}" matches more than one title in your library. Pick the copy to migrate your progress, history and categories from onto this source — or keep them all.`
+          : `"${title ?? 'This title'}" is already in your library. Migrate your progress, history and categories onto this source, or keep both copies.`}
+      </Text>
+
+      <Text style={{ color: theme.colors.textFaint, fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 6 }}>
+        MIGRATE FROM
+      </Text>
+      <ScrollView style={styles.pickList} keyboardShouldPersistTaps="handled">
+        {list.map(c => {
+
+const tint = seededColor(c.thumbnailUrl ?? c.title, 0.5, 0.3);
+          return (
+            <Pressable
+              key={`${c.sourceId}\u0000${c.url}`}
+              onPress={() => onMigrate(c)}
+              style={({ pressed }) => [styles.pickRow, { backgroundColor: pressed ? theme.colors.surface : 'transparent' }]}
+            >
+              <View style={[styles.pickThumb, { backgroundColor: tint }]}>
+                {c.thumbnailUrl ? (
+                  <RemoteImage uri={c.thumbnailUrl} sourceId={c.sourceId} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                ) : null}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]} numberOfLines={1}>
+                  {c.title}
+                </Text>
+                <Text style={{ color: theme.colors.textMuted, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
+                  {sourceNameById(c.sourceId) ?? 'Unknown source'}
+                </Text>
+              </View>
+              <Icon name="arrowRight" size={18} color={theme.colors.accent} />
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+
+      <Pressable
+        onPress={onAddBoth}
+        style={({ pressed }) => [
+          styles.migrateChoice,
+          { borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border, opacity: pressed ? 0.7 : 1, marginTop: 12 },
         ]}
       >
-        <View style={styles.grabber} />
-        <Text style={[theme.typography.heading, { color: theme.colors.text, marginBottom: 2 }]}>
-          Already in your library
-        </Text>
-        <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginBottom: 12, lineHeight: 18 }}>
-          {multiple
-            ? `"${title ?? 'This title'}" matches more than one title in your library. Pick the copy to migrate your progress, history and categories from onto this source — or keep them all.`
-            : `"${title ?? 'This title'}" is already in your library. Migrate your progress, history and categories onto this source, or keep both copies.`}
-        </Text>
+        <Icon name="bookmark" size={18} color={theme.colors.text} />
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>Add anyway</Text>
+          <Text style={{ color: theme.colors.textMuted, fontSize: 11.5, marginTop: 1 }}>
+            {multiple ? 'Keep this copy and all the existing ones' : 'Keep both copies in your library'}
+          </Text>
+        </View>
+      </Pressable>
 
-        <Text style={{ color: theme.colors.textFaint, fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 6 }}>
-          MIGRATE FROM
-        </Text>
-        <ScrollView style={styles.pickList} keyboardShouldPersistTaps="handled">
-          {list.map(c => {
-
-  const tint = seededColor(c.thumbnailUrl ?? c.title, 0.5, 0.3);
-            return (
-              <Pressable
-                key={`${c.sourceId}\u0000${c.url}`}
-                onPress={() => onMigrate(c)}
-                style={({ pressed }) => [styles.pickRow, { backgroundColor: pressed ? theme.colors.surface : 'transparent' }]}
-              >
-                <View style={[styles.pickThumb, { backgroundColor: tint }]}>
-                  {c.thumbnailUrl ? (
-                    <RemoteImage uri={c.thumbnailUrl} sourceId={c.sourceId} style={StyleSheet.absoluteFill} resizeMode="cover" />
-                  ) : null}
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]} numberOfLines={1}>
-                    {c.title}
-                  </Text>
-                  <Text style={{ color: theme.colors.textMuted, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
-                    {sourceNameById(c.sourceId) ?? 'Unknown source'}
-                  </Text>
-                </View>
-                <Icon name="arrowRight" size={18} color={theme.colors.accent} />
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-
-        <Pressable
-          onPress={onAddBoth}
-          style={({ pressed }) => [
-            styles.migrateChoice,
-            { borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border, opacity: pressed ? 0.7 : 1, marginTop: 12 },
-          ]}
-        >
-          <Icon name="bookmark" size={18} color={theme.colors.text} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>Add anyway</Text>
-            <Text style={{ color: theme.colors.textMuted, fontSize: 11.5, marginTop: 1 }}>
-              {multiple ? 'Keep this copy and all the existing ones' : 'Keep both copies in your library'}
-            </Text>
-          </View>
-        </Pressable>
-
-        <Pressable onPress={onClose} hitSlop={8} style={styles.migrateCancel}>
-          <Text style={{ color: theme.colors.textMuted, fontSize: 13.5, fontWeight: '600' }}>Cancel</Text>
-        </Pressable>
-      </View>
-    </Modal>
+      <Pressable onPress={onClose} hitSlop={8} style={styles.migrateCancel}>
+        <Text style={{ color: theme.colors.textMuted, fontSize: 13.5, fontWeight: '600' }}>Cancel</Text>
+      </Pressable>
+    </BottomSheet>
   );
 }
 
@@ -1472,58 +1469,58 @@ function MigrateResultPickSheet({
   const insets = useSafeAreaInsets();
   const results = data?.results ?? [];
   return (
-    <Modal visible={data != null} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.sheetBackdrop} onPress={onClose} />
-      <View
-        style={[
-          styles.sheet,
-          { backgroundColor: theme.colors.bg, paddingBottom: insets.bottom + 12, borderColor: theme.colors.border },
-        ]}
-      >
-        <View style={styles.grabber} />
-        <Text style={[theme.typography.heading, { color: theme.colors.text, marginBottom: 2 }]}>
-          Pick the match
-        </Text>
-        <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginBottom: 12, lineHeight: 18 }}>
-          {`Results on ${data?.sourceName ?? 'the source'} for "${data?.query ?? ''}". Choose the title to migrate your reading state onto.`}
-        </Text>
+    <BottomSheet
+      visible={data != null}
+      onClose={onClose}
+      scrollable
+      style={[
+        styles.sheet,
+        { backgroundColor: theme.colors.bg, paddingBottom: insets.bottom + 12, borderColor: theme.colors.border },
+      ]}
+    >
+      <View style={styles.grabber} />
+      <Text style={[theme.typography.heading, { color: theme.colors.text, marginBottom: 2 }]}>
+        Pick the match
+      </Text>
+      <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginBottom: 12, lineHeight: 18 }}>
+        {`Results on ${data?.sourceName ?? 'the source'} for "${data?.query ?? ''}". Choose the title to migrate your reading state onto.`}
+      </Text>
 
-        <ScrollView style={styles.pickList} keyboardShouldPersistTaps="handled">
-          {results.map(m => {
+      <ScrollView style={styles.pickList} keyboardShouldPersistTaps="handled">
+        {results.map(m => {
 
-  const tint = seededColor(m.thumbnailUrl ?? m.title, 0.5, 0.3);
-            return (
-              <Pressable
-                key={m.url}
-                onPress={() => onPick(m)}
-                style={({ pressed }) => [styles.pickRow, { backgroundColor: pressed ? theme.colors.surface : 'transparent' }]}
-              >
-                <View style={[styles.pickThumb, { backgroundColor: tint }]}>
-                  {m.thumbnailUrl ? (
-                    <RemoteImage uri={m.thumbnailUrl} sourceId={m.sourceId} style={StyleSheet.absoluteFill} resizeMode="cover" />
-                  ) : null}
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]} numberOfLines={2}>
-                    {m.title}
+const tint = seededColor(m.thumbnailUrl ?? m.title, 0.5, 0.3);
+          return (
+            <Pressable
+              key={m.url}
+              onPress={() => onPick(m)}
+              style={({ pressed }) => [styles.pickRow, { backgroundColor: pressed ? theme.colors.surface : 'transparent' }]}
+            >
+              <View style={[styles.pickThumb, { backgroundColor: tint }]}>
+                {m.thumbnailUrl ? (
+                  <RemoteImage uri={m.thumbnailUrl} sourceId={m.sourceId} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                ) : null}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[theme.typography.bodyStrong, { color: theme.colors.text }]} numberOfLines={2}>
+                  {m.title}
+                </Text>
+                {m.author ? (
+                  <Text style={{ color: theme.colors.textMuted, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
+                    {m.author}
                   </Text>
-                  {m.author ? (
-                    <Text style={{ color: theme.colors.textMuted, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
-                      {m.author}
-                    </Text>
-                  ) : null}
-                </View>
-                <Icon name="arrowRight" size={18} color={theme.colors.accent} />
-              </Pressable>
-            );
-          })}
-        </ScrollView>
+                ) : null}
+              </View>
+              <Icon name="arrowRight" size={18} color={theme.colors.accent} />
+            </Pressable>
+          );
+        })}
+      </ScrollView>
 
-        <Pressable onPress={onClose} hitSlop={8} style={[styles.migrateCancel, { marginTop: 10 }]}>
-          <Text style={{ color: theme.colors.textMuted, fontSize: 13.5, fontWeight: '600' }}>Cancel</Text>
-        </Pressable>
-      </View>
-    </Modal>
+      <Pressable onPress={onClose} hitSlop={8} style={[styles.migrateCancel, { marginTop: 10 }]}>
+        <Text style={{ color: theme.colors.textMuted, fontSize: 13.5, fontWeight: '600' }}>Cancel</Text>
+      </Pressable>
+    </BottomSheet>
   );
 }
 
@@ -2004,14 +2001,6 @@ const styles = StyleSheet.create({
     borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  sheetBackdrop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.5)',
   },
   sheet: {
     position: 'absolute',

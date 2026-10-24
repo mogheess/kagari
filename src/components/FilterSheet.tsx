@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeProvider';
 import { Icon } from './Icon';
 import type { FilterDto } from '../engine/types';
 import { countChanged, nextTriState, updateFilterAt, type FilterPath } from '../sources/filters';
+import { BottomSheet } from './BottomSheet';
 
 /**
  * Edits a source's search filters. Changes stay in a draft until Apply, so
@@ -39,50 +40,50 @@ export function FilterSheet({
   const changed = countChanged(draft, defaults);
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} />
-      <View
-        style={[
-          styles.sheet,
-          { backgroundColor: theme.colors.bg, borderColor: theme.colors.border, paddingBottom: insets.bottom + 10 },
-        ]}
-      >
-        <View style={styles.grabber} />
-        <View style={styles.headerRow}>
-          <Text style={[theme.typography.heading, { color: theme.colors.text, flex: 1 }]} numberOfLines={1}>
-            {sourceName ? `Filters · ${sourceName}` : 'Filters'}
-          </Text>
-          <Pressable hitSlop={10} onPress={onClose}>
-            <Icon name="close" size={22} color={theme.colors.textMuted} />
-          </Pressable>
-        </View>
-        <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ flexGrow: 0 }}>
-          {draft.map((f, i) => (
-            <FilterControl key={`${i}:${f.type}`} filter={f} path={[i]} onEdit={edit} />
-          ))}
-        </ScrollView>
-        <View style={styles.footer}>
-          <Pressable
-            onPress={() => setDraft([...defaults])}
-            disabled={changed === 0}
-            style={[styles.footerBtn, { borderColor: theme.colors.border, opacity: changed === 0 ? 0.5 : 1 }]}
-          >
-            <Text style={{ color: theme.colors.text, fontWeight: '700' }}>Reset</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => {
-              onApply(draft);
-              onClose();
-            }}
-            style={[styles.footerBtn, { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent, flex: 2 }]}
-          >
-            <Text style={{ color: theme.colors.onAccent, fontWeight: '700' }}>
-              {changed > 0 ? `Apply (${changed})` : 'Apply'}
-            </Text>
-          </Pressable>
-        </View>
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      scrollable
+      style={[
+        styles.sheet,
+        { backgroundColor: theme.colors.bg, borderColor: theme.colors.border, paddingBottom: insets.bottom + 10 },
+      ]}
+    >
+      <View style={styles.grabber} />
+      <View style={styles.headerRow}>
+        <Text style={[theme.typography.heading, { color: theme.colors.text, flex: 1 }]} numberOfLines={1}>
+          {sourceName ? `Filters · ${sourceName}` : 'Filters'}
+        </Text>
+        <Pressable hitSlop={10} onPress={onClose}>
+          <Icon name="close" size={22} color={theme.colors.textMuted} />
+        </Pressable>
       </View>
-    </Modal>
+      <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ flexGrow: 0 }}>
+        {draft.map((f, i) => (
+          <FilterControl key={`${i}:${f.type}`} filter={f} path={[i]} onEdit={edit} />
+        ))}
+      </ScrollView>
+      <View style={styles.footer}>
+        <Pressable
+          onPress={() => setDraft([...defaults])}
+          disabled={changed === 0}
+          style={[styles.footerBtn, { borderColor: theme.colors.border, opacity: changed === 0 ? 0.5 : 1 }]}
+        >
+          <Text style={{ color: theme.colors.text, fontWeight: '700' }}>Reset</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => {
+            onApply(draft);
+            onClose();
+          }}
+          style={[styles.footerBtn, { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent, flex: 2 }]}
+        >
+          <Text style={{ color: theme.colors.onAccent, fontWeight: '700' }}>
+            {changed > 0 ? `Apply (${changed})` : 'Apply'}
+          </Text>
+        </Pressable>
+      </View>
+    </BottomSheet>
   );
 }
 
@@ -251,14 +252,6 @@ function FilterControl({
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-  },
   sheet: {
     position: 'absolute',
     left: 0,
