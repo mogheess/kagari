@@ -110,6 +110,10 @@ const CHAPTER_TRANSITION_HEIGHT = 260;
  * screens tall, which can never be half on screen; the first is what reaches a
  * short last page, so a chapter can still be read to the end.
  */
+/** How long the reader's place from before an earlier chapter went in stays usable. */
+const ANCHOR_TTL_MS = 2000;
+/** How long the list gets to keep its own place after an earlier chapter goes in. */
+const ANCHOR_CHECK_MS = 300;
 const HALF_VISIBLE = { itemVisiblePercentThreshold: 50 };
 const FILLS_HALF_SCREEN = { viewAreaCoveragePercentThreshold: 50 };
 
@@ -267,8 +271,43 @@ export function ReaderScreen() {
   }, []);
   /** Scroll offset along the list as of the last scroll event. */
   const scrollOffset = useRef(0);
+  /** The list's items, for callbacks that outlive a render. */
+  const itemsRef = useRef<ReaderItem[]>([]);
   /** Exact offset of an item, for the current layout (set each render). */
   const offsetOf = useRef<(index: number) => number>(() => 0);
+  /**
+   * The page at the top of the screen when an earlier chapter went in above,
+   * how far into it the screen started, and the scroll offset then (see the
+   * effect that uses it).
+   */
+  const insertAnchor = useRef<{
+    key: string;
+    within: number;
+    offset: number;
+    before: ReaderItem[];
+    time: number;
+  } | null>(null);
+  const rememberAnchor = useCallback(() => {
+    // Several held inserts can go in together, and a chapter can be inserted
+    // twice (the second changes nothing). The place from before the first is
+    // the one to keep; a stale one must never pull the reader back later.
+    const pending = insertAnchor.current;
+    if (pending && Date.now() - pending.time < ANCHOR_TTL_MS) return;
+    const order = itemsRef.current;
+    const at = scrollOffset.current;
+    let top = -1;
+    while (top + 1 < order.length && offsetOf.current(top + 1) <= at) top++;
+    // A transition panel's key changes once the chapter it stands for loads.
+    if (top >= 0 && order[top].kind !== 'page') top++;
+    if (top < 0 || top >= order.length) return;
+    insertAnchor.current = {
+      key: order[top].key,
+      within: at - offsetOf.current(top),
+      offset: at,
+      before: order,
+      time: Date.now(),
+    };
+  }, []);
 
   /**
    * Resolves a chapter's pages and slots it into the window. Downloaded
@@ -310,7 +349,10 @@ export function ReaderScreen() {
           await measurePage(params.sourceId, series, url, last, offlineCount > 0);
         }
         if (earlier) {
-          heldInserts.current.push(insert);
+          heldInserts.current.push(() => {
+            if (!isPaged(modeRef.current)) rememberAnchor();
+            insert();
+          });
           releaseHeldInserts();
         } else {
           insert();
@@ -332,6 +374,7 @@ export function ReaderScreen() {
       params.chapter.url,
       series,
       releaseHeldInserts,
+      rememberAnchor,
     ],
   );
 
@@ -460,7 +503,6 @@ export function ReaderScreen() {
   //
   // The list spans several chapters, so this also decides which chapter is
   // "current" — that is the only thing a boundary changes now.
-  const itemsRef = useRef<ReaderItem[]>([]);
   itemsRef.current = items;
   const activeRef = useRef({ url: activeUrl, page: activePage });
   activeRef.current = { url: activeUrl, page: activePage };
@@ -742,6 +784,37 @@ export function ReaderScreen() {
   offsetOf.current = paged
     ? index => index * (horizontal ? width : height)
     : index => stripLayout.offsets[index] ?? 0;
+
+  // The list keeps the reader's place when an earlier chapter goes in above
+  // (maintainVisibleContentPosition): it shifts the scroll offset by the new
+  // chapter's height and reports the scroll. Now and then it doesn't: the
+  // offset stays put, the screen shows the start of the chapter that just went
+  // in, its page numbers show in the bar, and scrolling on from there makes it
+  // current. So once the list has had a moment, if the offset still hasn't
+  // moved, the page that was at the top goes back where it was. Correcting a
+  // shift that did happen would double it, so it only steps in when none did.
+  useEffect(() => {
+    const anchor = insertAnchor.current;
+    // Only once the chapter is in: this can run for a render from before it.
+    if (paged || !anchor || items === anchor.before) return;
+    if (Date.now() - anchor.time > ANCHOR_TTL_MS) {
+      insertAnchor.current = null;
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (insertAnchor.current !== anchor) return;
+      insertAnchor.current = null;
+      if (dragging.current || flinging.current || jumping.current) return;
+      if (scrollOffset.current !== anchor.offset) return;
+      const index = itemsRef.current.findIndex(item => item.key === anchor.key);
+      if (index < 0) return;
+      listRef.current?.scrollToOffset({
+        offset: offsetOf.current(index) + anchor.within,
+        animated: false,
+      });
+    }, ANCHOR_CHECK_MS);
+    return () => clearTimeout(timer);
+  }, [items, paged]);
 
   const renderItem = useCallback(
     ({ item, index }: { item: ReaderItem; index: number }) =>
