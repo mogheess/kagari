@@ -1,8 +1,9 @@
 import React from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeProvider';
 import { Icon } from './Icon';
+import { BottomSheet } from './BottomSheet';
 
 export interface SheetOption<T> {
   value: T;
@@ -30,57 +31,49 @@ export function OptionSheet<T>({
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} />
-      <View
-        style={[
-          styles.sheet,
-          { backgroundColor: theme.colors.bg, borderColor: theme.colors.border, paddingBottom: insets.bottom + 8 },
-        ]}
-      >
-        <View style={styles.grabber} />
-        <Text style={[theme.typography.heading, { color: theme.colors.text, marginBottom: 8 }]}>{title}</Text>
-        <ScrollView showsVerticalScrollIndicator={false}>
-          {options.map(opt => {
-            const active = opt.value === selected;
-            return (
-              <Pressable
-                key={String(opt.value)}
-                onPress={() => {
-                  onSelect(opt.value);
-                  onClose();
-                }}
-                style={({ pressed }) => [styles.row, { opacity: pressed ? 0.6 : 1 }]}
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      scrollable
+      style={[
+        styles.sheet,
+        { backgroundColor: theme.colors.bg, borderColor: theme.colors.border, paddingBottom: insets.bottom + 8 },
+      ]}
+    >
+      <View style={styles.grabber} />
+      <Text style={[theme.typography.heading, { color: theme.colors.text, marginBottom: 8 }]}>{title}</Text>
+      <ScrollView showsVerticalScrollIndicator={false}>
+        {options.map(opt => {
+          const active = opt.value === selected;
+          return (
+            <Pressable
+              key={String(opt.value)}
+              onPress={() => {
+                onSelect(opt.value);
+                onClose();
+              }}
+              style={({ pressed }) => [styles.row, { opacity: pressed ? 0.6 : 1 }]}
+            >
+              <Text
+                style={[
+                  theme.typography.body,
+                  { color: active ? theme.colors.accent : theme.colors.text, flex: 1, fontWeight: active ? '700' : '400' },
+                ]}
+                numberOfLines={1}
               >
-                <Text
-                  style={[
-                    theme.typography.body,
-                    { color: active ? theme.colors.accent : theme.colors.text, flex: 1, fontWeight: active ? '700' : '400' },
-                  ]}
-                  numberOfLines={1}
-                >
-                  {opt.label}
-                </Text>
-                {opt.hint ? <Text style={{ color: theme.colors.textFaint, fontSize: 12.5 }}>{opt.hint}</Text> : null}
-                {active ? <Icon name="check" size={18} color={theme.colors.accent} /> : <View style={{ width: 18 }} />}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </View>
-    </Modal>
+                {opt.label}
+              </Text>
+              {opt.hint ? <Text style={{ color: theme.colors.textFaint, fontSize: 12.5 }}>{opt.hint}</Text> : null}
+              {active ? <Icon name="check" size={18} color={theme.colors.accent} /> : <View style={{ width: 18 }} />}
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-  },
   sheet: {
     position: 'absolute',
     left: 0,

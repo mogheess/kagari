@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, TextInput, FlatList, Pressable, Modal, StyleSheet } from 'react-native';
+import { View, Text, TextInput, FlatList, Pressable, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeProvider';
 import { Icon } from './Icon';
@@ -10,6 +10,7 @@ import { LanguageFilterRow } from './LanguageFilterRow';
 import { useEnabledLanguages, filterByLanguages } from '../sources/languageFilter';
 import { usePinnedSources, togglePinned } from '../sources/pinned';
 import type { SourceDto } from '../engine/types';
+import { BottomSheet } from './BottomSheet';
 
 interface GlobalSourcesSheetProps {
   visible: boolean;
@@ -80,112 +81,104 @@ export function GlobalSourcesSheet({ visible, sources, onClose }: GlobalSourcesS
   }, [sources, query, enabledLangs]);
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} />
-      <View
-        style={[
-          styles.sheet,
-          { backgroundColor: theme.colors.bg, paddingBottom: insets.bottom + 8, borderColor: theme.colors.border },
-        ]}
-      >
-        <View style={styles.grabber} />
-        <View style={styles.headerRow}>
-          <View>
-            <Text style={[theme.typography.heading, { color: theme.colors.text }]}>Search sources</Text>
-            <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginTop: 2 }}>
-              {pinnedCount > 0 ? `${pinnedCount} selected for global search` : 'Select sources to search'}
-            </Text>
-          </View>
-          <Pressable hitSlop={10} onPress={onClose}>
-            <Icon name="close" size={22} color={theme.colors.textMuted} />
-          </Pressable>
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      scrollable
+      style={[
+        styles.sheet,
+        { backgroundColor: theme.colors.bg, paddingBottom: insets.bottom + 8, borderColor: theme.colors.border },
+      ]}
+    >
+      <View style={styles.grabber} />
+      <View style={styles.headerRow}>
+        <View>
+          <Text style={[theme.typography.heading, { color: theme.colors.text }]}>Search sources</Text>
+          <Text style={{ color: theme.colors.textMuted, fontSize: 12.5, marginTop: 2 }}>
+            {pinnedCount > 0 ? `${pinnedCount} selected for global search` : 'Select sources to search'}
+          </Text>
         </View>
+        <Pressable hitSlop={10} onPress={onClose}>
+          <Icon name="close" size={22} color={theme.colors.textMuted} />
+        </Pressable>
+      </View>
 
-        <View style={[styles.search, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-          <Icon name="search" size={17} color={theme.colors.textMuted} />
-          <TextInput
-            value={query}
-            onChangeText={setQuery}
-            placeholder="Filter sources"
-            placeholderTextColor={theme.colors.textFaint}
-            style={[styles.searchInput, { color: theme.colors.text }]}
-            autoCorrect={false}
-          />
-        </View>
-
-        <LanguageFilterRow sources={sources} />
-
-        <FlatList
-          data={rows}
-          keyExtractor={r => r.key}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: 12 }}
-          renderItem={({ item }) => {
-            if (item.kind === 'group') {
-              return (
-                <Text style={[styles.groupLabel, { color: theme.colors.textFaint }]}>
-                  {item.label.toUpperCase()}
-                </Text>
-              );
-            }
-            const s = item.source;
-            const checked = pinned.includes(s.id);
-            return (
-              <Pressable
-                onPress={() => togglePinned(s.id)}
-                style={({ pressed }) => [
-                  styles.row,
-                  { backgroundColor: pressed ? theme.colors.surface : 'transparent' },
-                ]}
-              >
-                <ExtensionIcon uri={s.iconUrl} name={s.name} size={ICON_SIZE} />
-                <View style={{ flex: 1 }}>
-                  <Text numberOfLines={1} style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
-                    {s.name}
-                  </Text>
-                  <View style={styles.tags}>
-                    <Text style={[styles.langTag, { color: theme.colors.textMuted, borderColor: theme.colors.border }]}>
-                      {langLabel(s.lang)}
-                    </Text>
-                    {s.isNsfw ? (
-                      <Text style={[styles.nsfwTag, { color: theme.colors.onAccent, backgroundColor: theme.colors.accent }]}>
-                        18+
-                      </Text>
-                    ) : null}
-                  </View>
-                </View>
-                <View
-                  style={[
-                    styles.checkbox,
-                    {
-                      borderColor: checked ? theme.colors.accent : theme.colors.border,
-                      backgroundColor: checked ? theme.colors.accent : 'transparent',
-                    },
-                  ]}
-                >
-                  {checked ? (
-                    <Icon name="check" size={14} color={theme.colors.onAccent} strokeWidth={3} />
-                  ) : null}
-                </View>
-              </Pressable>
-            );
-          }}
+      <View style={[styles.search, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+        <Icon name="search" size={17} color={theme.colors.textMuted} />
+        <TextInput
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Filter sources"
+          placeholderTextColor={theme.colors.textFaint}
+          style={[styles.searchInput, { color: theme.colors.text }]}
+          autoCorrect={false}
         />
       </View>
-    </Modal>
+
+      <LanguageFilterRow sources={sources} />
+
+      <FlatList
+        data={rows}
+        keyExtractor={r => r.key}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 12 }}
+        renderItem={({ item }) => {
+          if (item.kind === 'group') {
+            return (
+              <Text style={[styles.groupLabel, { color: theme.colors.textFaint }]}>
+                {item.label.toUpperCase()}
+              </Text>
+            );
+          }
+          const s = item.source;
+          const checked = pinned.includes(s.id);
+          return (
+            <Pressable
+              onPress={() => togglePinned(s.id)}
+              style={({ pressed }) => [
+                styles.row,
+                { backgroundColor: pressed ? theme.colors.surface : 'transparent' },
+              ]}
+            >
+              <ExtensionIcon uri={s.iconUrl} name={s.name} size={ICON_SIZE} />
+              <View style={{ flex: 1 }}>
+                <Text numberOfLines={1} style={[theme.typography.bodyStrong, { color: theme.colors.text }]}>
+                  {s.name}
+                </Text>
+                <View style={styles.tags}>
+                  <Text style={[styles.langTag, { color: theme.colors.textMuted, borderColor: theme.colors.border }]}>
+                    {langLabel(s.lang)}
+                  </Text>
+                  {s.isNsfw ? (
+                    <Text style={[styles.nsfwTag, { color: theme.colors.onAccent, backgroundColor: theme.colors.accent }]}>
+                      18+
+                    </Text>
+                  ) : null}
+                </View>
+              </View>
+              <View
+                style={[
+                  styles.checkbox,
+                  {
+                    borderColor: checked ? theme.colors.accent : theme.colors.border,
+                    backgroundColor: checked ? theme.colors.accent : 'transparent',
+                  },
+                ]}
+              >
+                {checked ? (
+                  <Icon name="check" size={14} color={theme.colors.onAccent} strokeWidth={3} />
+                ) : null}
+              </View>
+            </Pressable>
+          );
+        }}
+      />
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-  },
   sheet: {
     position: 'absolute',
     left: 0,

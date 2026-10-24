@@ -437,7 +437,8 @@ src/
   components/    Cover, RemoteImage (cover loader w/ native fallback), FeaturedHero,
                  FeaturedCarousel, CoverRail, SectionHeader, Icon, Skeleton,
                  HomeBlockView, SourcePickerSheet, GlobalSourcesSheet,
-                 CategoryAssignSheet, FastScroller, PageSlider, SwipeTabs,
+                 CategoryAssignSheet, BottomSheet (shared sheet shell),
+                 FastScroller, PageSlider, SwipeTabs,
                  WhatsNewSheet, UpdateAvailableSheet, ConfirmDialog, ...
   navigation/    RootNavigator (native stack), TabsScreen (local-state tabs,
                  kept alive), TabNav, GlassTabBar, types
@@ -489,6 +490,12 @@ patches/                       patch-package patches (react-native-screens)
   page instead), and Gesture Handler's own `FlatList` can't be interrupted at
   all. Give every `Gesture.Tap()` a `maxDistance`; it has no movement limit by
   default, so flicks counted as taps.
+- **Bottom sheets use `BottomSheet`** (`src/components/BottomSheet.tsx`), not
+  a bare `Modal`. It slides the panel while the backdrop fades (a `Modal`'s own
+  `slide` moved the dimmed backdrop with it), and closes on backdrop tap, back,
+  or a drag down. Pass `scrollable` when the sheet holds a list, so only drags
+  from its top move it. It uses `PanResponder`, not Gesture Handler: a `Modal`
+  is its own window on Android, outside the gesture root.
 - **Comments** explain *why*, not *what*. No narration comments.
 - **Empty states are required.** Zero-content screens render a friendly prompt
   that routes to **Extensions** (see `HomeScreen`/`DiscoverScreen`).
