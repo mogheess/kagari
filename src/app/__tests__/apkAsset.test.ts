@@ -33,9 +33,12 @@ describe('pickApkAsset', () => {
     expect(pickApkAsset(split, ['riscv64'])?.name).toBe('Kagari-v0.7.0-universal.apk');
   });
 
-  it('handles old single-APK releases', () => {
+  it('handles single-APK releases', () => {
     expect(pickApkAsset([{ name: 'Kagari-v0.6.1.apk' }], ['arm64-v8a'])?.name).toBe(
       'Kagari-v0.6.1.apk',
+    );
+    expect(pickApkAsset([{ name: 'Kagari-v0.7.apk' }], ['arm64-v8a', 'armeabi-v7a'])?.name).toBe(
+      'Kagari-v0.7.apk',
     );
   });
 

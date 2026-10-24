@@ -61,18 +61,22 @@ react {
 def enableProguardInReleaseBuilds = false
 
 /**
- * Release builds ship one APK per ABI plus a universal APK. Nearly every phone
- * only needs arm64-v8a, and bundling all four ABIs' native libraries roughly
- * triples the download. Debug builds (and CI) stay a single APK.
+ * Release builds ship one APK, named as before (`Kagari-v0.7.apk`), with only
+ * arm64-v8a native libraries: nearly every phone from the last several years.
+ * 32-bit-only phones and x86 (emulators, a few Chromebooks) are left out, and a
+ * universal APK bundling every ABI's libraries is roughly triple the download.
+ * A release built for another ABI only (`-PreactNativeArchitectures=x86_64`, to
+ * try it on an emulator) still splits that ABI and is named for it. Debug builds
+ * (and CI) stay a single APK.
  *
- * Every APK keeps the same versionCode, as Mihon's do. Per-ABI offsets are only
- * needed for Play Store multi-APK; for sideloaded builds they'd stop people
- * moving between the universal APK and a split one, since one of the two would
- * always count as a downgrade.
+ * The APK keeps the plain versionCode, as Mihon's do. Per-ABI offsets are only
+ * needed for Play Store multi-APK.
  */
 def abiSplitsEnabled = gradle.startParameter.taskNames.any { it.toLowerCase().contains("release") }
-def splitAbis = (findProperty("reactNativeArchitectures") ?: "armeabi-v7a,arm64-v8a,x86,x86_64")
+def releaseAbis = ["arm64-v8a"]
+def builtAbis = (findProperty("reactNativeArchitectures") ?: "armeabi-v7a,arm64-v8a,x86,x86_64")
     .split(",").collect { it.trim() }.findAll { !it.isEmpty() }
+def splitAbis = builtAbis.findAll { it in releaseAbis } ?: builtAbis
 
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
@@ -130,7 +134,7 @@ android {
             enable abiSplitsEnabled
             reset()
             include(*splitAbis)
-            universalApk true
+            universalApk false
         }
     }
     buildTypes {
@@ -163,13 +167,14 @@ kotlin {
     }
 }
 
-// Release APKs are named for the release page: Kagari-v0.7.0-arm64-v8a.apk,
-// Kagari-v0.7.0-universal.apk, ...
+// The release APK is named for the release page: Kagari-v0.7.apk. A release
+// built for another ABI (see above) says which, so it can't pass for it.
 android.applicationVariants.all { variant ->
     if (variant.buildType.name != "release") return
     variant.outputs.all { output ->
-        def abi = output.getFilter("ABI") ?: "universal"
-        outputFileName = "Kagari-v${variant.versionName}-${abi}.apk"
+        def abi = output.getFilter("ABI")
+        def suffix = (abi == null || abi == "arm64-v8a") ? "" : "-${abi}"
+        outputFileName = "Kagari-v${variant.versionName}${suffix}.apk"
     }
 }
 
