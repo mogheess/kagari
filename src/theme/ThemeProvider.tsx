@@ -43,7 +43,11 @@ const DEFAULT_APPEARANCE: Appearance = {
   amoled: false,
   density: 'comfortable',
   corners: 'soft',
-  backdrop: 'none',
+  // Artwork on by default. Ink's colours are the Ink look's own brass, so a
+  // fresh install keeps the default palette. Stored settings from before
+  // backdrops existed have no `backdrop` field and pick this up on merge; an
+  // explicit None is stored and stays.
+  backdrop: 'ink',
 };
 
 const appearanceStore = makePersistence<Appearance>('@kagari/appearance/v1');

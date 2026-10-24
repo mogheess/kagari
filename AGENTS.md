@@ -390,7 +390,8 @@ When you add a new persisted store, follow the favorites pattern (in-memory stat
   palettes, plus Pure black (dark only), Density (comfortable/compact) and
   Corners (soft/sharp). Mode defaults to dark. Chosen in `AppearanceScreen`
   (Profile → Theme); there's deliberately no hue picker. **Backdrops**
-  (`theme/backdrops.ts`): optional original artwork (bundled WebPs) drawn once
+  (`theme/backdrops.ts`): original artwork (bundled WebPs; **Ink** by default,
+  None turns it off) drawn once
   by `ScreenBackdrop` in TabsScreen as a fixed wallpaper behind every main tab,
   under an even scrim of the background colour. Tab roots use
   `useScreenCanvas()` (transparent while a backdrop is on) instead of
@@ -531,8 +532,8 @@ With no extensions installed you'll see empty states. Install a repo + extension
 ## Testing
 
 - **JS:** `npm test` (jest). Suites live in `__tests__/` next to the code in
-  `src/engine`, `src/library`, `src/reader`, `src/app`, `src/components` and
-  `src/sources`. Also run `npx tsc --noEmit` and `npm run lint` (warnings are
+  `src/engine`, `src/library`, `src/reader`, `src/app`, `src/components`,
+  `src/sources` and `src/theme`. Also run `npx tsc --noEmit` and `npm run lint` (warnings are
   tolerated; don't add new ones).
 - **On-device:** `android/app/src/androidTest` runs on a device or emulator
   against a `MockWebServer` (`mockwebserver3`). Today it covers the Cloudflare
