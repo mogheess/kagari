@@ -12,6 +12,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '0.7.1',
+    date: '2026-10-25',
+    highlights: [
+      'Titles with chapters from more than one scan group no longer read on into another copy of the same chapter. Reading continues with the group of the chapter you opened, or a downloaded copy.',
+      'Hide a scan group on a title: when its chapters come from more than one group, tap a group under Chapters to hide its chapters from the list, Resume, downloads and the reader. Kagari remembers it for that title.',
+      'With a title showing only downloaded chapters, the reader keeps to downloaded chapters as you read on.',
+    ],
+  },
+  {
     version: '0.7',
     date: '2026-10-24',
     highlights: [
