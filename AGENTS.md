@@ -117,8 +117,8 @@ classloader). So the host must *provide* that runtime. We vendor it under
   `uy.kohesive.injekt`.
 - `loader/`: `ExtensionLoader` (discovers/loads APKs, accepts lib versions
   `1.4` to `1.6`, reads `tachiyomix.contentWarning` before the legacy `nsfw`
-  flag, auto-trusts explicitly installed ones), `ChildFirstPathClassLoader`,
-  `SignatureTrust`.
+  flag, loads only trusted ones), `ChildFirstPathClassLoader`,
+  `SignatureTrust` (see *Extension trust*).
 - `storage/`: `StorageManager` (the user-picked SAF folder) and
   `DownloadNaming` (Mihon's folder layout). See *Downloads and storage*.
 - `backup/`: `MihonBackup` (import) and `MihonBackupExporter` (export).
@@ -202,6 +202,22 @@ optional external extension list). keiyoushi's `index.min.json` is now a
 tombstone of placeholder entries for old apps; reading `index.pb` first keeps
 it out of the UI (`repoClient.test.ts` guards this). Repo URLs themselves live
 natively in `RepoManager`.
+
+### Extension trust
+
+Extensions run arbitrary code in the app, so `ExtensionLoader` loads one only
+when its signing key is trusted (`SignatureTrust`):
+
+- **Repo-signed:** a repo the user added publishes its signing key
+  (`signingKeyFingerprint`). `src/sources/repoTrust.ts` syncs those keys to
+  native whenever the catalogue is fetched, and an extension signed with one
+  loads without a prompt.
+- **Trusted by hand:** anything else (an APK installed from a file, another
+  repo's build) shows as **Untrusted** on Extensions → Installed and loads
+  nothing until the user taps **Trust**, which records `pkg:signatureHash`
+  via `trustSignature`. A different signer for the same package needs it again.
+- **Upgrades:** builds before the check recorded every extension as trusted
+  when first seen, so extensions that already loaded keep loading.
 
 ### Downloads and storage
 
@@ -381,7 +397,8 @@ When you add a new persisted store, follow the favorites pattern (in-memory stat
     while the app is open; a true background job would need Android WorkManager.
 - **Extensions** (`ExtensionsScreen`): Browse (repo catalogue, language chips,
   search, install with per-package error + retry) and Installed (update badges,
-  **Update all**, uninstall). An installed extension no repo offers any more is
+  **Update all**, uninstall, **Trust** for extensions no repo signed; see
+  *Extension trust*). An installed extension no repo offers any more is
   flagged **Orphaned** (only once some repo has answered), since it won't get
   updates. Installed sources reach every screen through `sourcesStore.ts`
   without a restart.
@@ -582,9 +599,6 @@ With no extensions installed you'll see empty states. Install a repo + extension
   own client (and the HTTP/1.1 fallback builds from it), so sources that
   unscramble images in an interceptor (MangaFire, MANGA Plus) should work, but
   reading them end to end hasn't been checked.
-- **Trust prompt.** Explicitly installed extensions are **auto-trusted** on first
-  sight (`ExtensionLoader`); only an APK with no signature is held back.
-  `trustSignature` exists in the bridge but no screen uses it.
 - **Continuous reading in paged modes.** Crossing into the next chapter by
   scrolling works in webtoon mode; vertical/LTR/RTL still use the chapter
   buttons.
@@ -602,6 +616,7 @@ With no extensions installed you'll see empty states. Install a repo + extension
 - [x] Repo management (add/remove), `index.pb` with JSON fallback; APK
       install/uninstall (FileProvider + system installer), Update all, Orphaned
       state
+- [x] Extension trust: repo signing keys, **Trust** on the Installed tab
 - [x] Discover browse/search; grouped `SourcePickerSheet`
 - [x] Global search across pinned sources (per-source rails; `GlobalSourcesSheet`)
 - [x] Reading history (persisted) in a Updates | History segmented tab
@@ -638,7 +653,6 @@ With no extensions installed you'll see empty states. Install a repo + extension
 - [ ] Search filters wired (`FilterList` ⇄ `FilterDto`)
 - [ ] Background library updates (WorkManager + notifications); read chapters
       dropping off the Updates feed
-- [ ] Untrusted-extension trust prompt UI (auto-trust today)
 - [ ] Continuous chapter transitions in paged modes
 
 ---
