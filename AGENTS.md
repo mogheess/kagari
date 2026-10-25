@@ -328,8 +328,9 @@ When you add a new persisted store, follow the favorites pattern (in-memory stat
   more than one scan group, a row of group chips (name + count) under the
   header hides or shows each group, saved per title
   (`src/library/scanlatorFilters.ts`); hidden groups leave the list, Resume,
-  bulk download and the reader's order, but not migration. At least one group
-  stays shown. Read chapters are dimmed and a
+  bulk download, the reader's order and both new-chapter checks (the
+  closed-app worker reads the stored key), but not migration. At least one
+  group stays shown. Read chapters are dimmed and a
   half-read one shows its page. Long-press starts **multi-select** (a second
   long-press selects the range) with Read / Unread / Download; the download
   icon in the header queues All or Unread. A fast-scroll thumb sits on the
