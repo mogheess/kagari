@@ -63,6 +63,12 @@ import { FastScroller, type FastScrollerHandle } from '../components/FastScrolle
 import { BottomSheet } from '../components/BottomSheet';
 import type { RootStackParamList } from '../navigation/types';
 import { cleanScanlator } from '../utils/scanlator';
+import {
+  scanlatorGroups,
+  setHiddenScanlators,
+  useHiddenScanlators,
+  withoutHiddenScanlators,
+} from '../library/scanlatorFilters';
 import type { MangaDto, ChapterDto } from '../engine/types';
 
 function notify(message: string): void {
@@ -232,6 +238,14 @@ export function MangaDetailScreen() {
   const offlineOnly =
     !liveChapters && (!!chaptersError || sourceMissing) && downloadedHere.length > 0;
   const chapters = liveChapters ?? (offlineOnly ? downloadedHere : undefined);
+  // Groups hidden on this title leave every list below except migration,
+  // which carries the whole title over.
+  const hiddenGroups = useHiddenScanlators(params.sourceId, params.mangaUrl);
+  const groups = useMemo(() => scanlatorGroups(chapters ?? []), [chapters]);
+  const groupChapters = useMemo(
+    () => (chapters ? withoutHiddenScanlators(chapters, hiddenGroups) : undefined),
+    [chapters, hiddenGroups],
+  );
   const [downloadedOnly, setDownloadedOnly] = useState(false);
   const filterDownloaded = downloadedOnly && !offlineOnly && downloadedHere.length > 0;
 
@@ -241,9 +255,9 @@ export function MangaDetailScreen() {
   const filteredChapters = useMemo(
     () =>
       filterDownloaded
-        ? (chapters ?? []).filter(c => downloadedUrls.has(c.url))
-        : chapters ?? [],
-    [chapters, filterDownloaded, downloadedUrls],
+        ? (groupChapters ?? []).filter(c => downloadedUrls.has(c.url))
+        : groupChapters ?? [],
+    [groupChapters, filterDownloaded, downloadedUrls],
   );
   // The sort toggle flips the display only; resume always walks true reading
   // order.
@@ -252,17 +266,17 @@ export function MangaDetailScreen() {
     [filteredChapters, sortAsc],
   );
   const resume = useMemo(
-    () => pickResume(chapters ?? [], progressMap, params.sourceId),
-    [chapters, progressMap, params.sourceId],
+    () => pickResume(groupChapters ?? [], progressMap, params.sourceId),
+    [groupChapters, progressMap, params.sourceId],
   );
 
   /** Chapters with no read flag, in source (newest-first) order. */
   const unreadChapters = useMemo(
     () =>
-      (chapters ?? []).filter(
+      (groupChapters ?? []).filter(
         ch => !progressMap[chapterKey(params.sourceId, ch.url)]?.read,
       ),
-    [chapters, progressMap, params.sourceId],
+    [groupChapters, progressMap, params.sourceId],
   );
 
   const clearSelection = useCallback(() => {
@@ -319,7 +333,7 @@ export function MangaDetailScreen() {
     // openReader closes over navigation/manga, both stable enough for a tap,
     // and the chapter lists it hands the reader.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selecting, toggleSelect, manga, chapters, filteredChapters],
+    [selecting, toggleSelect, manga, groupChapters, filteredChapters],
   );
 
   const onChapterLongPress = useCallback(
@@ -407,6 +421,19 @@ export function MangaDetailScreen() {
     setMangaCategories(params.sourceId, params.mangaUrl, next);
   };
 
+  const toggleGroup = (name: string) => {
+    const isHidden = hiddenGroups.includes(name);
+    if (!isHidden && groups.every(g => g.name === name || hiddenGroups.includes(g.name))) {
+      notify('At least one group stays shown');
+      return;
+    }
+    setHiddenScanlators(
+      params.sourceId,
+      params.mangaUrl,
+      isHidden ? hiddenGroups.filter(g => g !== name) : [...hiddenGroups, name],
+    );
+  };
+
   const openReader = (chapter: ChapterDto, initialPage?: number) => {
     if (manga) recordRead(manga, chapter);
     navigation.navigate('Reader', {
@@ -419,7 +446,7 @@ export function MangaDetailScreen() {
       // through every chapter.
       chapters: filteredChapters.some(c => c.url === chapter.url)
         ? filteredChapters
-        : chapters ?? [chapter],
+        : groupChapters ?? [chapter],
       initialPage,
     });
   };
@@ -871,7 +898,7 @@ export function MangaDetailScreen() {
             <View style={styles.chaptersHeader}>
               <Text style={[theme.typography.heading, { color: theme.colors.text }]}>
                 Chapters
-                {chapters ? ` (${filterDownloaded ? displayedChapters.length : chapters.length})` : ''}
+                {chapters ? ` (${displayedChapters.length})` : ''}
               </Text>
               <View style={styles.chapterHeaderActions}>
                 {downloadedHere.length > 0 && !offlineOnly ? (
@@ -927,6 +954,49 @@ export function MangaDetailScreen() {
                 </Pressable>
               </View>
             </View>
+            {groups.length > 1 ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.groupRow}
+              >
+                {groups.map(group => {
+                  const shown = !hiddenGroups.includes(group.name);
+                  const label = group.name || 'No group';
+                  return (
+                    <Pressable
+                      key={group.name}
+                      onPress={() => toggleGroup(group.name)}
+                      hitSlop={4}
+                      accessibilityRole="checkbox"
+                      accessibilityState={{ checked: shown }}
+                      accessibilityLabel={`${label}, ${group.count} chapters`}
+                      accessibilityHint={shown ? 'Hides this group' : 'Shows this group'}
+                      style={[
+                        styles.downloadedChip,
+                        shown
+                          ? { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }
+                          : { borderColor: theme.colors.border },
+                      ]}
+                    >
+                      {shown ? (
+                        <Icon name="check" size={12} color={theme.colors.text} strokeWidth={2.6} />
+                      ) : null}
+                      <Text
+                        numberOfLines={1}
+                        style={[
+                          styles.downloadedChipText,
+                          { color: shown ? theme.colors.text : theme.colors.textMuted },
+                          !shown && styles.groupHiddenText,
+                        ]}
+                      >
+                        {`${label} \u00B7 ${group.count}`}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            ) : null}
           </View>
         }
         ListEmptyComponent={
@@ -980,11 +1050,11 @@ export function MangaDetailScreen() {
 
       <BulkDownloadSheet
         visible={bulkSheet}
-        totalCount={chapters?.length ?? 0}
+        totalCount={groupChapters?.length ?? 0}
         unreadCount={unreadChapters.length}
         onAll={() => {
           setBulkSheet(false);
-          queueDownloads(chapters ?? [], 'chapters');
+          queueDownloads(groupChapters ?? [], 'chapters');
         }}
         onUnread={() => {
           setBulkSheet(false);
@@ -1811,6 +1881,14 @@ const styles = StyleSheet.create({
   downloadedChipText: {
     fontSize: 12,
     fontWeight: '700',
+  },
+  groupRow: {
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+  },
+  groupHiddenText: {
+    textDecorationLine: 'line-through',
   },
   backBtn: {
     position: 'absolute',

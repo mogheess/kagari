@@ -271,6 +271,7 @@ Local state persists via `@react-native-async-storage/async-storage`, wrapped by
 - Others follow the same pattern: `history.ts`, `chapterProgress.ts` (per-chapter
   read flag + last page), `downloads.ts`, `libraryUpdates.ts`, `tierLists.ts`,
   `collections.ts` (library view), `recentlyAdded.ts`, `storageLocation.ts`,
+  `scanlatorFilters.ts` (hidden scan groups per title),
   `src/sources/` (`pinned`, `languageFilter`, `sourceHealth`), `src/reader/readerSettings.ts`,
   and the theme/appearance prefs in `ThemeProvider`. `src/engine/mangaCache.ts`
   is a persisted LRU of recent details + chapter lists so revisits open instantly.
@@ -323,7 +324,12 @@ When you add a new persisted store, follow the favorites pattern (in-memory stat
   title came from** with a **Migrate** action (`src/library/migrate.ts` — moves a
   title to another source and carries over history; prompts on a duplicate).
   **Resume** jumps to where you left off (`src/library/chapterProgress.ts`), and
-  chapters can be sorted **newest/oldest first**. Read chapters are dimmed and a
+  chapters can be sorted **newest/oldest first**. When the chapters come from
+  more than one scan group, a row of group chips (name + count) under the
+  header hides or shows each group, saved per title
+  (`src/library/scanlatorFilters.ts`); hidden groups leave the list, Resume,
+  bulk download and the reader's order, but not migration. At least one group
+  stays shown. Read chapters are dimmed and a
   half-read one shows its page. Long-press starts **multi-select** (a second
   long-press selects the range) with Read / Unread / Download; the download
   icon in the header queues All or Unread. A fast-scroll thumb sits on the
@@ -453,7 +459,8 @@ src/
   library/       favorites, categories, collections (library view), history,
                  chapterProgress (read flags + resume), libraryUpdates
                  (new-chapters scan/feed), backgroundUpdates (closed-app
-                 check settings), recentlyAdded, downloads (queue),
+                 check settings), scanlatorFilters (hidden scan groups),
+                 recentlyAdded, downloads (queue),
                  downloadQueue (queue grouping), downloadsLibrary (library
                  side of downloads),
                  storageLocation, collectionCovers, migrate (cross-source +
