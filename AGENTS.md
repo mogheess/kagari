@@ -338,7 +338,11 @@ When you add a new persisted store, follow the favorites pattern (in-memory stat
   (`src/reader/chapterWindow.ts`): neighbouring chapters are preloaded and
   flattened into one list, so scrolling past the end of a chapter runs straight
   into the next; at most `MAX_LOADED_CHAPTERS` (5) stay loaded around the
-  current one, and scrolling past a chapter marks it read. Downloaded chapters
+  current one, and scrolling past a chapter marks it read. The order keeps one
+  chapter per number (`skipDuplicateChapters`): titles with chapters from
+  several scan groups list a number more than once, so the reader keeps the
+  opened chapter, else its group's copy, else a downloaded one. MangaDetail
+  hands the reader only the chapters its filters leave. Downloaded chapters
   read from storage. An optional **keep screen on** toggle holds the display
   awake while reading. Pages
   load via the native `fetchImage` cache (queued, retried) and render tall
