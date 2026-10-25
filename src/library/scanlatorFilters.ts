@@ -3,7 +3,8 @@
  *
  * Some titles carry chapters from several groups, so each number is listed
  * more than once. Hiding a group takes its chapters out of the title page,
- * Resume, bulk downloads and the reader's chapter order. Keyed by
+ * Resume, bulk downloads, the reader's chapter order and new-chapter checks
+ * (the closed-app check reads this key from storage itself). Keyed by
  * `(sourceId, mangaUrl)` and persisted; reactive via useSyncExternalStore.
  */
 import { useSyncExternalStore } from 'react';
@@ -44,7 +45,12 @@ async function hydrate(): Promise<void> {
   emit();
   if (touchedBeforeHydrate.size > 0) store.save(hidden);
 }
-hydrate().catch(() => {});
+const ready = hydrate().catch(() => {});
+
+/** Resolves once stored filters have loaded, so a scan at launch sees them. */
+export function scanlatorFiltersReady(): Promise<void> {
+  return ready;
+}
 
 /** Hides exactly these groups on a title; an empty list shows them all. */
 export function setHiddenScanlators(
@@ -72,6 +78,11 @@ function subscribe(cb: () => void): () => void {
 }
 
 const getSnapshot = () => hidden;
+
+/** Non-reactive lookup, for the library update scan. */
+export function getHiddenScanlators(sourceId: string, mangaUrl: string): readonly string[] {
+  return hidden[keyOf(sourceId, mangaUrl)] ?? NONE;
+}
 
 /** The groups hidden on a title (cleaned names, as `scanlatorOf` gives them). */
 export function useHiddenScanlators(sourceId: string, mangaUrl: string): readonly string[] {

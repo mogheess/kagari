@@ -18,6 +18,11 @@ import { useSyncExternalStore } from 'react';
 import { makePersistence } from '../store/persist';
 import { getFavorites, subscribeFavorites, favoritesHydrated } from './favorites';
 import { takeRecentlyAdded } from './recentlyAdded';
+import {
+  getHiddenScanlators,
+  scanlatorFiltersReady,
+  withoutHiddenScanlators,
+} from './scanlatorFilters';
 import type { ChapterDto, Engine, MangaDto, MangaStatus } from '../engine/types';
 
 export interface LibraryUpdate {
@@ -196,6 +201,7 @@ export async function checkLibraryUpdates(engine: Engine, opts?: { force?: boole
 
   checking = true;
   emit();
+  await scanlatorFiltersReady();
 
   const found: LibraryUpdate[] = [];
   let snapChanged = false;
@@ -254,8 +260,12 @@ export async function checkLibraryUpdates(engine: Engine, opts?: { force?: boole
       // silently so the backlog doesn't flood the feed.
       if (!prev) continue;
 
+      // Counted from what the title page shows: chapters from a group hidden
+      // on this title aren't new to the reader. The snapshot above keeps
+      // every chapter, so showing the group again later doesn't flood.
       const known = new Set(prev);
-      const newChapters = chapters!.filter(c => !known.has(c.url));
+      const shown = withoutHiddenScanlators(chapters!, getHiddenScanlators(f.sourceId, f.url));
+      const newChapters = shown.filter(c => !known.has(c.url));
       if (newChapters.length === 0) continue;
 
       const newest = newChapters.slice().sort(byNewest)[0];
