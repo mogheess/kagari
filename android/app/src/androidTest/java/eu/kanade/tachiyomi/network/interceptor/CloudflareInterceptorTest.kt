@@ -4,7 +4,7 @@ import android.webkit.CookieManager
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.manhwa.MainActivity
+import com.manhwa.testing.BlankActivity
 import eu.kanade.tachiyomi.network.AndroidCookieJar
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
@@ -34,7 +34,7 @@ import java.util.concurrent.TimeUnit
 class CloudflareInterceptorTest {
 
     private lateinit var server: MockWebServer
-    private lateinit var scenario: ActivityScenario<MainActivity>
+    private lateinit var scenario: ActivityScenario<BlankActivity>
     private lateinit var client: OkHttpClient
     private val cookieJar = AndroidCookieJar()
 
@@ -43,7 +43,7 @@ class CloudflareInterceptorTest {
     @Before
     fun setUp() {
         // The interceptor attaches its WebView to the live Activity window.
-        scenario = ActivityScenario.launch(MainActivity::class.java)
+        scenario = ActivityScenario.launch(BlankActivity::class.java)
         scenario.onActivity { WebViewActivityHolder.set(it) }
         CookieManager.getInstance().removeAllCookies(null)
         CookieManager.getInstance().flush()

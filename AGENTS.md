@@ -487,6 +487,7 @@ android/app/src/main/java/
                          BackgroundUpdates (schedule, inbox, notification),
                          AsyncStorageReader
 android/app/src/androidTest/   On-device tests (see Testing)
+android/app/src/debug/         Debug-only test host (BlankActivity)
 patches/                       patch-package patches (react-native-screens)
 ```
 
@@ -598,6 +599,11 @@ With no extensions installed you'll see empty states. Install a repo + extension
   cd android && ./gradlew :app:connectedDebugAndroidTest -PreactNativeArchitectures=arm64-v8a
   ```
   Results land in `android/app/build/outputs/androidTest-results/connected/`.
+  A test that needs a live Activity window launches `BlankActivity`
+  (`android/app/src/debug/`), never `MainActivity`: that starts React Native,
+  which without Metro fails to load the JS bundle and crashes the run. It lives
+  in the debug source set because an androidTest manifest's activities run in
+  the test APK's own process.
 
 ---
 
