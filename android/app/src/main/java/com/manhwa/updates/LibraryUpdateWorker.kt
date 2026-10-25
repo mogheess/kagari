@@ -47,6 +47,9 @@ class LibraryUpdateWorker(context: Context, params: WorkerParameters) :
         val snapshots = storage.read(SNAPSHOTS_KEY)
             ?.let { runCatching { json.decodeFromString<Map<String, List<String>>>(it) }.getOrNull() }
             .orEmpty()
+        val hiddenGroups = storage.read(HIDDEN_SCANLATORS_KEY)
+            ?.let { runCatching { json.decodeFromString<Map<String, List<String>>>(it) }.getOrNull() }
+            .orEmpty()
         val inbox = BackgroundUpdates.readInbox(context)
 
         val facade = EngineFacade.get(context)
@@ -58,7 +61,7 @@ class LibraryUpdateWorker(context: Context, params: WorkerParameters) :
                 .filter { it.sourceId in installed }
                 .map { fav ->
                     async {
-                        gate.withPermit { check(facade, fav, snapshots, inbox) }
+                        gate.withPermit { check(facade, fav, snapshots, hiddenGroups, inbox) }
                     }
                 }
                 .awaitAll()
@@ -79,6 +82,7 @@ class LibraryUpdateWorker(context: Context, params: WorkerParameters) :
         facade: EngineFacade,
         fav: Favorite,
         snapshots: Map<String, List<String>>,
+        hiddenGroups: Map<String, List<String>>,
         inbox: BackgroundInbox,
     ): Pair<InboxUpdate, Pair<String, List<String>>>? {
         val key = "${fav.sourceId}\u0000${fav.url}"
@@ -92,7 +96,15 @@ class LibraryUpdateWorker(context: Context, params: WorkerParameters) :
         }
         if (chapters.isEmpty()) return null
         val known = previous.toHashSet().apply { addAll(inbox.snapshots[key].orEmpty()) }
-        val fresh = chapters.filter { it.url !in known }
+        // As on the title page: chapters from a group hidden on this title
+        // don't count, unless hiding them would leave nothing.
+        val hidden = hiddenGroups[key].orEmpty().toHashSet()
+        val shown = if (hidden.isEmpty()) {
+            chapters
+        } else {
+            chapters.filter { scanlatorOf(it) !in hidden }.ifEmpty { chapters }
+        }
+        val fresh = shown.filter { it.url !in known }
         if (fresh.isEmpty()) return null
         val newest = fresh.sortedWith(NEWEST_FIRST).first()
         val update = InboxUpdate(
@@ -112,6 +124,13 @@ class LibraryUpdateWorker(context: Context, params: WorkerParameters) :
         const val TAG = "LibraryUpdateWorker"
         const val FAVORITES_KEY = "@kagari/favorites/v1"
         const val SNAPSHOTS_KEY = "@kagari/librarySnapshots/v1"
+        /** `src/library/scanlatorFilters.ts`: hidden scan groups per title. */
+        const val HIDDEN_SCANLATORS_KEY = "@kagari/hidden-scanlators/v1"
+        private val ZERO_WIDTH = Regex("[\u200B-\u200D\uFEFF]")
+
+        /** A chapter's group as the app compares it (`src/utils/scanlator.ts`). */
+        fun scanlatorOf(chapter: ChapterDto): String =
+            chapter.scanlator.orEmpty().replace(ZERO_WIDTH, "").trim()
         /** Same as the in-app scan: gentle on sources. */
         const val SCAN_CONCURRENCY = 3
 
