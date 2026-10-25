@@ -6,8 +6,8 @@
  * via GitHub Releases, so the update check compares the current version against
  * the latest published release tag.
  */
-export const APP_VERSION = '0.7';
-export const APP_VERSION_CODE = 8;
+export const APP_VERSION = '0.7.1';
+export const APP_VERSION_CODE = 9;
 
 export const GITHUB_OWNER = 'mogheess';
 export const GITHUB_REPO = 'kagari';
