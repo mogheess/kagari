@@ -316,9 +316,10 @@ export function MangaDetailScreen() {
       if (selecting) toggleSelect(ch.url);
       else openReader(ch);
     },
-    // openReader closes over navigation/manga, both stable enough for a tap.
+    // openReader closes over navigation/manga, both stable enough for a tap,
+    // and the chapter lists it hands the reader.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selecting, toggleSelect, manga, chapters],
+    [selecting, toggleSelect, manga, chapters, filteredChapters],
   );
 
   const onChapterLongPress = useCallback(
