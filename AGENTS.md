@@ -300,6 +300,10 @@ When you add a new persisted store, follow the favorites pattern (in-memory stat
     extension with language + NSFW tags, filtered by the enabled languages in
     `languageFilter.ts`), debounced search, a **Popular | Latest** toggle (Latest
     hidden when the source can't), infinite scroll, typed error/empty states.
+    A **Filters** button appears when the source declares filters
+    (`FilterSheet`; edits stay a draft until Apply). Native writes the edited
+    state onto a fresh `getFilterList()` position by position, keeping a
+    position only when its type and name still match (`FilterSerializer`).
     The chosen source + browse mode persist; Home's "See all" opens a source
     here via `discoverIntent.ts`. Default-source picking skips sources that
     recently failed (`sourceHealth.ts`).
@@ -393,8 +397,17 @@ When you add a new persisted store, follow the favorites pattern (in-memory stat
   - **Library new chapters** (`src/library/libraryUpdates.ts`): scans each
     favorite via `engine.getChapters`, diffs against a persisted per-manga url
     snapshot, and records new chapters into the Updates feed; 6h TTL, concurrency
-    3, best-effort (a not-installed/offline source is skipped). In-app only — runs
-    while the app is open; a true background job would need Android WorkManager.
+    3, best-effort (a not-installed/offline source is skipped).
+  - **Closed-app checks** (`src/library/backgroundUpdates.ts` ⇄ native
+    `com/manhwa/updates/`): a WorkManager job (`LibraryUpdateWorker`) runs the
+    same diff while the app is closed, reading the library and snapshots
+    straight from AsyncStorage (`AsyncStorageReader`). Daily by default; Off,
+    6 h, 12 h, Wi-Fi only and charging only are in Profile, and it never runs
+    on low battery. The settings are pushed to native on launch and on each
+    change. Finds go to a native inbox and a notification that opens the
+    Updates tab (`kagari://updates`); `mergeBackgroundUpdates` folds the inbox
+    into the feed and snapshots when the app next runs. Notification
+    permission: `src/app/notificationPermission.ts`.
 - **Extensions** (`ExtensionsScreen`): Browse (repo catalogue, language chips,
   search, install with per-package error + retry) and Installed (update badges,
   **Update all**, uninstall, **Trust** for extensions no repo signed; see
@@ -435,7 +448,8 @@ src/
   hooks/         useAsync, usePagedCatalog (infinite scroll)
   library/       favorites, categories, collections (library view), history,
                  chapterProgress (read flags + resume), libraryUpdates
-                 (new-chapters scan/feed), recentlyAdded, downloads (queue),
+                 (new-chapters scan/feed), backgroundUpdates (closed-app
+                 check settings), recentlyAdded, downloads (queue),
                  downloadQueue (queue grouping), downloadsLibrary (library
                  side of downloads),
                  storageLocation, collectionCovers, migrate (cross-source +
@@ -468,7 +482,10 @@ android/app/src/main/java/
                          util/ (Apache 2.0)
   com/manhwa/engine/     loader/, repo/, bridge/, dto/, storage/, backup/,
                          web/ (SourceWebViewActivity), EngineFacade, Mappers,
-                         EngineInjektModule
+                         FilterSerializer, EngineInjektModule
+  com/manhwa/updates/    LibraryUpdateWorker (closed-app new-chapters check),
+                         BackgroundUpdates (schedule, inbox, notification),
+                         AsyncStorageReader
 android/app/src/androidTest/   On-device tests (see Testing)
 patches/                       patch-package patches (react-native-screens)
 ```
@@ -586,15 +603,9 @@ With no extensions installed you'll see empty states. Install a repo + extension
 
 ## Known gaps / next up
 
-- **Search filters are declared but unused.** TS has the full `FilterDto` schema,
-  but native `getFilters` returns `[]` and `search(...)` ignores `filtersJson`
-  (`ManhwaEngineModule.kt`). Wire `FilterList` ⇄ `FilterDto` (de)serialization so
-  sources with genre/sort/status filters work.
-- **Background library updates.** The in-app new-chapters scan exists
-  (`libraryUpdates.ts`, wired into `UpdateBootstrap` and pull-to-refresh). Still
-  missing: running it **while the app is closed** (Android **WorkManager**) with
-  **new-chapter notifications**, and dropping read chapters off the Updates
-  feed. *Don't reintroduce faked update data.*
+- **Read chapters stay on the Updates feed.** New-chapter entries are only
+  removed by dismiss or clear-all, not by reading them. *Don't reintroduce
+  faked update data.*
 - **Per-source descramble interceptors.** `fetchImage` goes through the source's
   own client (and the HTTP/1.1 fallback builds from it), so sources that
   unscramble images in an interceptor (MangaFire, MANGA Plus) should work, but
@@ -650,9 +661,9 @@ With no extensions installed you'll see empty states. Install a repo + extension
 - [x] Theming: Ink / Paper looks, light/dark/system, pure black, density, corners
 - [x] On-device Cloudflare interceptor tests
 - [x] Kotlin 2.4 toolchain; stdlib, kotlinx and OkHttp at keiyoushi's versions
-- [ ] Search filters wired (`FilterList` ⇄ `FilterDto`)
-- [ ] Background library updates (WorkManager + notifications); read chapters
-      dropping off the Updates feed
+- [x] Search filters (`FilterList` ⇄ `FilterDto`, `FilterSheet`)
+- [x] Closed-app library updates (WorkManager) with new-chapter notifications
+- [ ] Read chapters dropping off the Updates feed
 - [ ] Continuous chapter transitions in paged modes
 
 ---
