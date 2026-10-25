@@ -12,6 +12,7 @@
  * into each other with nothing in between.
  */
 import type { ChapterDto, PageDto } from '../engine/types';
+import { scanlatorOf } from '../utils/scanlator';
 
 /** A chapter whose pages have been resolved and can be rendered. */
 export interface LoadedChapter {
@@ -61,6 +62,34 @@ export function toReadingOrder(list: readonly ChapterDto[]): ChapterDto[] {
     .map((c, i) => ({ c, i }))
     .sort((a, b) => a.c.chapterNumber - b.c.chapterNumber || a.i - b.i)
     .map(x => x.c);
+}
+
+/**
+ * One chapter per number, for titles that list some chapters more than once.
+ *
+ * With chapters from several scan groups ("Ch. 20 · official",
+ * "Ch. 20 · unofficial"), plain number order runs from one copy of a chapter
+ * into the other, or on into the next number from whichever group sorted
+ * first. So each number keeps one chapter: the one being opened, else one from
+ * its group, else a downloaded one, else the first in `ordered`.
+ *
+ * Chapters without a number are all kept; there's nothing to match them on.
+ */
+export function skipDuplicateChapters(
+  ordered: readonly ChapterDto[],
+  opened: ChapterDto,
+  isDownloaded: (chapter: ChapterDto) => boolean = () => false,
+): ChapterDto[] {
+  const group = scanlatorOf(opened);
+  const score = (c: ChapterDto) =>
+    (c.url === opened.url ? 4 : 0) + (scanlatorOf(c) === group ? 2 : 0) + (isDownloaded(c) ? 1 : 0);
+  const kept = new Map<number, ChapterDto>();
+  for (const c of ordered) {
+    if (c.chapterNumber < 0) continue;
+    const current = kept.get(c.chapterNumber);
+    if (!current || score(c) > score(current)) kept.set(c.chapterNumber, c);
+  }
+  return ordered.filter(c => c.chapterNumber < 0 || kept.get(c.chapterNumber) === c);
 }
 
 /** Neighbour lookup over the reading-ordered chapter list. */

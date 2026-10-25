@@ -4,6 +4,7 @@ import {
   insertChapter,
   MAX_LOADED_CHAPTERS,
   neighboursOf,
+  skipDuplicateChapters,
   toReadingOrder,
   type LoadedChapter,
 } from '../chapterWindow';
@@ -38,6 +39,74 @@ describe('toReadingOrder', () => {
     // Sources list newest-first; without numbers, reading order is the reverse.
     const ordered = toReadingOrder([chapter(3, -1), chapter(2, -1), chapter(1, -1)]);
     expect(ordered.map(c => c.name)).toEqual(['Chapter 1', 'Chapter 2', 'Chapter 3']);
+  });
+});
+
+/** A chapter from one scan group; the url tells copies of a number apart. */
+function scanned(chapterNumber: number, scanlator: string): ChapterDto {
+  return {
+    ...chapter(chapterNumber),
+    url: `/m/${scanlator}/ch-${chapterNumber}`,
+    name: `Ch. ${chapterNumber}`,
+    scanlator,
+  };
+}
+
+describe('skipDuplicateChapters', () => {
+  const urls = (list: ChapterDto[]) => list.map(c => c.url);
+  // Newest first, as sources list them, with two groups.
+  const listed = [
+    scanned(21, 'official'),
+    scanned(21, 'unofficial'),
+    scanned(20.5, 'unofficial'),
+    scanned(20, 'official'),
+    scanned(20, 'unofficial'),
+    scanned(19, 'official'),
+    scanned(19, 'unofficial'),
+  ];
+
+  test("reads on through the opened chapter's group", () => {
+    const opened = scanned(20, 'official');
+    const ordered = skipDuplicateChapters(toReadingOrder(listed), opened);
+    expect(urls(ordered)).toEqual([
+      '/m/official/ch-19',
+      '/m/official/ch-20',
+      '/m/unofficial/ch-20.5',
+      '/m/official/ch-21',
+    ]);
+    expect(neighboursOf(ordered, opened.url).next?.url).toBe('/m/unofficial/ch-20.5');
+  });
+
+  test('keeps the opened chapter even when another copy is downloaded', () => {
+    const opened = scanned(20, 'unofficial');
+    const downloaded = (c: ChapterDto) => c.url === '/m/official/ch-20';
+    const ordered = skipDuplicateChapters(toReadingOrder(listed), opened, downloaded);
+    expect(urls(ordered)).toContain('/m/unofficial/ch-20');
+    expect(urls(ordered)).not.toContain('/m/official/ch-20');
+  });
+
+  test("prefers a downloaded copy when the group has none", () => {
+    const list = [scanned(2, 'b'), scanned(2, 'c'), scanned(1, 'a')];
+    const downloaded = (c: ChapterDto) => c.url === '/m/c/ch-2';
+    const ordered = skipDuplicateChapters(toReadingOrder(list), scanned(1, 'a'), downloaded);
+    expect(urls(ordered)).toEqual(['/m/a/ch-1', '/m/c/ch-2']);
+  });
+
+  test('otherwise keeps the first copy the source listed', () => {
+    const list = [scanned(2, 'b'), scanned(2, 'c'), scanned(1, 'a')];
+    const ordered = skipDuplicateChapters(toReadingOrder(list), scanned(1, 'a'));
+    expect(urls(ordered)).toEqual(['/m/a/ch-1', '/m/b/ch-2']);
+  });
+
+  test('treats blank and zero-width group names as no group', () => {
+    const list = [scanned(2, '\u200B'), scanned(2, 'x'), scanned(1, ' ')];
+    const ordered = skipDuplicateChapters(toReadingOrder(list), list[2]);
+    expect(ordered.map(c => c.scanlator)).toEqual([' ', '\u200B']);
+  });
+
+  test('keeps every chapter without a number', () => {
+    const list = [chapter(3, -1), chapter(2, -1), chapter(1, -1)];
+    expect(skipDuplicateChapters(toReadingOrder(list), list[2])).toHaveLength(3);
   });
 });
 

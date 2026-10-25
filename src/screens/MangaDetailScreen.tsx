@@ -62,6 +62,7 @@ import { offerToAddToLibrary } from '../library/downloadsLibrary';
 import { FastScroller, type FastScrollerHandle } from '../components/FastScroller';
 import { BottomSheet } from '../components/BottomSheet';
 import type { RootStackParamList } from '../navigation/types';
+import { cleanScanlator } from '../utils/scanlator';
 import type { MangaDto, ChapterDto } from '../engine/types';
 
 function notify(message: string): void {
@@ -234,14 +235,22 @@ export function MangaDetailScreen() {
   const [downloadedOnly, setDownloadedOnly] = useState(false);
   const filterDownloaded = downloadedOnly && !offlineOnly && downloadedHere.length > 0;
 
-  // Chapters come from the source newest-first; sort toggle flips the display
-  // only — resume always walks true reading order.
-  const displayedChapters = useMemo(() => {
-    const list = filterDownloaded
-      ? (chapters ?? []).filter(c => downloadedUrls.has(c.url))
-      : chapters ?? [];
-    return sortAsc ? [...list].reverse() : list;
-  }, [chapters, sortAsc, filterDownloaded, downloadedUrls]);
+  // The chapters the filters leave, in source (newest-first) order. The
+  // reader reads on through these, so a Downloaded filter doesn't continue
+  // into a chapter that isn't downloaded.
+  const filteredChapters = useMemo(
+    () =>
+      filterDownloaded
+        ? (chapters ?? []).filter(c => downloadedUrls.has(c.url))
+        : chapters ?? [],
+    [chapters, filterDownloaded, downloadedUrls],
+  );
+  // The sort toggle flips the display only; resume always walks true reading
+  // order.
+  const displayedChapters = useMemo(
+    () => (sortAsc ? [...filteredChapters].reverse() : filteredChapters),
+    [filteredChapters, sortAsc],
+  );
   const resume = useMemo(
     () => pickResume(chapters ?? [], progressMap, params.sourceId),
     [chapters, progressMap, params.sourceId],
@@ -405,7 +414,11 @@ export function MangaDetailScreen() {
       mangaTitle: manga?.title,
       mangaThumbnailUrl: manga?.thumbnailUrl,
       chapter,
-      chapters: chapters ?? [chapter],
+      // Resume can pick a chapter the filters hide; that one reads on
+      // through every chapter.
+      chapters: filteredChapters.some(c => c.url === chapter.url)
+        ? filteredChapters
+        : chapters ?? [chapter],
       initialPage,
     });
   };
@@ -1618,11 +1631,6 @@ function ChaptersNotice({
 
 /** Per-chapter download control: download / progress / done / retry. */
 const chapterRowKey = (ch: ChapterDto, i: number) => `${ch.url}:${i}`;
-
-/** Some sources fill scanlator with only whitespace or zero-width spaces. */
-function cleanScanlator(name: string | undefined): string {
-  return (name ?? '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
-}
 
 const ChapterRow = React.memo(function ChapterRow({
   chapter: ch,

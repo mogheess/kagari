@@ -38,6 +38,7 @@ import {
   insertChapter,
   MAX_LOADED_CHAPTERS,
   neighboursOf,
+  skipDuplicateChapters,
   toReadingOrder,
   type LoadedChapter,
   type ReaderItem,
@@ -235,8 +236,19 @@ export function ReaderScreen() {
   }, [toggles.keepScreenOn, engine]);
 
   // Reading order for the whole series, so the window knows what sits either
-  // side of the chapter being read.
-  const orderedChapters = useMemo(() => toReadingOrder(params.chapters ?? []), [params.chapters]);
+  // side of the chapter being read. One chapter per number, matched to the
+  // opened chapter's group (see skipDuplicateChapters). Route params never
+  // change, so this is worked out once, and a chapter in the loaded window
+  // stays in it.
+  const orderedChapters = useMemo(
+    () =>
+      skipDuplicateChapters(
+        toReadingOrder(params.chapters ?? [params.chapter]),
+        params.chapter,
+        c => getDownloadEntry(params.sourceId, c.url)?.status === 'done',
+      ),
+    [params.chapters, params.chapter, params.sourceId],
+  );
 
   // The loaded window. Several chapters are kept resolved at once and flattened
   // into one list, so reading across a boundary is plain scrolling rather than
