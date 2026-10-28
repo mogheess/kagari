@@ -37,15 +37,30 @@ export function baseLanguage(code: string): string {
   return code.toLowerCase().split(/[-_]/)[0];
 }
 
-/** Base languages in preference order. */
-export function preferredLanguages(device: readonly string[], enabled: readonly string[]): string[] {
-  return [...new Set([...device.map(baseLanguage), 'en', ...enabled.map(baseLanguage)].filter(Boolean))];
+/**
+ * The codes a language tag answers to, most specific first:
+ * `zh-Hant-TW` → `zh-hant-tw`, `zh-hant`, `zh-tw`, `zh`. A source coded with
+ * the phone's own script or region (`zh-hant`, `pt-br`) then ranks ahead of
+ * the language's other variants.
+ */
+export function languageKeys(tag: string): string[] {
+  const [base, ...rest] = tag.toLowerCase().split(/[-_]/).filter(Boolean);
+  if (!base) return [];
+  const full = [base, ...rest].join('-');
+  return [...new Set([full, ...rest.map(sub => `${base}-${sub}`), base])];
 }
 
-/** Position in `preferred`, or after all of them. */
+/** Language codes in preference order: specific ones, then their base. */
+export function preferredLanguages(device: readonly string[], enabled: readonly string[]): string[] {
+  return [...new Set([...device.flatMap(languageKeys), 'en', ...enabled.flatMap(languageKeys)])];
+}
+
+/** Position in `preferred` (the exact code, else its base), or after all of them. */
 export function languageRank(code: string, preferred: readonly string[]): number {
-  const i = preferred.indexOf(baseLanguage(code));
-  return i < 0 ? preferred.length : i;
+  const exact = preferred.indexOf(code.toLowerCase());
+  if (exact >= 0) return exact;
+  const base = preferred.indexOf(baseLanguage(code));
+  return base < 0 ? preferred.length : base;
 }
 
 /**

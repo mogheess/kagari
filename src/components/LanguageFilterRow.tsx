@@ -3,7 +3,7 @@ import { ScrollView, Pressable, Text, StyleSheet } from 'react-native';
 import { useTheme } from '../theme/ThemeProvider';
 import { compareLanguages, langLabel } from '../utils/lang';
 import { useEnabledLanguages, toggleLanguage, clearLanguages } from '../sources/languageFilter';
-import { usePreferredLanguages } from '../sources/languageOrder';
+import { usePhoneLanguages } from '../sources/languageOrder';
 import type { SourceDto } from '../engine/types';
 
 /**
@@ -14,7 +14,8 @@ import type { SourceDto } from '../engine/types';
 export function LanguageFilterRow({ sources }: { sources: SourceDto[] }) {
   const theme = useTheme();
   const enabled = useEnabledLanguages();
-  const preferred = usePreferredLanguages();
+  // Not the enabled ones: a chip would jump away from the finger when tapped.
+  const preferred = usePhoneLanguages();
 
   const langs = useMemo(() => {
     const set = new Set(sources.map(s => s.lang).filter(Boolean));

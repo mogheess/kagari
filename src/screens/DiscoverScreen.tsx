@@ -116,9 +116,9 @@ export function DiscoverScreen() {
     const unhealthy = unhealthyIds(health);
     const current = sources.find(s => s.id === sourceId);
     if (current && !unhealthy.has(current.id)) return;
-    const def = pickDefaultSource(sources, { unhealthy });
+    const def = pickDefaultSource(sources, preferred, { unhealthy });
     if (def && def.id !== sourceId) setSourceId(def.id);
-  }, [restored, sources, health, sourceId]);
+  }, [restored, sources, health, sourceId, preferred]);
 
   // Persist the user's explicit source/browse choice (not the auto-picked default).
   useEffect(() => {

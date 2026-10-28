@@ -546,8 +546,11 @@ patches/                       patch-package patches (react-native-screens)
   is its own window on Android, outside the gesture root.
 - **Comments** explain *why*, not *what*. No narration comments.
 - **Language lists use `compareLanguages` / `languageRank`** (`utils/lang.ts`)
-  with `usePreferredLanguages()`: the phone's languages, then English, then
-  enabled ones, matched on base language. Don't hardcode English first.
+  with `usePreferredLanguages()`: the phone's languages (its own script or
+  region first, re-read on return to the foreground), then English, then
+  enabled ones. The language filter chips use `usePhoneLanguages()` instead, so
+  a chip doesn't jump away when tapped. `pickDefaultSource` and
+  `sortSourcesForPicker` take the same list. Don't hardcode English first.
 - **Empty states are required.** Zero-content screens render a friendly prompt
   that routes to **Extensions** (see `HomeScreen`/`DiscoverScreen`).
 

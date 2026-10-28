@@ -13,6 +13,7 @@ import { pickDefaultSource, sortSourcesForPicker } from '../utils/sourceSelect';
 import { useHistory, historyToManga } from '../library/history';
 import { useLibraryUpdates, updateToManga, type LibraryUpdate } from '../library/libraryUpdates';
 import { filterByLanguages, useEnabledLanguages } from '../sources/languageFilter';
+import { usePreferredLanguages } from '../sources/languageOrder';
 import { useSourceHealth, unhealthyIds, recordSourceResult } from '../sources/sourceHealth';
 import { requestDiscover } from '../sources/discoverIntent';
 import { useTabNav } from '../navigation/TabNav';
@@ -94,6 +95,7 @@ function resolveBlockSource(
   sources: SourceDto[],
   universalSourceId: string | undefined,
   unhealthy: Set<string>,
+  preferred: readonly string[],
 ): SourceDto | undefined {
   const wantsLatest = block.kind === 'latest';
   const ok = (s?: SourceDto) => !!s && (!wantsLatest || s.supportsLatest);
@@ -101,7 +103,7 @@ function resolveBlockSource(
   const universal = sources.find(s => s.id === universalSourceId);
   if (ok(override)) return override;
   if (ok(universal)) return universal;
-  const fallback = pickDefaultSource(sources, { needsLatest: wantsLatest, unhealthy });
+  const fallback = pickDefaultSource(sources, preferred, { needsLatest: wantsLatest, unhealthy });
   return ok(fallback) ? fallback : undefined;
 }
 
@@ -186,15 +188,16 @@ function PerSourceBlock({
   const { blocks, universalSourceId } = useHomeConfig();
   const health = useSourceHealth();
   const languages = useEnabledLanguages();
+  const preferred = usePreferredLanguages();
   const virtual = useMemo(() => {
     const unhealthy = unhealthyIds(health);
     const shown = new Set<string>();
     for (const b of blocks) {
       if (!b.enabled || (b.kind !== 'popular' && b.kind !== 'latest' && b.kind !== 'featured')) continue;
-      const s = resolveBlockSource(b, sources, universalSourceId, unhealthy);
+      const s = resolveBlockSource(b, sources, universalSourceId, unhealthy, preferred);
       if (s) shown.add(s.id);
     }
-    return sortSourcesForPicker(filterByLanguages(sources, languages))
+    return sortSourcesForPicker(filterByLanguages(sources, languages), preferred)
       .filter(s => !s.isNsfw && !shown.has(s.id))
       // Recently failing sources go last rather than leading the feed with errors.
       .sort((a, b) => Number(unhealthy.has(a.id)) - Number(unhealthy.has(b.id)))
@@ -206,7 +209,7 @@ function PerSourceBlock({
         sourceName: s.name,
         enabled: true,
       }));
-  }, [blocks, sources, universalSourceId, health, languages]);
+  }, [blocks, sources, universalSourceId, health, languages, preferred]);
   return (
     <>
       {virtual.map(b => (
@@ -238,12 +241,13 @@ function BrowseBlock({
   const { navigateTab } = useTabNav();
   const { universalSourceId } = useHomeConfig();
   const health = useSourceHealth();
+  const preferred = usePreferredLanguages();
   const favKeys = useFavoriteKeySet();
   const [retry, setRetry] = useState(0);
 
   const wantsLatest = block.kind === 'latest';
   const query = block.kind === 'search' ? block.query?.trim() ?? '' : '';
-  const source = resolveBlockSource(block, sources, universalSourceId, unhealthyIds(health));
+  const source = resolveBlockSource(block, sources, universalSourceId, unhealthyIds(health), preferred);
   const usable = !!source && (block.kind !== 'search' || query.length > 0);
   const sourceId = source?.id;
 

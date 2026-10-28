@@ -13,8 +13,9 @@
  * answers or on builds without it.
  */
 import { useMemo, useSyncExternalStore } from 'react';
+import { AppState } from 'react-native';
 import { getEngine } from '../engine';
-import { baseLanguage, preferredLanguages } from '../utils/lang';
+import { preferredLanguages } from '../utils/lang';
 import { useEnabledLanguages } from './languageFilter';
 
 function unique(codes: string[]): string[] {
@@ -29,18 +30,25 @@ function intlLanguages(): string[] {
   }
 }
 
-let device: string[] = intlLanguages().map(baseLanguage);
+let device: string[] = intlLanguages();
 const listeners = new Set<() => void>();
 
-getEngine()
-  .getDeviceLanguages()
-  .then(tags => {
-    const next = unique(tags.map(baseLanguage));
-    if (next.length === 0) return;
-    device = next;
-    for (const l of listeners) l();
-  })
-  .catch(() => {});
+function loadDeviceLanguages(): void {
+  getEngine()
+    .getDeviceLanguages()
+    .then(tags => {
+      const next = unique(tags);
+      if (next.length === 0 || next.join() === device.join()) return;
+      device = next;
+      for (const l of listeners) l();
+    })
+    .catch(() => {});
+}
+loadDeviceLanguages();
+// The JS side outlives the Activity a language change recreates.
+AppState.addEventListener('change', state => {
+  if (state === 'active') loadDeviceLanguages();
+});
 
 function subscribe(cb: () => void): () => void {
   listeners.add(cb);
@@ -51,9 +59,18 @@ function subscribe(cb: () => void): () => void {
 
 const getSnapshot = () => device;
 
-/** Base languages in the order lists should show them. */
+/** Language codes in the order lists should show them. */
 export function usePreferredLanguages(): string[] {
   const phone = useSyncExternalStore(subscribe, getSnapshot);
   const enabled = useEnabledLanguages();
   return useMemo(() => preferredLanguages(phone, enabled), [phone, enabled]);
+}
+
+/**
+ * The phone's languages and English, without the enabled ones: for the row of
+ * chips that toggles them, which would otherwise reorder under the finger.
+ */
+export function usePhoneLanguages(): string[] {
+  const phone = useSyncExternalStore(subscribe, getSnapshot);
+  return useMemo(() => preferredLanguages(phone, []), [phone]);
 }

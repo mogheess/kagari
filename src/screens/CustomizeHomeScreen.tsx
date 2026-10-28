@@ -80,7 +80,7 @@ export function CustomizeHomeScreen() {
   const pickerBlock = blocks.find(b => b.id === pickerFor);
   const universalSource = sources.find(s => s.id === universalSourceId);
   // What "Auto" actually resolves to, so the universal default isn't a mystery.
-  const autoDefault = sources.length ? pickDefaultSource(sources) : undefined;
+  const autoDefault = sources.length ? pickDefaultSource(sources, preferred) : undefined;
   const hasOverrides = blocks.some(b => b.sourceId);
 
   return (
