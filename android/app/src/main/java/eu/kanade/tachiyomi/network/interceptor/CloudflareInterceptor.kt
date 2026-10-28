@@ -205,7 +205,9 @@ class CloudflareInterceptor(
         // new one, and a flagged bot-management cookie (`__cf_bm`) fails every
         // attempt the same way until it's gone; that's the state clearing
         // cookies by hand got people out of. The site's own cookies (a login)
-        // stay.
+        // stay. A parent-domain copy is shared with sibling hosts, which then
+        // solve again too; one that just failed here is unlikely to be good
+        // there.
         cookieManager.removeMatching(request.url, ::isCloudflareCookie)
         // Only a clearance that wasn't there before counts as solved, in case
         // the store kept one anyway.

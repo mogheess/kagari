@@ -49,26 +49,36 @@ class AndroidCookieJar : CookieJar {
     }
 
     /**
-     * Expires every cookie visible to [url] whose name matches, wherever it was
-     * set. A cookie is only replaced by one with the same domain and path, and
-     * sites (Cloudflare among them) set theirs on `/`, often for the parent
-     * domain, so an expired copy written for the request's own path, as
-     * [remove] does, can leave them in place. Returns how many names matched.
+     * Expires every cookie visible to [url] whose name matches, on any path
+     * that covers it and for the host or a parent domain. A cookie is only
+     * replaced by one with the same domain and path, and sites (Cloudflare
+     * among them) set theirs on `/`, often for the parent domain, so an expired
+     * copy written for the request's own path, as [remove] does, can leave them
+     * in place. Returns how many names matched.
      */
     fun removeMatching(url: HttpUrl, matches: (String) -> Boolean): Int {
         val names = get(url).map { it.name }.filter(matches).distinct()
         if (names.isEmpty()) return 0
         val urlString = url.toString()
-        val domains = parentDomains(url.host)
+        val domains = listOf(null) + parentDomains(url.host)
+        val paths = coveringPaths(url)
         for (name in names) {
             manager.setCookie(urlString, "$name=; Max-Age=0")
-            manager.setCookie(urlString, "$name=; Max-Age=0; Path=/")
             for (domain in domains) {
-                manager.setCookie(urlString, "$name=; Max-Age=0; Path=/; Domain=$domain")
+                for (path in paths) {
+                    val scope = if (domain == null) "Path=$path" else "Path=$path; Domain=$domain"
+                    manager.setCookie(urlString, "$name=; Max-Age=0; $scope")
+                }
             }
         }
         manager.flush()
         return names.size
+    }
+
+    /** `/a/b/c` → `/`, `/a`, `/a/b`, `/a/b/c`: every path a cookie for it can be on. */
+    private fun coveringPaths(url: HttpUrl): List<String> {
+        val segments = url.pathSegments.filter { it.isNotEmpty() }
+        return listOf("/") + segments.indices.map { "/" + segments.take(it + 1).joinToString("/") }
     }
 
     fun removeAll() {

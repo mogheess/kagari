@@ -138,24 +138,29 @@ class CloudflareInterceptorTest {
             setCookie(root, "session=keep; Path=/")
             flush()
         }
+        // Cloudflare hands back the same value. The solve only sees it arrive
+        // if the stale copy really went; otherwise it waits out its timeout.
         val page = """
             <html><body><script>
-              setTimeout(function () { document.cookie = "cf_clearance=fresh; path=/"; }, 500);
+              setTimeout(function () { document.cookie = "cf_clearance=stale; path=/"; }, 500);
             </script></body></html>
         """.trimIndent()
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val cookie = request.headers["Cookie"].orEmpty()
-                val cleared = "cf_clearance=fresh" in cookie && "__cf_bm=flagged" !in cookie
+                val cleared = "cf_clearance=stale" in cookie && "__cf_bm=flagged" !in cookie
                 return if (cleared) MockResponse.Builder().code(200).body(cookie).build() else challenge(page)
             }
         }
 
         // A deep path: expiring cookies for the request's own path missed these.
+        val started = System.nanoTime()
         val response = client.newCall(api("/api/manga/1/chapters")).execute()
+        val elapsed = TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - started)
         assertEquals(200, response.code)
         assertTrue("the login cookie should survive", "session=keep" in response.body.string())
         response.close()
+        assertTrue("solved in ${elapsed}s; a missed delete waits out the 20 s timeout", elapsed < 10)
     }
 
     @Test
