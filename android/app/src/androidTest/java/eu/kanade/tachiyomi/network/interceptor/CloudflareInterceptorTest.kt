@@ -29,6 +29,7 @@ import java.util.concurrent.TimeUnit
  *  - a challenge page that turns interactive → give up at once, distinct error
  *  - a challenge page that hands out `cf_clearance` → retry succeeds
  *  - a plain 403 with no challenge header → no WebView work, plain error
+ *  - stale Cloudflare cookies set for the whole site → cleared, solved afresh
  */
 @RunWith(AndroidJUnit4::class)
 class CloudflareInterceptorTest {
@@ -122,6 +123,38 @@ class CloudflareInterceptorTest {
         val response = client.newCall(api("/api/list")).execute()
         assertEquals(200, response.code)
         assertEquals("ok", response.body.string())
+        response.close()
+    }
+
+    @Test
+    fun staleCloudflareCookiesAreClearedBeforeSolving() {
+        // Left from an earlier session and set for the whole site: a clearance
+        // Cloudflare no longer accepts and a flagged bot-management cookie,
+        // plus a login cookie that has to survive.
+        val root = server.url("/").toString()
+        CookieManager.getInstance().apply {
+            setCookie(root, "cf_clearance=stale; Path=/")
+            setCookie(root, "__cf_bm=flagged; Path=/")
+            setCookie(root, "session=keep; Path=/")
+            flush()
+        }
+        val page = """
+            <html><body><script>
+              setTimeout(function () { document.cookie = "cf_clearance=fresh; path=/"; }, 500);
+            </script></body></html>
+        """.trimIndent()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val cookie = request.headers["Cookie"].orEmpty()
+                val cleared = "cf_clearance=fresh" in cookie && "__cf_bm=flagged" !in cookie
+                return if (cleared) MockResponse.Builder().code(200).body(cookie).build() else challenge(page)
+            }
+        }
+
+        // A deep path: expiring cookies for the request's own path missed these.
+        val response = client.newCall(api("/api/manga/1/chapters")).execute()
+        assertEquals(200, response.code)
+        assertTrue("the login cookie should survive", "session=keep" in response.body.string())
         response.close()
     }
 

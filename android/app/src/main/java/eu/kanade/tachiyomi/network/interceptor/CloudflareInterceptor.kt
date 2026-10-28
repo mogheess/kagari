@@ -141,8 +141,14 @@ class CloudflareInterceptor(
             interactive = true,
         )
 
-    private fun hasClearance(url: HttpUrl): Boolean =
-        cookieManager.get(url).any { it.name == "cf_clearance" }
+    private fun hasClearance(url: HttpUrl): Boolean = clearanceOf(url) != null
+
+    private fun clearanceOf(url: HttpUrl): String? =
+        cookieManager.get(url).firstOrNull { it.name == "cf_clearance" }?.value
+
+    /** Cookies Cloudflare itself sets: clearance, challenge state, bot management. */
+    private fun isCloudflareCookie(name: String): Boolean =
+        name == "cf_clearance" || name.startsWith("cf_chl") || name.startsWith("__cf") || name == "_cfuvid"
 
     /**
      * What counts as "Cloudflare is challenging us", not merely "Cloudflare said no".
@@ -195,11 +201,18 @@ class CloudflareInterceptor(
             .toString()
         val cookieUrl = request.url
         val userAgent = request.header("User-Agent") ?: defaultUserAgentProvider()
-        // Drop any stale clearance so we detect the *appearance* of a fresh one.
-        cookieManager.remove(request.url, COOKIE_NAMES, 0)
+        // Start the host from a clean slate. An old clearance would pass for a
+        // new one, and a flagged bot-management cookie (`__cf_bm`) fails every
+        // attempt the same way until it's gone; that's the state clearing
+        // cookies by hand got people out of. The site's own cookies (a login)
+        // stay.
+        cookieManager.removeMatching(request.url, ::isCloudflareCookie)
+        // Only a clearance that wasn't there before counts as solved, in case
+        // the store kept one anyway.
+        val staleClearance = clearanceOf(cookieUrl)
         Log.i(TAG, "Solving Cloudflare clearance via $rootUrl")
 
-        fun isBypassed(): Boolean = cookieManager.get(cookieUrl).any { it.name == "cf_clearance" }
+        fun isBypassed(): Boolean = clearanceOf(cookieUrl).let { it != null && it != staleClearance }
         fun finish(result: SolveOutcome) {
             outcome = result
             latch.countDown()
@@ -426,7 +439,6 @@ class CloudflareInterceptor(
         private const val RECENT_SOLVE_MS = 15_000L
         private val ERROR_CODES = listOf(403, 503)
         private val SERVER_CHECK = listOf("cloudflare-nginx", "cloudflare")
-        private val COOKIE_NAMES = listOf("cf_clearance")
         private val IMAGE_EXTENSIONS = listOf(".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif")
 
         /** Mihon's floor; older Chromium is rejected by the challenge script itself. */
