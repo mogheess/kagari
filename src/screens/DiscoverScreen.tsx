@@ -35,6 +35,7 @@ import { langLabel } from '../utils/lang';
 import { needsHumanCheck } from '../engine/errors';
 import { useSources } from '../sources/sourcesStore';
 import { pickDefaultSource, sortSourcesForPicker } from '../utils/sourceSelect';
+import { usePreferredLanguages } from '../sources/languageOrder';
 import type { RootStackParamList } from '../navigation/types';
 import type { FilterDto, MangaDto, MangasPageDto, SourceDto } from '../engine/types';
 
@@ -79,7 +80,11 @@ export function DiscoverScreen() {
   const [fetching, setFetching] = useState(false);
 
   const allSources = useSources();
-  const sources = useMemo(() => sortSourcesForPicker(allSources), [allSources]);
+  const preferred = usePreferredLanguages();
+  const sources = useMemo(
+    () => sortSourcesForPicker(allSources, preferred),
+    [allSources, preferred],
+  );
   const pinned = usePinnedSources();
   const health = useSourceHealth();
   const userPicked = useRef(false);
@@ -111,9 +116,9 @@ export function DiscoverScreen() {
     const unhealthy = unhealthyIds(health);
     const current = sources.find(s => s.id === sourceId);
     if (current && !unhealthy.has(current.id)) return;
-    const def = pickDefaultSource(sources, { unhealthy });
+    const def = pickDefaultSource(sources, preferred, { unhealthy });
     if (def && def.id !== sourceId) setSourceId(def.id);
-  }, [restored, sources, health, sourceId]);
+  }, [restored, sources, health, sourceId, preferred]);
 
   // Persist the user's explicit source/browse choice (not the auto-picked default).
   useEffect(() => {

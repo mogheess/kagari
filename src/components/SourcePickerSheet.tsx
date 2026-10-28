@@ -11,9 +11,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeProvider';
 import { Icon } from './Icon';
 import { ExtensionIcon } from './ExtensionIcon';
-import { langLabel } from '../utils/lang';
+import { compareLanguages, langLabel } from '../utils/lang';
 import { LanguageFilterRow } from './LanguageFilterRow';
 import { useEnabledLanguages, filterByLanguages } from '../sources/languageFilter';
+import { usePreferredLanguages } from '../sources/languageOrder';
 import type { SourceDto } from '../engine/types';
 import { BottomSheet } from './BottomSheet';
 
@@ -54,6 +55,7 @@ export function SourcePickerSheet({
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
   const enabledLangs = useEnabledLanguages();
+  const preferred = usePreferredLanguages();
 
   const rows = useMemo<Row[]>(() => {
     const byLang = filterByLanguages(sources, enabledLangs);
@@ -80,10 +82,7 @@ export function SourcePickerSheet({
     );
     for (const [pkg, list] of sortedGroups) {
       list.sort(
-        (a, b) =>
-          Number(b.lang === 'en') - Number(a.lang === 'en') ||
-          a.lang.localeCompare(b.lang) ||
-          a.name.localeCompare(b.name),
+        (a, b) => compareLanguages(a.lang, b.lang, preferred) || a.name.localeCompare(b.name),
       );
       // Every row carries its extension's icon, so a header is only worth
       // showing when one extension has several sources (one per language).
@@ -93,7 +92,7 @@ export function SourcePickerSheet({
       for (const s of list) out.push({ kind: 'source', key: s.id, source: s });
     }
     return out;
-  }, [sources, query, enabledLangs]);
+  }, [sources, query, enabledLangs, preferred]);
 
   return (
     <BottomSheet

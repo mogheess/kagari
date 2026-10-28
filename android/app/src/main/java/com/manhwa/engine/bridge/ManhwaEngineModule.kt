@@ -102,6 +102,18 @@ class ManhwaEngineModule(
     }
 
     /**
+     * Every language in the phone's settings, preferred first. The system list,
+     * not the app's: lists of sources should follow what the reader reads.
+     * `toLanguageTag` also maps the legacy `in` / `iw` to `id` / `he`, which is
+     * how extensions spell them.
+     */
+    @ReactMethod
+    fun getDeviceLanguages(promise: Promise) {
+        val locales = android.content.res.Resources.getSystem().configuration.locales
+        promise.resolve(json.encodeToString((0 until locales.size()).map { locales[it].toLanguageTag() }))
+    }
+
+    /**
      * Holds the screen awake while reading. The flag lives on the window, so it
      * must be set on the UI thread and cleared when the reader closes —
      * otherwise the screen stays on for the rest of the session.

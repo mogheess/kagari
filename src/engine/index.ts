@@ -63,6 +63,7 @@ function createUnavailableEngine(): Engine {
     exportMihonBackup: reject,
     shareBackup: reject,
     getSupportedAbis: () => Promise.resolve([]),
+    getDeviceLanguages: () => Promise.resolve([]),
     setKeepScreenOn: () => Promise.resolve(),
     setBackgroundUpdates: () => Promise.resolve(),
     takeBackgroundUpdates: () => Promise.resolve({ updates: [], snapshots: {} }),
