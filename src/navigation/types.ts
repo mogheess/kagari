@@ -24,6 +24,7 @@ export type RootStackParamList = {
   };
   Appearance: undefined;
   Changelog: undefined;
+  Advanced: undefined;
   CustomizeHome: undefined;
   Extensions: undefined;
   Categories: undefined;

@@ -163,6 +163,16 @@ data class StorageLocationDto(
     val writable: Boolean,
 )
 
+/** The system WebView, which every Cloudflare check runs in. */
+@Serializable
+data class WebViewInfoDto(
+    /** Null when there's no WebView provider, or Android is too old to say. */
+    val packageName: String? = null,
+    val version: String? = null,
+    /** Older than Cloudflare's challenge script accepts. */
+    val outdated: Boolean = false,
+)
+
 /** Identifies one chapter's download. */
 @Serializable
 data class ChapterKeyDto(

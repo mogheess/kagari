@@ -444,6 +444,14 @@ When you add a new persisted store, follow the favorites pattern (in-memory stat
   contrast when adding one: on-accent on accent ≥ 4.5, accent on bg ≈ 4.5+.
 - **Tier lists** (`tierLists.ts` + `TierListsScreen`): S–D rows of library
   titles, exported as an image (rendered natively) to save or share.
+- **Advanced** (`AdvancedScreen`, Profile → Advanced): **Clear cookies**
+  (`EngineFacade.clearCookies`: every cookie, plus
+  `CloudflareInterceptor.forgetHosts` so byte-fetch hosts are tried afresh),
+  **Clear WebView data** (cookies plus cache, site storage, form data; WebView
+  calls on the main thread), the **Android System WebView** version with an
+  Update link to its store page (flagged below `MINIMUM_WEBVIEW_VERSION`, 118),
+  and a **Don't kill my app** link for phones that stop the closed-app check.
+  Both clears ask first.
 
 ---
 
@@ -487,7 +495,7 @@ src/
                  kept alive), TabNav, GlassTabBar, types
   screens/       Home, Library, Discover, Updates, Profile, MangaDetail, Reader,
                  CustomizeHome, Extensions, Categories, DownloadQueue, Appearance,
-                 Changelog, TierLists
+                 Changelog, TierLists, Advanced
 android/app/src/main/java/
   eu/kanade/tachiyomi/   Vendored runtime: source/ (extension-lib 1.6 API),
                          network/ (interceptors, Cloudflare WebView solver),

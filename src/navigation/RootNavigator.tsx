@@ -7,6 +7,7 @@ import { MangaDetailScreen } from '../screens/MangaDetailScreen';
 import { ReaderScreen } from '../screens/ReaderScreen';
 import { AppearanceScreen } from '../screens/AppearanceScreen';
 import { ChangelogScreen } from '../screens/ChangelogScreen';
+import { AdvancedScreen } from '../screens/AdvancedScreen';
 import { CustomizeHomeScreen } from '../screens/CustomizeHomeScreen';
 import { ExtensionsScreen } from '../screens/ExtensionsScreen';
 import { CategoriesScreen } from '../screens/CategoriesScreen';
@@ -49,6 +50,7 @@ export function RootNavigator() {
         />
         <Stack.Screen name="Appearance" component={AppearanceScreen} />
         <Stack.Screen name="Changelog" component={ChangelogScreen} />
+        <Stack.Screen name="Advanced" component={AdvancedScreen} />
         <Stack.Screen name="CustomizeHome" component={CustomizeHomeScreen} />
         <Stack.Screen name="Extensions" component={ExtensionsScreen} />
         <Stack.Screen name="Categories" component={CategoriesScreen} />

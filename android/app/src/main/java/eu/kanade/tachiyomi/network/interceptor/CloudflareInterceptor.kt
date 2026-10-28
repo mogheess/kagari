@@ -125,6 +125,19 @@ class CloudflareInterceptor(
         }
     }
 
+    /**
+     * Forgets what was learned per host (which ones only pass through the
+     * WebView, which was solved a moment ago), so after cookies are cleared
+     * every host is tried from the start again instead of on the next launch.
+     */
+    fun forgetHosts() {
+        synchronized(solveLock) {
+            byteFetchHosts.clear()
+            lastSolvedHost = null
+            lastSolvedAt = 0L
+        }
+    }
+
     private fun cloudflareError(request: Request): IOException =
         CloudflareBypassException("Failed to bypass Cloudflare for ${request.url.host}", interactive = false)
 
@@ -430,7 +443,7 @@ class CloudflareInterceptor(
         private val IMAGE_EXTENSIONS = listOf(".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif")
 
         /** Mihon's floor; older Chromium is rejected by the challenge script itself. */
-        private const val MINIMUM_WEBVIEW_VERSION = 118
+        const val MINIMUM_WEBVIEW_VERSION = 118
 
         /**
          * Cloudflare's challenge page announces an interactive step by posting

@@ -25,6 +25,7 @@ import type {
   MihonBackupDto,
   DownloadMeta,
   StorageLocation,
+  WebViewInfo,
 } from './types';
 import { fetchAllRepos } from './repoClient';
 
@@ -77,6 +78,9 @@ interface ManhwaEngineNative {
   takeBackgroundUpdates(): Promise<string>;
   exportMihonBackup(requestJson: string, fileName: string): Promise<string>;
   shareBackup(uri: string, fileName: string): Promise<void>;
+  clearCookies?(): Promise<string>;
+  clearWebViewData?(): Promise<string>;
+  getWebViewInfo?(): Promise<string>;
 }
 
 const Native = NativeModules.ManhwaEngine as ManhwaEngineNative | undefined;
@@ -291,6 +295,22 @@ export function createNativeEngine(): Engine | null {
       // Older builds lack the method; keeping the screen on is optional.
       if (typeof Native.setKeepScreenOn !== 'function') return;
       await Native.setKeepScreenOn(enabled);
+    },
+    async clearCookies() {
+      if (typeof Native.clearCookies !== 'function') {
+        throw new Error('Clearing cookies needs a newer build of the app.');
+      }
+      await Native.clearCookies();
+    },
+    async clearWebViewData() {
+      if (typeof Native.clearWebViewData !== 'function') {
+        throw new Error('Clearing WebView data needs a newer build of the app.');
+      }
+      await Native.clearWebViewData();
+    },
+    async getWebViewInfo() {
+      if (typeof Native.getWebViewInfo !== 'function') return null;
+      return parse<WebViewInfo>(await Native.getWebViewInfo());
     },
     async openInWebView(url: string) {
       if (typeof Native.openInWebView !== 'function') {

@@ -114,6 +114,12 @@ export function ProfileScreen() {
         <StorageLocationRow />
         <MihonImportRow />
         <BackupExportRow />
+        <Row
+          icon="settings"
+          label="Advanced"
+          hint="Cookies, WebView"
+          onPress={() => navigation.navigate('Advanced')}
+        />
 
         {/* Only rendered once an invite is configured in `app/community.ts`, so
             an unset link never ships as a dead row. */}

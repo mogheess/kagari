@@ -203,6 +203,25 @@ class ManhwaEngineModule(
         ""
     }
 
+    // --- advanced ---
+
+    @ReactMethod
+    fun clearCookies(promise: Promise) = resolve(promise) {
+        facade.clearCookies()
+        ""
+    }
+
+    @ReactMethod
+    fun clearWebViewData(promise: Promise) = resolve(promise) {
+        facade.clearWebViewData()
+        ""
+    }
+
+    @ReactMethod
+    fun getWebViewInfo(promise: Promise) = resolve(promise) {
+        json.encodeToString(facade.webViewInfo())
+    }
+
     // --- browsing ---
 
     @ReactMethod
