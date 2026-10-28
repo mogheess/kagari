@@ -29,6 +29,7 @@ import com.manhwa.engine.dto.ImageTileDto
 import com.manhwa.engine.dto.ImageRequestDto
 import com.manhwa.engine.dto.MangaDto
 import com.manhwa.engine.dto.MangasPageDto
+import com.manhwa.engine.dto.WebViewInfoDto
 import com.manhwa.engine.dto.PageDto
 import com.manhwa.engine.dto.RelatedMangaDto
 import com.manhwa.engine.dto.StorageLocationDto
@@ -58,7 +59,9 @@ import java.security.MessageDigest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.withLock
 import okhttp3.Protocol
 import okhttp3.Request
@@ -171,6 +174,56 @@ class EngineFacade private constructor(context: Context) {
     fun trustSignature(pkg: String, certSha256: String) {
         trust.trust(pkg, certSha256)
         reload()
+    }
+
+    // --- Profile → Advanced ---
+
+    /**
+     * Every cookie the app and its WebView share, plus what the Cloudflare
+     * solver remembered per host, so a site stuck on a bad cookie (a stale
+     * clearance, a flagged `__cf_bm`, a broken login) starts over. Signs the
+     * user out of sites.
+     */
+    fun clearCookies() {
+        network.cookieJar.removeAll()
+        network.cloudflareInterceptor.forgetHosts()
+    }
+
+    /**
+     * Cookies, plus the WebView's cache, site storage and form data: state a
+     * challenge page can leave behind that clearing cookies doesn't reach.
+     * WebView APIs need the main thread.
+     */
+    suspend fun clearWebViewData() {
+        try {
+            withContext(Dispatchers.Main) {
+                android.webkit.WebStorage.getInstance().deleteAllData()
+                android.webkit.WebViewDatabase.getInstance(appContext).clearHttpAuthUsernamePassword()
+                // Last: creating a WebView is what fails while the provider updates.
+                android.webkit.WebView(appContext).apply {
+                    clearCache(true)
+                    clearFormData()
+                    clearHistory()
+                    clearSslPreferences()
+                    destroy()
+                }
+            }
+        } finally {
+            // The cookies go even if the WebView couldn't be made.
+            clearCookies()
+        }
+    }
+
+    fun webViewInfo(): WebViewInfoDto {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return WebViewInfoDto()
+        val pkg = android.webkit.WebView.getCurrentWebViewPackage() ?: return WebViewInfoDto()
+        val major = pkg.versionName?.substringBefore('.')?.toIntOrNull()
+        return WebViewInfoDto(
+            packageName = pkg.packageName,
+            version = pkg.versionName,
+            outdated = major != null &&
+                major < eu.kanade.tachiyomi.network.interceptor.CloudflareInterceptor.MINIMUM_WEBVIEW_VERSION,
+        )
     }
 
     /**

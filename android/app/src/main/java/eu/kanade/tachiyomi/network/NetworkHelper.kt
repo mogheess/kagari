@@ -43,6 +43,9 @@ class NetworkHelper(context: Context) {
 
     fun defaultUserAgentProvider(): String = defaultUserAgent
 
+    /** Kept so clearing cookies can also reset what it learned per host. */
+    val cloudflareInterceptor = CloudflareInterceptor(context, cookieJar, ::defaultUserAgentProvider)
+
     /**
      * Default client. The Cloudflare WebView solver is attached here (not only on
      * [cloudflareClient]) so any source hitting a challenge can recover, even if
@@ -63,7 +66,7 @@ class NetworkHelper(context: Context) {
         .callTimeout(2, TimeUnit.MINUTES)
         .addInterceptor(UncaughtExceptionInterceptor())
         .addInterceptor(UserAgentInterceptor(::defaultUserAgentProvider))
-        .addInterceptor(CloudflareInterceptor(context, cookieJar, ::defaultUserAgentProvider))
+        .addInterceptor(cloudflareInterceptor)
         .build()
 
     /** Alias of [client]; the Cloudflare solver is already attached above. */

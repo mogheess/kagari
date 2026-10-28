@@ -67,6 +67,9 @@ function createUnavailableEngine(): Engine {
     setBackgroundUpdates: () => Promise.resolve(),
     takeBackgroundUpdates: () => Promise.resolve({ updates: [], snapshots: {} }),
     openInWebView: reject,
+    clearCookies: reject,
+    clearWebViewData: reject,
+    getWebViewInfo: () => Promise.resolve(null),
   };
 }
 

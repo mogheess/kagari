@@ -111,6 +111,15 @@ export interface DownloadMeta {
   scanlator?: string;
 }
 
+/** The system WebView, which every Cloudflare check runs in. */
+export interface WebViewInfo {
+  /** Null when there's no WebView provider, or Android is too old to say. */
+  packageName?: string | null;
+  version?: string | null;
+  /** Older than Cloudflare's challenge script accepts. */
+  outdated: boolean;
+}
+
 /** A user-picked storage folder (Storage Access Framework tree). */
 export interface StorageLocation {
   uri: string;
@@ -429,6 +438,14 @@ export interface Engine {
   getSupportedAbis(): Promise<string[]>;
   /** Holds the screen awake (reader). Best-effort; no-ops without an Activity. */
   setKeepScreenOn(enabled: boolean): Promise<void>;
+
+  // advanced
+  /** Clears every cookie and the Cloudflare solver's per-site memory. Signs out of sites. */
+  clearCookies(): Promise<void>;
+  /** Cookies plus the WebView's cache, site storage and form data. */
+  clearWebViewData(): Promise<void>;
+  /** Null when the native build can't report it. */
+  getWebViewInfo(): Promise<WebViewInfo | null>;
 
   // web view
   /**
