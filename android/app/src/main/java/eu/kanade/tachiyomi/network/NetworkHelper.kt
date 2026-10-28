@@ -28,10 +28,11 @@ class NetworkHelper(context: Context) {
     val cookieJar = AndroidCookieJar()
 
     /**
-     * Realistic mobile Chrome UA. Falls back to the system WebView UA when
-     * available so the UA matches the WebView used for Cloudflare clearance.
+     * The system WebView's UA with its WebView markers removed, so it reads as
+     * mobile Chrome and moves on with WebView updates. Cloudflare clearances are
+     * solved in that same WebView.
      */
-    private val defaultUserAgent: String by lazy {
+    val systemUserAgent: String by lazy {
         try {
             WebSettings.getDefaultUserAgent(context)
                 .replace("; wv", "")
@@ -41,7 +42,23 @@ class NetworkHelper(context: Context) {
         }
     }
 
-    fun defaultUserAgentProvider(): String = defaultUserAgent
+    private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    /** Set in Profile → Advanced, for a site that blocks one browser version. */
+    @Volatile
+    var customUserAgent: String? = prefs.getString(KEY_USER_AGENT, null)
+        private set
+
+    fun defaultUserAgentProvider(): String = customUserAgent ?: systemUserAgent
+
+    /** Null or blank goes back to [systemUserAgent]. Sources pick it up once rebuilt. */
+    fun setUserAgent(userAgent: String?) {
+        val value = userAgent?.trim()?.takeIf { it.isNotEmpty() }
+        customUserAgent = value
+        prefs.edit().apply {
+            if (value == null) remove(KEY_USER_AGENT) else putString(KEY_USER_AGENT, value)
+        }.apply()
+    }
 
     /** Kept so clearing cookies can also reset what it learned per host. */
     val cloudflareInterceptor = CloudflareInterceptor(context, cookieJar, ::defaultUserAgentProvider)
@@ -74,6 +91,8 @@ class NetworkHelper(context: Context) {
         get() = client
 
     companion object {
+        private const val PREFS = "network"
+        private const val KEY_USER_AGENT = "user_agent"
         private const val FALLBACK_USER_AGENT =
             "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) " +
                 "Chrome/120.0.0.0 Mobile Safari/537.36"

@@ -111,6 +111,14 @@ export interface DownloadMeta {
   scanlator?: string;
 }
 
+/** The User-Agent every request goes out with. */
+export interface UserAgentInfo {
+  current: string;
+  /** The system WebView's, used unless one is set. */
+  system: string;
+  custom: boolean;
+}
+
 /** The system WebView, which every Cloudflare check runs in. */
 export interface WebViewInfo {
   /** Null when there's no WebView provider, or Android is too old to say. */
@@ -446,6 +454,10 @@ export interface Engine {
   clearWebViewData(): Promise<void>;
   /** Null when the native build can't report it. */
   getWebViewInfo(): Promise<WebViewInfo | null>;
+  /** Null when the native build can't report it. */
+  getUserAgent(): Promise<UserAgentInfo | null>;
+  /** Null or blank goes back to the WebView's. Resolves with the result. */
+  setUserAgent(userAgent: string | null): Promise<UserAgentInfo>;
 
   // web view
   /**

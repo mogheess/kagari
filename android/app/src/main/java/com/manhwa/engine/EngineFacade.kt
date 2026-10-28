@@ -29,6 +29,7 @@ import com.manhwa.engine.dto.ImageTileDto
 import com.manhwa.engine.dto.ImageRequestDto
 import com.manhwa.engine.dto.MangaDto
 import com.manhwa.engine.dto.MangasPageDto
+import com.manhwa.engine.dto.UserAgentDto
 import com.manhwa.engine.dto.WebViewInfoDto
 import com.manhwa.engine.dto.PageDto
 import com.manhwa.engine.dto.RelatedMangaDto
@@ -212,6 +213,29 @@ class EngineFacade private constructor(context: Context) {
             // The cookies go even if the WebView couldn't be made.
             clearCookies()
         }
+    }
+
+    fun userAgentInfo(): UserAgentDto = UserAgentDto(
+        current = network.defaultUserAgentProvider(),
+        system = network.systemUserAgent,
+        custom = network.customUserAgent != null,
+    )
+
+    /**
+     * Null or blank goes back to the WebView's. Sources build their headers
+     * once, so they're reloaded to pick it up. A clearance issued to the old
+     * UA stops passing; the next challenge clears it and solves again.
+     */
+    fun setUserAgent(userAgent: String?) {
+        val value = userAgent?.trim()?.takeIf { it.isNotEmpty() }
+        if (value != null) {
+            require(value.length <= MAX_USER_AGENT && value.all { it in ' '..'~' }) {
+                "A user agent is plain ASCII text, up to $MAX_USER_AGENT characters"
+            }
+        }
+        network.setUserAgent(value)
+        network.cloudflareInterceptor.forgetHosts()
+        reload()
     }
 
     fun webViewInfo(): WebViewInfoDto {
@@ -1279,6 +1303,7 @@ class EngineFacade private constructor(context: Context) {
                 instance ?: EngineFacade(context.applicationContext).also { instance = it }
             }
 
+        private const val MAX_USER_AGENT = 512
         private const val READER_IMAGE_TAG = "KagariReaderImage"
         private const val MAX_TILE_HEIGHT = 4096
         private const val MAX_EXPORT_PIXELS = 12_000_000L
