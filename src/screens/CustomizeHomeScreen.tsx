@@ -8,6 +8,7 @@ import { useHomeConfig, blockLabel, isBrowseBlock, type HomeBlockKind } from '..
 import { Icon } from '../components/Icon';
 import { SourcePickerSheet } from '../components/SourcePickerSheet';
 import { sortSourcesForPicker, pickDefaultSource } from '../utils/sourceSelect';
+import { usePreferredLanguages } from '../sources/languageOrder';
 import { langLabel } from '../utils/lang';
 
 const UNIVERSAL = '__universal__';
@@ -55,7 +56,11 @@ export function CustomizeHomeScreen() {
   } = useHomeConfig();
 
   const allSources = useSources();
-  const sources = useMemo(() => sortSourcesForPicker(allSources), [allSources]);
+  const preferred = usePreferredLanguages();
+  const sources = useMemo(
+    () => sortSourcesForPicker(allSources, preferred),
+    [allSources, preferred],
+  );
   const [pickerFor, setPickerFor] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const draftReady =

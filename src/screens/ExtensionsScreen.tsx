@@ -25,6 +25,8 @@ import {
   setExtensionUpdates,
 } from '../sources/extensionUpdates';
 import type { AvailableExtensionDto, ExtensionDto, RepoDto } from '../engine/types';
+import { usePreferredLanguages } from '../sources/languageOrder';
+import { languageRank } from '../utils/lang';
 
 type Tab = 'browse' | 'installed';
 
@@ -310,14 +312,18 @@ export function ExtensionsScreen() {
     [installedPkgs, busyPkg, failedPkgs, updatesByPkg, orphanedPkgs, repoIcons],
   );
 
-  // Language chips, most common first.
+  // Language chips: the reader's languages first, then the most common.
+  const preferred = usePreferredLanguages();
   const languages = useMemo(() => {
     const counts = new Map<string, number>();
     for (const e of available) counts.set(e.lang, (counts.get(e.lang) ?? 0) + 1);
     return Array.from(counts.entries())
-      .sort((a, b) => b[1] - a[1])
+      .sort(
+        (a, b) =>
+          languageRank(a[0], preferred) - languageRank(b[0], preferred) || b[1] - a[1],
+      )
       .map(([code]) => code);
-  }, [available]);
+  }, [available, preferred]);
 
   const filtered = useMemo(() => {
     return available.filter(e => {

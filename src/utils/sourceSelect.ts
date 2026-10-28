@@ -1,4 +1,5 @@
 import type { SourceDto } from '../engine/types';
+import { languageRank } from './lang';
 
 /**
  * Picks a sensible default browse source. Sources that recently errored sink to
@@ -19,11 +20,18 @@ export function pickDefaultSource(
   return [...pool].sort((a, b) => score(b) - score(a) || a.name.localeCompare(b.name))[0];
 }
 
-/** Ordering for source pickers: English first, non-NSFW next, then by name. */
-export function sortSourcesForPicker(sources: SourceDto[]): SourceDto[] {
+/**
+ * Ordering for source pickers: the reader's languages first (`preferred`, from
+ * `usePreferredLanguages`; English alone by default), non-NSFW next, then by
+ * name.
+ */
+export function sortSourcesForPicker(
+  sources: SourceDto[],
+  preferred: readonly string[] = ['en'],
+): SourceDto[] {
   return [...sources].sort(
     (a, b) =>
-      Number(b.lang === 'en') - Number(a.lang === 'en') ||
+      languageRank(a.lang, preferred) - languageRank(b.lang, preferred) ||
       Number(!b.isNsfw) - Number(!a.isNsfw) ||
       a.name.localeCompare(b.name),
   );

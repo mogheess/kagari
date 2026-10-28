@@ -468,7 +468,8 @@ src/
                  history transfer), mihonImport / mihonExport (.tachibk),
                  tierLists
   sources/       sourcesStore (installed sources), pinned (global search),
-                 languageFilter, sourceHealth, discoverIntent,
+                 languageFilter, languageOrder (phone + enabled languages
+                 first in every language list), sourceHealth, discoverIntent,
                  extensionUpdates (repo version diff)
   app/           version, appUpdate (GitHub release check), updatePrompt,
                  changelog + whatsNew (one-time release-notes sheet), community
@@ -544,6 +545,9 @@ patches/                       patch-package patches (react-native-screens)
   from its top move it. It uses `PanResponder`, not Gesture Handler: a `Modal`
   is its own window on Android, outside the gesture root.
 - **Comments** explain *why*, not *what*. No narration comments.
+- **Language lists use `compareLanguages` / `languageRank`** (`utils/lang.ts`)
+  with `usePreferredLanguages()`: the phone's languages, then English, then
+  enabled ones, matched on base language. Don't hardcode English first.
 - **Empty states are required.** Zero-content screens render a friendly prompt
   that routes to **Extensions** (see `HomeScreen`/`DiscoverScreen`).
 

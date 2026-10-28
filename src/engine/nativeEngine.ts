@@ -72,6 +72,7 @@ interface ManhwaEngineNative {
   shareImage(uri: string): Promise<void>;
   openInWebView(url: string): Promise<boolean | null>;
   getSupportedAbis(): Promise<string>;
+  getDeviceLanguages?(): Promise<string>;
   setKeepScreenOn(enabled: boolean): Promise<void>;
   setBackgroundUpdates(intervalHours: number, wifiOnly: boolean, chargingOnly: boolean): Promise<string>;
   takeBackgroundUpdates(): Promise<string>;
@@ -282,6 +283,10 @@ export function createNativeEngine(): Engine | null {
     async takeBackgroundUpdates() {
       if (typeof Native.takeBackgroundUpdates !== 'function') return { updates: [], snapshots: {} };
       return parse<BackgroundInboxDto>(await Native.takeBackgroundUpdates());
+    },
+    async getDeviceLanguages() {
+      if (typeof Native.getDeviceLanguages !== 'function') return [];
+      return parse<string[]>(await Native.getDeviceLanguages());
     },
     async getSupportedAbis() {
       if (typeof Native.getSupportedAbis !== 'function') return [];

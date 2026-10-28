@@ -35,6 +35,7 @@ import { langLabel } from '../utils/lang';
 import { needsHumanCheck } from '../engine/errors';
 import { useSources } from '../sources/sourcesStore';
 import { pickDefaultSource, sortSourcesForPicker } from '../utils/sourceSelect';
+import { usePreferredLanguages } from '../sources/languageOrder';
 import type { RootStackParamList } from '../navigation/types';
 import type { FilterDto, MangaDto, MangasPageDto, SourceDto } from '../engine/types';
 
@@ -79,7 +80,11 @@ export function DiscoverScreen() {
   const [fetching, setFetching] = useState(false);
 
   const allSources = useSources();
-  const sources = useMemo(() => sortSourcesForPicker(allSources), [allSources]);
+  const preferred = usePreferredLanguages();
+  const sources = useMemo(
+    () => sortSourcesForPicker(allSources, preferred),
+    [allSources, preferred],
+  );
   const pinned = usePinnedSources();
   const health = useSourceHealth();
   const userPicked = useRef(false);

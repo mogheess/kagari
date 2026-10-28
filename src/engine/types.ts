@@ -425,6 +425,8 @@ export interface Engine {
   takeBackgroundUpdates(): Promise<BackgroundInboxDto>;
 
   // device
+  /** The phone's languages as BCP 47 tags, preferred first. Empty when unknown. */
+  getDeviceLanguages(): Promise<string[]>;
   /** Device ABIs, preferred first (e.g. `["arm64-v8a", "armeabi-v7a"]`). Empty when unknown. */
   getSupportedAbis(): Promise<string[]>;
   /** Holds the screen awake (reader). Best-effort; no-ops without an Activity. */
