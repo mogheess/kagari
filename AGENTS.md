@@ -178,9 +178,14 @@ Cloudflare and either `cf-mitigated: challenge` is set or an **image** request
 got a 403/503. A plain 403 on a page is returned as-is. For a challenge it:
 
 1. retries if a `cf_clearance` cookie already exists;
-2. otherwise loads the host in an invisible in-app WebView and polls for
+2. otherwise expires every Cloudflare cookie for the host (`cf_clearance`,
+   `cf_chl*`, `__cf*`, `_cfuvid`; `AndroidCookieJar.removeMatching`, on `/` and
+   each parent domain, since a cookie only goes when its domain and path
+   match), loads the host in an invisible in-app WebView and polls for a *new*
    `cf_clearance` (20 s timeout, at most once per host per 15 s), then retries
-   with that cookie **and the WebView's User-Agent**;
+   with that cookie **and the WebView's User-Agent**. A stale clearance or a
+   flagged `__cf_bm` used to survive and fail every attempt; the site's own
+   cookies (a login) stay;
 3. if the page starts an **interactive** check (Turnstile posts
    `interactiveBegin`), gives up at once with
    `CloudflareBypassException(interactive = true)`, as Mihon does;
@@ -614,7 +619,7 @@ With no extensions installed you'll see empty states. Install a repo + extension
   against a `MockWebServer` (`mockwebserver3`). Today it covers the Cloudflare
   interceptor: interactive challenge fails fast, an issued clearance is retried
   with the cookie, a plain 403 isn't a challenge, a clean root stops the solve
-  early. Run:
+  early, stale site-wide Cloudflare cookies are cleared before a solve. Run:
   ```sh
   cd android && ./gradlew :app:connectedDebugAndroidTest -PreactNativeArchitectures=arm64-v8a
   ```
