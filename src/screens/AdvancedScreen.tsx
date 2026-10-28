@@ -6,7 +6,7 @@
  * broken sign-in) that the solver itself can't see past; clearing WebView data
  * also drops the cache and site storage a challenge page can leave behind.
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Linking,
@@ -18,7 +18,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeProvider';
 import { Icon, type IconName } from '../components/Icon';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -52,12 +52,15 @@ export function AdvancedScreen() {
   const [busy, setBusy] = useState<Reset | null>(null);
   const [webView, setWebView] = useState<WebViewInfo | null>(null);
 
-  useEffect(() => {
-    getEngine()
-      .getWebViewInfo()
-      .then(setWebView)
-      .catch(() => setWebView(null));
-  }, []);
+  // On focus, so coming back from updating it in the store shows the new version.
+  useFocusEffect(
+    useCallback(() => {
+      getEngine()
+        .getWebViewInfo()
+        .then(setWebView)
+        .catch(() => setWebView(null));
+    }, []),
+  );
 
   const runReset = useCallback(async (reset: Reset) => {
     setConfirm(null);
@@ -105,14 +108,15 @@ export function AdvancedScreen() {
           label="Clear cookies"
           description="For a source stuck on a Cloudflare check or a broken sign-in."
           busy={busy === 'cookies'}
-          onPress={() => setConfirm('cookies')}
+          // One reset at a time: both clear the cookies.
+          onPress={busy ? undefined : () => setConfirm('cookies')}
         />
         <ActionRow
           icon="trash"
           label="Clear WebView data"
           description="Also clears the built-in browser's cache and site storage. Try it if clearing cookies didn't help."
           busy={busy === 'webview'}
-          onPress={() => setConfirm('webview')}
+          onPress={busy ? undefined : () => setConfirm('webview')}
         />
         <ActionRow
           icon="globe"

@@ -27,6 +27,7 @@ package eu.kanade.tachiyomi.network.interceptor
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Base64
@@ -62,8 +63,9 @@ class CloudflareInterceptor(
 
     /** Serializes WebView work and remembers what we've learned per host. */
     private val solveLock = Any()
-    private var lastSolvedHost: String? = null
-    private var lastSolvedAt = 0L
+    // Volatile: forgetHosts() resets them without waiting on solveLock.
+    @Volatile private var lastSolvedHost: String? = null
+    @Volatile private var lastSolvedAt = 0L
 
     /** Hosts known to gate on fingerprint (no cookie possible) → byte-fetch. */
     private val byteFetchHosts = Collections.synchronizedSet(mutableSetOf<String>())
@@ -129,13 +131,15 @@ class CloudflareInterceptor(
      * Forgets what was learned per host (which ones only pass through the
      * WebView, which was solved a moment ago), so after cookies are cleared
      * every host is tried from the start again instead of on the next launch.
+     *
+     * Doesn't take [solveLock]: a challenge holds it for up to a solve plus a
+     * byte-fetch, and a reset shouldn't wait behind every queued one. A solve
+     * still running finishes with a fresh clearance, which is fine to keep.
      */
     fun forgetHosts() {
-        synchronized(solveLock) {
-            byteFetchHosts.clear()
-            lastSolvedHost = null
-            lastSolvedAt = 0L
-        }
+        byteFetchHosts.clear()
+        lastSolvedHost = null
+        lastSolvedAt = 0L
     }
 
     private fun cloudflareError(request: Request): IOException =
@@ -376,7 +380,9 @@ class CloudflareInterceptor(
      * instead of leaving the user with "didn't respond" on every source.
      */
     private fun warnIfWebViewOutdated() {
-        if (warnedOutdated) return
+        // getCurrentWebViewPackage is API 26; on 24-25 it threw on the main
+        // looper at the first challenge and took the app down.
+        if (warnedOutdated || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val version = WebView.getCurrentWebViewPackage()?.versionName ?: return
         val major = version.substringBefore('.').toIntOrNull() ?: return
         if (major >= MINIMUM_WEBVIEW_VERSION) return

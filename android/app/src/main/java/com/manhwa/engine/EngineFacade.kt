@@ -195,18 +195,23 @@ class EngineFacade private constructor(context: Context) {
      * WebView APIs need the main thread.
      */
     suspend fun clearWebViewData() {
-        withContext(Dispatchers.Main) {
-            android.webkit.WebView(appContext).apply {
-                clearCache(true)
-                clearFormData()
-                clearHistory()
-                clearSslPreferences()
-                destroy()
+        try {
+            withContext(Dispatchers.Main) {
+                android.webkit.WebStorage.getInstance().deleteAllData()
+                android.webkit.WebViewDatabase.getInstance(appContext).clearHttpAuthUsernamePassword()
+                // Last: creating a WebView is what fails while the provider updates.
+                android.webkit.WebView(appContext).apply {
+                    clearCache(true)
+                    clearFormData()
+                    clearHistory()
+                    clearSslPreferences()
+                    destroy()
+                }
             }
-            android.webkit.WebStorage.getInstance().deleteAllData()
-            android.webkit.WebViewDatabase.getInstance(appContext).clearHttpAuthUsernamePassword()
+        } finally {
+            // The cookies go even if the WebView couldn't be made.
+            clearCookies()
         }
-        clearCookies()
     }
 
     fun webViewInfo(): WebViewInfoDto {
