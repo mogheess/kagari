@@ -6,7 +6,7 @@
  * broken sign-in) that the solver itself can't see past; clearing WebView data
  * also drops the cache and site storage a challenge page can leave behind.
  */
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Linking,
@@ -203,7 +203,9 @@ function UserAgentRow() {
 
   const trimmed = draft?.trim() ?? '';
   const invalid = draft !== null && trimmed !== '' && !USER_AGENT_PATTERN.test(trimmed);
-  const unchanged = trimmed === info.current;
+  // Blank, or the WebView's own, means following the WebView.
+  const target = trimmed === '' || trimmed === info.system ? null : trimmed;
+  const unchanged = target === (info.custom ? info.current : null);
 
   return (
     <View
@@ -220,8 +222,8 @@ function UserAgentRow() {
           <Text style={[theme.typography.body, { color: theme.colors.text }]}>User agent</Text>
           <Text style={[styles.description, { color: theme.colors.textFaint }]}>
             {info.custom
-              ? 'Set by you. Sent with every request.'
-              : "Your WebView's, sent with every request. Change it only if a site blocks this browser version."}
+              ? "Set by you. Sources that don't set their own send it."
+              : "Your WebView's. Sources that don't set their own send it. Change it only if a site blocks this browser version."}
           </Text>
         </View>
         {draft === null ? (
@@ -274,7 +276,7 @@ function UserAgentRow() {
               <Pressable
                 hitSlop={6}
                 disabled={invalid || unchanged}
-                onPress={() => save(trimmed === '' || trimmed === info.system ? null : trimmed)}
+                onPress={() => save(target)}
               >
                 <Text
                   style={[

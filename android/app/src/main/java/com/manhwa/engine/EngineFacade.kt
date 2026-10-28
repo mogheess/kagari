@@ -86,16 +86,20 @@ class EngineFacade private constructor(context: Context) {
     private val loader = ExtensionLoader(appContext, trust)
     private val network: NetworkHelper by injectLazy()
 
-    private var extensions: List<LoadedExtension> = emptyList()
-    private val sourcesById = HashMap<Long, Source>()
+    // Read without the lock: reload() builds a new set and swaps it in whole,
+    // so a lookup never lands on a half-filled map.
+    @Volatile private var extensions: List<LoadedExtension> = emptyList()
+    @Volatile private var sourcesById: Map<Long, Source> = emptyMap()
 
     @Synchronized
     fun reload() {
-        extensions = loader.loadExtensions()
-        sourcesById.clear()
-        extensions.forEach { ext ->
-            ext.sources.forEach { src -> sourcesById[src.id] = src }
+        val loaded = loader.loadExtensions()
+        val byId = HashMap<Long, Source>()
+        loaded.forEach { ext ->
+            ext.sources.forEach { src -> byId[src.id] = src }
         }
+        extensions = loaded
+        sourcesById = byId
     }
 
     private fun ensureLoaded() {
@@ -228,11 +232,8 @@ class EngineFacade private constructor(context: Context) {
      */
     fun setUserAgent(userAgent: String?) {
         val value = userAgent?.trim()?.takeIf { it.isNotEmpty() }
-        if (value != null) {
-            require(value.length <= MAX_USER_AGENT && value.all { it in ' '..'~' }) {
-                "A user agent is plain ASCII text, up to $MAX_USER_AGENT characters"
-            }
-        }
+        // Nothing to rebuild: a reload and a fresh solve per host for nothing.
+        if (value == network.customUserAgent) return
         network.setUserAgent(value)
         network.cloudflareInterceptor.forgetHosts()
         reload()
@@ -1303,7 +1304,6 @@ class EngineFacade private constructor(context: Context) {
                 instance ?: EngineFacade(context.applicationContext).also { instance = it }
             }
 
-        private const val MAX_USER_AGENT = 512
         private const val READER_IMAGE_TAG = "KagariReaderImage"
         private const val MAX_TILE_HEIGHT = 4096
         private const val MAX_EXPORT_PIXELS = 12_000_000L
