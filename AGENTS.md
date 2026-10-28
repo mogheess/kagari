@@ -98,6 +98,9 @@ classloader). So the host must *provide* that runtime. We vendor it under
   bridge to the older RxJava1 `fetch*` methods. 1.6 has no separate
   details/chapter-list calls; both go through `getMangaUpdate`. Request/parse
   methods are `open`, not abstract, so 1.6-only extensions still link.
+  `HttpSource.headersBuilder()` sends `network.defaultUserAgentProvider()`
+  (the system WebView's UA, or the one set in Advanced), as Mihon's does; a
+  fixed string there went stale and Cloudflare challenges outdated browsers.
   `android/app/build.gradle` compiles with `-Xjvm-default=all-compatibility` so
   extensions inherit those interface default bodies.
 - `network/`: `NetworkHelper` (base OkHttp client), `AndroidCookieJar` (shares
@@ -455,8 +458,10 @@ When you add a new persisted store, follow the favorites pattern (in-memory stat
   **Clear WebView data** (cookies plus cache, site storage, form data; WebView
   calls on the main thread), the **Android System WebView** version with an
   Update link to its store page (flagged below `MINIMUM_WEBVIEW_VERSION`, 118),
-  and a **Don't kill my app** link for phones that stop the closed-app check.
-  Both clears ask first.
+  a **User agent** editor (`NetworkHelper.setUserAgent`, saved in the `network`
+  prefs; printable ASCII up to 512 chars; Save reloads extensions so sources
+  rebuild their headers), and a **Don't kill my app** link for phones that stop
+  the closed-app check. Both clears ask first.
 
 ---
 

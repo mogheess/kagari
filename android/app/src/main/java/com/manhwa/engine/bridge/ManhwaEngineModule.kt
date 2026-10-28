@@ -222,6 +222,18 @@ class ManhwaEngineModule(
         json.encodeToString(facade.webViewInfo())
     }
 
+    @ReactMethod
+    fun getUserAgent(promise: Promise) = resolve(promise) {
+        json.encodeToString(facade.userAgentInfo())
+    }
+
+    /** Null or blank goes back to the WebView's. */
+    @ReactMethod
+    fun setUserAgent(userAgent: String?, promise: Promise) = resolve(promise) {
+        facade.setUserAgent(userAgent)
+        json.encodeToString(facade.userAgentInfo())
+    }
+
     // --- browsing ---
 
     @ReactMethod

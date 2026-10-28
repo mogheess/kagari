@@ -25,6 +25,7 @@ import type {
   MihonBackupDto,
   DownloadMeta,
   StorageLocation,
+  UserAgentInfo,
   WebViewInfo,
 } from './types';
 import { fetchAllRepos } from './repoClient';
@@ -81,6 +82,8 @@ interface ManhwaEngineNative {
   clearCookies?(): Promise<string>;
   clearWebViewData?(): Promise<string>;
   getWebViewInfo?(): Promise<string>;
+  getUserAgent?(): Promise<string>;
+  setUserAgent?(userAgent: string | null): Promise<string>;
 }
 
 const Native = NativeModules.ManhwaEngine as ManhwaEngineNative | undefined;
@@ -311,6 +314,16 @@ export function createNativeEngine(): Engine | null {
     async getWebViewInfo() {
       if (typeof Native.getWebViewInfo !== 'function') return null;
       return parse<WebViewInfo>(await Native.getWebViewInfo());
+    },
+    async getUserAgent() {
+      if (typeof Native.getUserAgent !== 'function') return null;
+      return parse<UserAgentInfo>(await Native.getUserAgent());
+    },
+    async setUserAgent(userAgent: string | null) {
+      if (typeof Native.setUserAgent !== 'function') {
+        throw new Error('Setting the user agent needs a newer build of the app.');
+      }
+      return parse<UserAgentInfo>(await Native.setUserAgent(userAgent));
     },
     async openInWebView(url: string) {
       if (typeof Native.openInWebView !== 'function') {

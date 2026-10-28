@@ -173,6 +173,15 @@ data class WebViewInfoDto(
     val outdated: Boolean = false,
 )
 
+/** The User-Agent every request goes out with. */
+@Serializable
+data class UserAgentDto(
+    val current: String,
+    /** The system WebView's, used unless one is set. */
+    val system: String,
+    val custom: Boolean,
+)
+
 /** Identifies one chapter's download. */
 @Serializable
 data class ChapterKeyDto(

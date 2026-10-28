@@ -29,6 +29,7 @@ import com.manhwa.engine.dto.ImageTileDto
 import com.manhwa.engine.dto.ImageRequestDto
 import com.manhwa.engine.dto.MangaDto
 import com.manhwa.engine.dto.MangasPageDto
+import com.manhwa.engine.dto.UserAgentDto
 import com.manhwa.engine.dto.WebViewInfoDto
 import com.manhwa.engine.dto.PageDto
 import com.manhwa.engine.dto.RelatedMangaDto
@@ -85,16 +86,20 @@ class EngineFacade private constructor(context: Context) {
     private val loader = ExtensionLoader(appContext, trust)
     private val network: NetworkHelper by injectLazy()
 
-    private var extensions: List<LoadedExtension> = emptyList()
-    private val sourcesById = HashMap<Long, Source>()
+    // Read without the lock: reload() builds a new set and swaps it in whole,
+    // so a lookup never lands on a half-filled map.
+    @Volatile private var extensions: List<LoadedExtension> = emptyList()
+    @Volatile private var sourcesById: Map<Long, Source> = emptyMap()
 
     @Synchronized
     fun reload() {
-        extensions = loader.loadExtensions()
-        sourcesById.clear()
-        extensions.forEach { ext ->
-            ext.sources.forEach { src -> sourcesById[src.id] = src }
+        val loaded = loader.loadExtensions()
+        val byId = HashMap<Long, Source>()
+        loaded.forEach { ext ->
+            ext.sources.forEach { src -> byId[src.id] = src }
         }
+        extensions = loaded
+        sourcesById = byId
     }
 
     private fun ensureLoaded() {
@@ -212,6 +217,26 @@ class EngineFacade private constructor(context: Context) {
             // The cookies go even if the WebView couldn't be made.
             clearCookies()
         }
+    }
+
+    fun userAgentInfo(): UserAgentDto = UserAgentDto(
+        current = network.defaultUserAgentProvider(),
+        system = network.systemUserAgent,
+        custom = network.customUserAgent != null,
+    )
+
+    /**
+     * Null or blank goes back to the WebView's. Sources build their headers
+     * once, so they're reloaded to pick it up. A clearance issued to the old
+     * UA stops passing; the next challenge clears it and solves again.
+     */
+    fun setUserAgent(userAgent: String?) {
+        val value = userAgent?.trim()?.takeIf { it.isNotEmpty() }
+        // Nothing to rebuild: a reload and a fresh solve per host for nothing.
+        if (value == network.customUserAgent) return
+        network.setUserAgent(value)
+        network.cloudflareInterceptor.forgetHosts()
+        reload()
     }
 
     fun webViewInfo(): WebViewInfoDto {

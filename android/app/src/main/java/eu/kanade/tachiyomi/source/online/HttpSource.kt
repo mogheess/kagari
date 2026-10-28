@@ -74,9 +74,15 @@ abstract class HttpSource : CatalogueSource {
     open val client: OkHttpClient
         get() = network.client
 
-    /** Headers builder for requests. Override for custom headers. */
+    /**
+     * Headers builder for requests. Override for custom headers.
+     *
+     * The User-Agent is the app's, as in Mihon: the system WebView's, or the one
+     * set in Profile → Advanced. A fixed string here went stale (it said
+     * Chrome 120 long after), and Cloudflare challenges an outdated browser.
+     */
     protected open fun headersBuilder(): Headers.Builder = Headers.Builder().apply {
-        add("User-Agent", DEFAULT_USER_AGENT)
+        add("User-Agent", network.defaultUserAgentProvider())
     }
 
     /** Visible name of the source. */
@@ -286,6 +292,7 @@ abstract class HttpSource : CatalogueSource {
         throw UnsupportedOperationException("$name does not implement $method")
 
     companion object {
+        /** Kept for extensions that reference it; requests use [NetworkHelper.defaultUserAgentProvider]. */
         const val DEFAULT_USER_AGENT =
             "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) " +
                 "Chrome/120.0.0.0 Mobile Safari/537.36"

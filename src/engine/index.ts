@@ -70,6 +70,8 @@ function createUnavailableEngine(): Engine {
     clearCookies: reject,
     clearWebViewData: reject,
     getWebViewInfo: () => Promise.resolve(null),
+    getUserAgent: () => Promise.resolve(null),
+    setUserAgent: reject,
   };
 }
 

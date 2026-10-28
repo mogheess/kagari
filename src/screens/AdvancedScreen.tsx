@@ -6,7 +6,7 @@
  * broken sign-in) that the solver itself can't see past; clearing WebView data
  * also drops the cache and site storage a challenge page can leave behind.
  */
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Linking,
@@ -14,6 +14,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   ToastAndroid,
   View,
 } from 'react-native';
@@ -23,9 +24,12 @@ import { useTheme } from '../theme/ThemeProvider';
 import { Icon, type IconName } from '../components/Icon';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { getEngine } from '../engine';
-import type { WebViewInfo } from '../engine/types';
+import type { UserAgentInfo, WebViewInfo } from '../engine/types';
 
 const DONT_KILL_MY_APP_URL = 'https://dontkillmyapp.com';
+
+/** Printable ASCII: a header value can't carry anything else. */
+const USER_AGENT_PATTERN = /^[\x20-\x7E]{1,512}$/;
 
 type Reset = 'cookies' | 'webview';
 
@@ -132,6 +136,7 @@ export function AdvancedScreen() {
           action={webView?.packageName ? 'Update' : undefined}
           onPress={webView?.packageName ? openWebViewStore : undefined}
         />
+        <UserAgentRow />
 
         <Text style={[styles.sectionLabel, styles.laterSection, { color: theme.colors.textFaint }]}>
           BACKGROUND
@@ -154,6 +159,138 @@ export function AdvancedScreen() {
         onConfirm={() => confirm && runReset(confirm)}
         onCancel={() => setConfirm(null)}
       />
+    </View>
+  );
+}
+
+/**
+ * The User-Agent every request goes out with: the WebView's unless set here.
+ * Mostly for a site that blocks one browser version.
+ */
+function UserAgentRow() {
+  const theme = useTheme();
+  const [info, setInfo] = useState<UserAgentInfo | null>(null);
+  // The text being edited, or null while not editing.
+  const [draft, setDraft] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    getEngine()
+      .getUserAgent()
+      .then(setInfo)
+      .catch(() => setInfo(null));
+  }, []);
+
+  const save = useCallback(async (value: string | null) => {
+    setSaving(true);
+    try {
+      const next = await getEngine().setUserAgent(value);
+      setInfo(next);
+      setDraft(null);
+      ToastAndroid.show(
+        next.custom ? 'User agent saved' : "Using your WebView's user agent",
+        ToastAndroid.SHORT,
+      );
+    } catch (e) {
+      ToastAndroid.show(e instanceof Error ? e.message : "Couldn't save it", ToastAndroid.LONG);
+    } finally {
+      setSaving(false);
+    }
+  }, []);
+
+  // An older native build can't report or change it.
+  if (!info) return null;
+
+  const trimmed = draft?.trim() ?? '';
+  const invalid = draft !== null && trimmed !== '' && !USER_AGENT_PATTERN.test(trimmed);
+  // Blank, or the WebView's own, means following the WebView.
+  const target = trimmed === '' || trimmed === info.system ? null : trimmed;
+  const unchanged = target === (info.custom ? info.current : null);
+
+  return (
+    <View
+      style={[
+        styles.row,
+        styles.column,
+        theme.elevation.card,
+        { backgroundColor: theme.colors.surface, borderColor: theme.colors.border },
+      ]}
+    >
+      <View style={styles.rowTop}>
+        <Icon name="edit" size={20} color={theme.colors.textMuted} />
+        <View style={styles.fill}>
+          <Text style={[theme.typography.body, { color: theme.colors.text }]}>User agent</Text>
+          <Text style={[styles.description, { color: theme.colors.textFaint }]}>
+            {info.custom
+              ? "Set by you. Sources that don't set their own send it."
+              : "Your WebView's. Sources that don't set their own send it. Change it only if a site blocks this browser version."}
+          </Text>
+        </View>
+        {draft === null ? (
+          <Pressable hitSlop={8} onPress={() => setDraft(info.current)}>
+            <Text style={[styles.action, { color: theme.colors.accent }]}>Edit</Text>
+          </Pressable>
+        ) : null}
+      </View>
+
+      {draft === null ? (
+        <Text
+          numberOfLines={3}
+          style={[styles.userAgent, { color: theme.colors.textMuted }]}
+        >
+          {info.current}
+        </Text>
+      ) : (
+        <>
+          <TextInput
+            value={draft}
+            onChangeText={setDraft}
+            multiline
+            autoFocus
+            autoCapitalize="none"
+            autoCorrect={false}
+            editable={!saving}
+            style={[
+              styles.userAgent,
+              styles.input,
+              { color: theme.colors.text, borderColor: invalid ? theme.colors.danger : theme.colors.border },
+            ]}
+          />
+          {invalid ? (
+            <Text style={[styles.description, { color: theme.colors.danger }]}>
+              Plain ASCII text only, up to 512 characters.
+            </Text>
+          ) : null}
+          <View style={styles.buttons}>
+            <Pressable hitSlop={6} disabled={saving} onPress={() => setDraft(null)}>
+              <Text style={[styles.action, { color: theme.colors.textMuted }]}>Cancel</Text>
+            </Pressable>
+            {info.custom ? (
+              <Pressable hitSlop={6} disabled={saving} onPress={() => save(null)}>
+                <Text style={[styles.action, { color: theme.colors.textMuted }]}>Use WebView's</Text>
+              </Pressable>
+            ) : null}
+            {saving ? (
+              <ActivityIndicator size="small" color={theme.colors.textMuted} />
+            ) : (
+              <Pressable
+                hitSlop={6}
+                disabled={invalid || unchanged}
+                onPress={() => save(target)}
+              >
+                <Text
+                  style={[
+                    styles.action,
+                    { color: invalid || unchanged ? theme.colors.textFaint : theme.colors.accent },
+                  ]}
+                >
+                  Save
+                </Text>
+              </Pressable>
+            )}
+          </View>
+        </>
+      )}
     </View>
   );
 }
@@ -241,6 +378,35 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     marginTop: 2,
+  },
+  column: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: 10,
+  },
+  rowTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  userAgent: {
+    fontSize: 12,
+    lineHeight: 17,
+    fontFamily: 'monospace',
+  },
+  input: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    minHeight: 72,
+    textAlignVertical: 'top',
+  },
+  buttons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 22,
   },
   action: {
     fontWeight: '700',
