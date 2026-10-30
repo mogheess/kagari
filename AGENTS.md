@@ -620,6 +620,12 @@ With no extensions installed you'll see empty states. Install a repo + extension
   BlurView on Android: its glass is faked (`AndroidGlass` in GlassTabBar), a
   blurred thumbnail of the fixed backdrop cut to the bar's position, plus a
   frost, sheen, rim streak and depth gradient. No per-frame cost.
+- **Keep `RNScreensFragmentFactory` in `MainActivity.onCreate`** (set before
+  `super.onCreate`). When Android kills the app in the background, coming back
+  recreates the activity from saved state; without the factory the fragment
+  manager restores react-native-screens' fragments, which throw "Screen
+  fragments should never be restored" and crash the app on return. To check:
+  open a screen, press Home, `adb shell am kill app.kagari`, reopen.
 - **Release vs debug installs:** they're signed with different keys, so one
   won't install over the other (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`).
   Uninstalling wipes app data, including the repo list.
