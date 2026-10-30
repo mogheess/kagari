@@ -48,5 +48,6 @@ test('"Added to library" entries stored by older versions are dropped', async ()
   const saved = (AsyncStorage.setItem as jest.Mock).mock.calls.filter(
     ([key]) => key === '@kagari/libraryUpdates/v1',
   );
+  expect(saved.length).toBeGreaterThan(0);
   expect(JSON.parse(saved[saved.length - 1][1])).toHaveLength(1);
 });
