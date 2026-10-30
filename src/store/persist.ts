@@ -11,6 +11,27 @@ export interface Persistence<T> {
 }
 
 export function makePersistence<T>(key: string): Persistence<T> {
+  // AsyncStorage runs every write as its own background task, so two writes of
+  // one key can land in either order and leave an older state on disk (deleting
+  // eight downloads at once kept five of them). One write at a time, and only
+  // the newest value waiting: the ones in between are already out of date.
+  let waiting: string | undefined;
+  let writing = false;
+
+  const flush = async () => {
+    writing = true;
+    while (waiting !== undefined) {
+      const raw = waiting;
+      waiting = undefined;
+      try {
+        await AsyncStorage.setItem(key, raw);
+      } catch {
+        // Swallowed like every other storage error; the next save tries again.
+      }
+    }
+    writing = false;
+  };
+
   return {
     load: async () => {
       try {
@@ -21,7 +42,8 @@ export function makePersistence<T>(key: string): Persistence<T> {
       }
     },
     save: (value: T) => {
-      AsyncStorage.setItem(key, JSON.stringify(value)).catch(() => {});
+      waiting = JSON.stringify(value);
+      if (!writing) flush();
     },
   };
 }
