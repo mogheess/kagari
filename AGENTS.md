@@ -273,7 +273,8 @@ when its signing key is trusted (`SignatureTrust`):
   after every page made long chapters crawl. Folders are created under a lock,
   since parallel pages would each make their own. Exported
   backups are also copied to `<root>/backups/`. Pages are staged in
-  `cacheDir/download_tmp` and verified before they're committed. Reads check
+  `noBackupFilesDir/download_tmp` and verified before they're committed (not
+  the cache: Android clears that when storage runs low, mid-copy included). Reads check
   the folder first, then app storage; existing app-storage downloads can be
   moved over from the same row.
 - **Other locations:** gallery saves go to MediaStore `Pictures/Kagari`; caches
