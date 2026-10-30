@@ -673,7 +673,13 @@ class EngineFacade private constructor(context: Context) {
             source.getImage(model).use { response -> writeImageResponse(response, temp) }
         } catch (error: Throwable) {
             temp.delete()
-            directImageResponse(source, imageUrl).use { response -> writeImageResponse(response, temp) }
+            try {
+                directImageResponse(source, imageUrl).use { response -> writeImageResponse(response, temp) }
+            } catch (fallback: Throwable) {
+                // Outside the cache nothing clears a half-written page for us.
+                temp.delete()
+                throw fallback
+            }
         }
         if (imageSize(temp) == null) {
             temp.delete()
