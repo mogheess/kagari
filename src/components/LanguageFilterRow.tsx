@@ -2,7 +2,13 @@ import React, { useMemo } from 'react';
 import { ScrollView, Pressable, Text, StyleSheet } from 'react-native';
 import { useTheme } from '../theme/ThemeProvider';
 import { compareLanguages, langLabel } from '../utils/lang';
-import { useEnabledLanguages, toggleLanguage, clearLanguages } from '../sources/languageFilter';
+import {
+  clearLanguages,
+  isLanguageEnabled,
+  setLanguages,
+  toggleLanguage,
+  useEnabledLanguages,
+} from '../sources/languageFilter';
 import { usePhoneLanguages } from '../sources/languageOrder';
 import type { SourceDto } from '../engine/types';
 
@@ -21,6 +27,8 @@ export function LanguageFilterRow({ sources }: { sources: SourceDto[] }) {
     const set = new Set(sources.map(s => s.lang).filter(Boolean));
     return [...set].sort((a, b) => compareLanguages(a, b, preferred));
   }, [sources, preferred]);
+
+  const filtering = langs.some(l => isLanguageEnabled(l, enabled));
 
   if (langs.length < 2) return null;
 
@@ -50,9 +58,15 @@ export function LanguageFilterRow({ sources }: { sources: SourceDto[] }) {
       keyboardShouldPersistTaps="handled"
     >
       {/* With none of the enabled languages here, every source shows (see
-          filterByLanguages), so All is what's in effect. */}
-      {chip('all', 'All', !enabled.some(l => langs.includes(l)), clearLanguages)}
-      {langs.map(l => chip(l, langLabel(l), enabled.includes(l), () => toggleLanguage(l)))}
+          filterByLanguages), so All is what's in effect, and a tap starts a
+          new selection rather than adding to languages that aren't
+          installed. */}
+      {chip('all', 'All', !filtering, clearLanguages)}
+      {langs.map(l =>
+        chip(l, langLabel(l), isLanguageEnabled(l, enabled), () =>
+          filtering ? toggleLanguage(l) : setLanguages([l]),
+        ),
+      )}
     </ScrollView>
   );
 }

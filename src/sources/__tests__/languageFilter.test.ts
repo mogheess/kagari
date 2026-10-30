@@ -3,7 +3,7 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
   setItem: jest.fn(async () => undefined),
 }));
 
-import { filterByLanguages } from '../languageFilter';
+import { defaultLanguagesFor, filterByLanguages } from '../languageFilter';
 import type { SourceDto } from '../../engine/types';
 
 const source = (id: string, lang: string): SourceDto =>
@@ -24,5 +24,16 @@ describe('filterByLanguages', () => {
   test('a set that matches none of the sources shows everything instead of nothing', () => {
     // Only Spanish extensions installed, English enabled: the lists came up empty.
     expect(filterByLanguages(spanish, ['en'])).toBe(spanish);
+  });
+});
+
+describe('first-run languages', () => {
+  test("every phone language, specific and base, then English", () => {
+    expect(defaultLanguagesFor(['pt-BR', 'fr-CA'])).toEqual(['pt-br', 'pt', 'fr-ca', 'fr', 'en']);
+  });
+
+  test("a regional source matches the phone's language whatever the case", () => {
+    const list = [source('1', 'en'), source('2', 'pt-BR'), source('3', 'ja')];
+    expect(filterByLanguages(list, defaultLanguagesFor(['pt-BR'])).map(s => s.id)).toEqual(['1', '2']);
   });
 });

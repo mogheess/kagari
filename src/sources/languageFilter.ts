@@ -11,29 +11,39 @@
  */
 import { useSyncExternalStore } from 'react';
 import { makePersistence } from '../store/persist';
-import { baseLanguage } from '../utils/lang';
+import { getEngine } from '../engine';
+import { languageKeys } from '../utils/lang';
 import type { SourceDto } from '../engine/types';
 
 const store = makePersistence<string[]>('@kagari/enabled-languages/v1');
 
 /**
- * Seeded once on first run; an explicit (even empty) saved value wins after.
- * The phone's language and English: English alone hid everything from someone
- * who only installed extensions in their own language.
+ * The first-run set: each of the phone's languages, as itself and its base
+ * (`pt-BR` → `pt-br`, `pt`, so a `pt-BR` source matches), and English.
+ * English alone hid everything from someone who only installed extensions in
+ * their own language.
  */
-function defaultLanguages(): string[] {
-  let phone = '';
-  try {
-    phone = baseLanguage(Intl.DateTimeFormat().resolvedOptions().locale);
-  } catch {
-    // No Intl: English alone, and the filter below still never hides everything.
-  }
-  return [...new Set([phone, 'en'].filter(Boolean))];
+export function defaultLanguagesFor(phoneTags: readonly string[]): string[] {
+  return [...new Set([...phoneTags.flatMap(languageKeys), 'en'])];
 }
 
-const DEFAULT_LANGUAGES = defaultLanguages();
+function intlTags(): string[] {
+  try {
+    return [Intl.DateTimeFormat().resolvedOptions().locale];
+  } catch {
+    return [];
+  }
+}
 
-let enabled: string[] = DEFAULT_LANGUAGES;
+const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
+/** Whether `code` is in `languages`, ignoring case (`pt-BR` and `pt-br`). */
+export function isLanguageEnabled(code: string, languages: readonly string[]): boolean {
+  return languages.some(l => same(l, code));
+}
+
+// Until the stored set loads. Intl knows only the phone's first language.
+let enabled: string[] = defaultLanguagesFor(intlTags());
 const listeners = new Set<() => void>();
 
 function emit(): void {
@@ -45,7 +55,12 @@ async function hydrate(): Promise<void> {
   if (stored && Array.isArray(stored)) {
     enabled = stored;
   } else {
-    // No prior preference: persist the English-only default so it sticks.
+    // First run: seed from every language in the phone's settings, which only
+    // the native list has, and persist it so it sticks.
+    const phone = await getEngine()
+      .getDeviceLanguages()
+      .catch(() => []);
+    if (phone.length > 0) enabled = defaultLanguagesFor(phone);
     store.save(enabled);
   }
   emit();
@@ -53,9 +68,16 @@ async function hydrate(): Promise<void> {
 
 /** Toggles a language code in/out of the enabled set. */
 export function toggleLanguage(code: string): void {
-  enabled = enabled.includes(code)
-    ? enabled.filter(c => c !== code)
+  enabled = isLanguageEnabled(code, enabled)
+    ? enabled.filter(c => !same(c, code))
     : [...enabled, code];
+  emit();
+  store.save(enabled);
+}
+
+/** Enables exactly these languages. */
+export function setLanguages(codes: string[]): void {
+  enabled = codes;
   emit();
   store.save(enabled);
 }
@@ -71,12 +93,13 @@ export function clearLanguages(): void {
  * Keeps only sources in the enabled languages; empty set = all. A set that
  * matches none of them is ignored: with English enabled and only Spanish
  * extensions installed, every source list came up empty, and the chips to
- * change it only show when there are two languages or more.
+ * change it only show when there are two languages or more. The set itself
+ * stays, so it applies again once a source in one of its languages is back.
  */
 export function filterByLanguages(sources: SourceDto[], languages: string[]): SourceDto[] {
   if (languages.length === 0) return sources;
-  const set = new Set(languages);
-  const kept = sources.filter(s => set.has(s.lang));
+  const set = new Set(languages.map(l => l.toLowerCase()));
+  const kept = sources.filter(s => set.has(s.lang.toLowerCase()));
   return kept.length > 0 ? kept : sources;
 }
 
