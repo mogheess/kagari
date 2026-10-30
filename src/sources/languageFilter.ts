@@ -4,19 +4,34 @@
  * Extension repos expose the same source in many languages, which makes the
  * picker overwhelming. Like Mihon's "enabled languages" setting, this lets the
  * user narrow the lists to the languages they actually read. On first launch we
- * default to English so the picker isn't flooded with every localization; the
- * user can add languages or clear the filter (empty set = "show all") and that
- * choice is respected from then on.
+ * default to the phone's language and English so the picker isn't flooded with
+ * every localization; the user can add languages or clear the filter (empty
+ * set = "show all") and that choice is respected from then on.
  * Persisted with AsyncStorage and exposed reactively via useSyncExternalStore.
  */
 import { useSyncExternalStore } from 'react';
 import { makePersistence } from '../store/persist';
+import { baseLanguage } from '../utils/lang';
 import type { SourceDto } from '../engine/types';
 
 const store = makePersistence<string[]>('@kagari/enabled-languages/v1');
 
-/** Seeded once on first run; an explicit (even empty) saved value wins after. */
-const DEFAULT_LANGUAGES = ['en'];
+/**
+ * Seeded once on first run; an explicit (even empty) saved value wins after.
+ * The phone's language and English: English alone hid everything from someone
+ * who only installed extensions in their own language.
+ */
+function defaultLanguages(): string[] {
+  let phone = '';
+  try {
+    phone = baseLanguage(Intl.DateTimeFormat().resolvedOptions().locale);
+  } catch {
+    // No Intl: English alone, and the filter below still never hides everything.
+  }
+  return [...new Set([phone, 'en'].filter(Boolean))];
+}
+
+const DEFAULT_LANGUAGES = defaultLanguages();
 
 let enabled: string[] = DEFAULT_LANGUAGES;
 const listeners = new Set<() => void>();
@@ -52,11 +67,17 @@ export function clearLanguages(): void {
   store.save(enabled);
 }
 
-/** Keeps only sources in the enabled languages; empty set = all. */
+/**
+ * Keeps only sources in the enabled languages; empty set = all. A set that
+ * matches none of them is ignored: with English enabled and only Spanish
+ * extensions installed, every source list came up empty, and the chips to
+ * change it only show when there are two languages or more.
+ */
 export function filterByLanguages(sources: SourceDto[], languages: string[]): SourceDto[] {
   if (languages.length === 0) return sources;
   const set = new Set(languages);
-  return sources.filter(s => set.has(s.lang));
+  const kept = sources.filter(s => set.has(s.lang));
+  return kept.length > 0 ? kept : sources;
 }
 
 function subscribe(cb: () => void): () => void {

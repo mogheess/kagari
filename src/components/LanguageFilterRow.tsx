@@ -49,7 +49,9 @@ export function LanguageFilterRow({ sources }: { sources: SourceDto[] }) {
       contentContainerStyle={styles.row}
       keyboardShouldPersistTaps="handled"
     >
-      {chip('all', 'All', enabled.length === 0, clearLanguages)}
+      {/* With none of the enabled languages here, every source shows (see
+          filterByLanguages), so All is what's in effect. */}
+      {chip('all', 'All', !enabled.some(l => langs.includes(l)), clearLanguages)}
       {langs.map(l => chip(l, langLabel(l), enabled.includes(l), () => toggleLanguage(l)))}
     </ScrollView>
   );

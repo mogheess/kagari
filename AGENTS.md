@@ -307,7 +307,9 @@ When you add a new persisted store, follow the favorites pattern (in-memory stat
 - **Discover**: a **Source | Global** segmented toggle.
   - **Source** mode: single-source picker (`SourcePickerSheet`, grouped by
     extension with language + NSFW tags, filtered by the enabled languages in
-    `languageFilter.ts`), debounced search, a **Popular | Latest** toggle (Latest
+    `languageFilter.ts`: phone language + English on a fresh install, and a set
+    that matches none of the installed sources is ignored rather than hiding
+    them all), debounced search, a **Popular | Latest** toggle (Latest
     hidden when the source can't), infinite scroll, typed error/empty states.
     A **Filters** button appears when the source declares filters
     (`FilterSheet`; edits stay a draft until Apply). Native writes the edited
