@@ -35,7 +35,10 @@ class StorageManager(context: Context) {
      */
     private val chapterDirs = appContext.getSharedPreferences(CHAPTER_DIRS, Context.MODE_PRIVATE)
 
-    private val listings = HashMap<String, Map<String, DocumentFile>>()
+    /** A file in a cached folder listing, with its size read once at listing time. */
+    private class Listed(val file: DocumentFile, val length: Long)
+
+    private val listings = HashMap<String, Map<String, Listed>>()
 
     // --- location ----------------------------------------------------------
 
@@ -158,24 +161,45 @@ class StorageManager(context: Context) {
         chapterDirs.edit().putString(chapterKey(sourceId, chapterUrl), uri.toString()).apply()
     }
 
-    /** Page files in a chapter folder by index, from a cached listing. */
-    fun pages(dir: DocumentFile): Map<Int, DocumentFile> {
+    /**
+     * A folder's files by name. Listed once, then kept up to date by
+     * [recordFile]: listing a SAF folder costs a query per file, and doing it
+     * after every page made long chapters crawl. Built under the lock, so a
+     * file recorded meanwhile can't be lost to a listing taken before it.
+     */
+    private fun listing(dir: DocumentFile): Map<String, Listed> = synchronized(listings) {
         val key = dir.uri.toString()
-        val listing = synchronized(listings) { listings[key] } ?: run {
-            val fresh = HashMap<String, DocumentFile>()
+        listings[key] ?: HashMap<String, Listed>().also { fresh ->
             for (file in dir.listFiles()) {
                 val name = file.name ?: continue
-                if (file.isFile && file.length() > 0L) fresh[name] = file
+                if (file.isFile) fresh[name] = Listed(file, file.length())
             }
-            synchronized(listings) { listings[key] = fresh }
-            fresh
+            listings[key] = fresh
         }
+    }
+
+    /** Page files in a chapter folder by index, from a cached listing. */
+    fun pages(dir: DocumentFile): Map<Int, DocumentFile> {
         val byIndex = HashMap<Int, DocumentFile>()
-        for ((name, file) in listing) {
+        for ((name, listed) in listing(dir)) {
+            if (listed.length <= 0L) continue
             val index = DownloadNaming.pageIndexOf(name) ?: continue
-            byIndex[index] = file
+            byIndex[index] = listed.file
         }
         return byIndex
+    }
+
+    /** A file in a folder by name, from the cached listing (`findFile` lists the folder each time). */
+    fun file(dir: DocumentFile, name: String): DocumentFile? = listing(dir)[name]?.file
+
+    /** Adds a file just written to the folder's cached listing. */
+    fun recordFile(dir: DocumentFile, name: String, file: DocumentFile, length: Long) {
+        synchronized(listings) {
+            val key = dir.uri.toString()
+            // Not listed yet: the first lookup will list it, this file included.
+            val current = listings[key] ?: return
+            listings[key] = current + (name to Listed(file, length))
+        }
     }
 
     fun invalidate(dir: DocumentFile) {

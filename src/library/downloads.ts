@@ -125,7 +125,13 @@ export async function migrateDownloadsToStorage(
   return { moved, failed };
 }
 
-/** Processes queued chapters one at a time. */
+/**
+ * Pages of a chapter downloaded at once. The source's own rate limit still
+ * applies on top: pages go through its HTTP client.
+ */
+const PAGE_CONCURRENCY = 4;
+
+/** Processes queued chapters one at a time, several pages at once. */
 async function pump(): Promise<void> {
   if (running || !hydrated || paused) return;
   const next = entries.find(e => e.status === 'queued');
@@ -144,20 +150,40 @@ async function pump(): Promise<void> {
       return;
     }
     patch(sourceId, chapterUrl, { pageCount: pages.length });
-    for (let i = 0; i < pages.length; i += 1) {
-      if (!entries.some(e => sameChapter(e, sourceId, chapterUrl))) return; // cancelled mid-run
-      if (paused) {
-        // Stop after the page in flight. Pages already saved are skipped on
-        // resume (downloadPage is idempotent), so nothing is fetched twice.
-        patch(sourceId, chapterUrl, { status: 'queued' });
-        return;
+    // The next chapter's page list loads meanwhile (it's cached), so the queue
+    // doesn't sit idle between chapters while a page list is fetched.
+    const after = entries.find(e => e.status === 'queued' && !sameChapter(e, sourceId, chapterUrl));
+    if (after) loadPages(after.sourceId, after.chapterUrl, after.memo).catch(() => {});
+    // Several pages at once: one at a time left most of the connection idle.
+    // Each worker takes the next page until none are left or the chapter
+    // stops; a failure stops the others after their page in flight.
+    let cursor = 0;
+    let saved = 0;
+    let failure: unknown;
+    const worker = async (): Promise<void> => {
+      while (cursor < pages.length && failure === undefined && !paused) {
+        if (!entries.some(e => sameChapter(e, sourceId, chapterUrl))) return; // cancelled mid-run
+        const page = pages[cursor++];
+        try {
+          await engine.downloadPage(sourceId, chapterUrl, page, downloadMeta(next));
+        } catch (e) {
+          if (failure === undefined) failure = e;
+          return;
+        }
+        saved += 1;
+        patch(sourceId, chapterUrl, { downloaded: saved });
       }
-      await engine.downloadPage(sourceId, chapterUrl, pages[i], downloadMeta(next));
-      patch(sourceId, chapterUrl, { downloaded: i + 1 });
+    };
+    await Promise.all(Array.from({ length: Math.min(PAGE_CONCURRENCY, pages.length) }, worker));
+    if (failure !== undefined) throw failure;
+    if (!entries.some(e => sameChapter(e, sourceId, chapterUrl))) return; // cancelled
+    if (saved < pages.length) {
+      // Paused. Pages already saved are skipped on resume (downloadPage is
+      // idempotent), so nothing is fetched twice.
+      patch(sourceId, chapterUrl, { status: 'queued' });
+      return;
     }
-    if (entries.some(e => sameChapter(e, sourceId, chapterUrl))) {
-      patch(sourceId, chapterUrl, { status: 'done' });
-    }
+    patch(sourceId, chapterUrl, { status: 'done' });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     if (entries.some(e2 => sameChapter(e2, sourceId, chapterUrl))) {

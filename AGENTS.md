@@ -229,8 +229,11 @@ when its signing key is trusted (`SignatureTrust`):
 
 ### Downloads and storage
 
-- **Queue:** `src/library/downloads.ts` is a persisted single-worker queue
-  (re-queues anything mid-download on launch). MangaDetail multi-select and the
+- **Queue:** `src/library/downloads.ts` is a persisted queue that takes one
+  chapter at a time and `PAGE_CONCURRENCY` (4) of its pages at once, and loads
+  the next chapter's page list meanwhile (re-queues anything mid-download on
+  launch). The source's own rate limit still applies: pages go through its
+  client, so some sources stay near one page a second. MangaDetail multi-select and the
   bulk sheet (All / Unread) enqueue in batches. `DownloadQueueScreen` (Profile →
   Download queue, or the pill in the Library header while it runs) shows only
   what's waiting or failed.
@@ -251,7 +254,11 @@ when its signing key is trusted (`SignatureTrust`):
   SAF (`StorageManager`, persisted tree URI). Downloads then use Mihon's
   layout from `DownloadNaming`:
   `<root>/downloads/<Source (LANG)>/<Title>/<[scanlator_]Chapter_<md5(url):6>>/001.jpg`,
-  with the same FAT-safe names and length cap, plus `.nomedia`. Exported
+  with the same FAT-safe names and length cap, plus `.nomedia`. Each chapter
+  folder is listed once and the listing kept up to date as pages are written
+  (`StorageManager.recordFile`): SAF costs a query per file, and re-listing
+  after every page made long chapters crawl. Folders are created under a lock,
+  since parallel pages would each make their own. Exported
   backups are also copied to `<root>/backups/`. Pages are staged in
   `cacheDir/download_tmp` and verified before they're committed. Reads check
   the folder first, then app storage; existing app-storage downloads can be
