@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BackHandler, Linking, StyleSheet, View } from 'react-native';
-import { StackActions, useNavigation } from '@react-navigation/native';
+import { CommonActions, StackActions, useNavigation } from '@react-navigation/native';
 import { GlassTabBar } from './GlassTabBar';
 import { ScreenBackdrop } from '../components/ScreenBackdrop';
 import { useTheme } from '../theme/ThemeProvider';
@@ -75,9 +75,15 @@ export function TabsScreen() {
     });
   }, []);
 
-  // The new-chapters notification opens kagari://updates.
+  // The new-chapters notification opens kagari://updates, the download one
+  // kagari://downloads.
   useEffect(() => {
     const open = (url: string | null) => {
+      if (url?.startsWith('kagari://downloads')) {
+        // pop: back to the queue if it's already open, rather than a second copy.
+        navigation.dispatch(CommonActions.navigate('DownloadQueue', undefined, { pop: true }));
+        return;
+      }
       if (!url?.startsWith('kagari://updates')) return;
       // A title or the reader may be open on top of the tabs.
       if (navigation.canGoBack()) navigation.dispatch(StackActions.popToTop());

@@ -9,11 +9,13 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
+import com.manhwa.downloads.DownloadService
 import com.manhwa.engine.EngineException
 import com.manhwa.engine.EngineFacade
 import com.manhwa.updates.BackgroundUpdates
 import com.manhwa.engine.backup.ExportRequest
 import com.manhwa.engine.dto.ChapterKeyDto
+import com.manhwa.engine.dto.DownloadActivityDto
 import com.manhwa.engine.dto.DownloadMetaDto
 import com.manhwa.engine.dto.PageDto
 import com.manhwa.engine.dto.StorageLocationDto
@@ -58,6 +60,8 @@ class ManhwaEngineModule(
 
     init {
         reactContext.addActivityEventListener(this)
+        // Pause on the download notification goes to the JS queue, which owns it.
+        DownloadService.pauseListener = { reactContext.emitDeviceEvent(DOWNLOADS_PAUSE_EVENT) }
     }
 
     override fun getName(): String = NAME
@@ -79,6 +83,22 @@ class ManhwaEngineModule(
     fun reload(promise: Promise) = resolve(promise) {
         facade.reload()
         ""
+    }
+
+    /**
+     * What the download queue is doing (JSON), or null when it's idle or paused.
+     * Runs on the module's own thread rather than the IO pool, so updates land
+     * in the order they were sent.
+     */
+    @ReactMethod
+    fun setDownloadActivity(activityJson: String?, promise: Promise) {
+        try {
+            val activity = activityJson?.let { json.decodeFromString<DownloadActivityDto>(it) }
+            DownloadService.update(reactContext.applicationContext, activity)
+            promise.resolve("")
+        } catch (e: Throwable) {
+            promise.reject("unknown", e.message, e)
+        }
     }
 
     /** [intervalHours] 0 turns the background new-chapters check off. */
@@ -573,6 +593,8 @@ class ManhwaEngineModule(
 
     companion object {
         const val NAME = "ManhwaEngine"
+        /** Emitted when Pause is tapped on the download notification. */
+        const val DOWNLOADS_PAUSE_EVENT = "KagariDownloadsPause"
         private const val PICK_BACKUP_REQUEST = 0xBAC0
         private const val PICK_STORAGE_REQUEST = 0xBAC1
         private const val WEBVIEW_REQUEST = 0xBAC2

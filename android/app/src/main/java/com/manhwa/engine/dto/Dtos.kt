@@ -182,6 +182,19 @@ data class UserAgentDto(
     val custom: Boolean,
 )
 
+/** What the download queue is doing, for the notification that keeps it alive. */
+@Serializable
+data class DownloadActivityDto(
+    val title: String,
+    val chapterName: String,
+    /** Pages saved of the chapter downloading now. */
+    val downloaded: Int,
+    /** 0 until its page list is known. */
+    val pageCount: Int,
+    /** Chapters still to download, this one included. */
+    val remaining: Int,
+)
+
 /** Identifies one chapter's download. */
 @Serializable
 data class ChapterKeyDto(

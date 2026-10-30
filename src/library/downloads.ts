@@ -12,6 +12,7 @@ import { useMemo, useSyncExternalStore } from 'react';
 import { makePersistence } from '../store/persist';
 import { getEngine } from '../engine';
 import { loadPages } from '../engine/pageCache';
+import { syncDownloadService } from './downloadActivity';
 import type { MangaDto, ChapterDto, DownloadMeta } from '../engine/types';
 
 export type DownloadStatus = 'queued' | 'downloading' | 'done' | 'error';
@@ -51,6 +52,8 @@ const listeners = new Set<() => void>();
 
 function emit(): void {
   for (const l of listeners) l();
+  // Keeps the app alive in the background while there's work (see downloadActivity).
+  syncDownloadService(entries, paused);
 }
 
 function persist(): void {
@@ -86,6 +89,13 @@ async function hydrate(): Promise<void> {
     entries = [...byKey.values()];
   }
   hydrated = true;
+  // Pause on the download notification pauses the queue, as the button in the
+  // app does. Registered here rather than at import, once the engine is up.
+  // Ignored once the queue has emptied: a tap that lands just after the last
+  // chapter would leave the next download waiting on a pause nobody sees.
+  getEngine().onDownloadsPauseRequested(() => {
+    if (entries.some(e => e.status === 'queued' || e.status === 'downloading')) pauseDownloads();
+  });
   emit();
   persist();
   void pump();

@@ -66,6 +66,8 @@ function createUnavailableEngine(): Engine {
     getDeviceLanguages: () => Promise.resolve([]),
     setKeepScreenOn: () => Promise.resolve(),
     setBackgroundUpdates: () => Promise.resolve(),
+    setDownloadActivity: () => Promise.resolve(),
+    onDownloadsPauseRequested: () => () => {},
     takeBackgroundUpdates: () => Promise.resolve({ updates: [], snapshots: {} }),
     openInWebView: reject,
     clearCookies: reject,
