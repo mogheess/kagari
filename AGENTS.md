@@ -278,7 +278,7 @@ Local state persists via `@react-native-async-storage/async-storage`, wrapped by
   persisted here too.
 - Others follow the same pattern: `history.ts`, `chapterProgress.ts` (per-chapter
   read flag + last page), `downloads.ts`, `libraryUpdates.ts`, `tierLists.ts`,
-  `collections.ts` (library view), `recentlyAdded.ts`, `storageLocation.ts`,
+  `collections.ts` (library view), `storageLocation.ts`,
   `scanlatorFilters.ts` (hidden scan groups per title),
   `src/sources/` (`pinned`, `languageFilter`, `sourceHealth`), `src/reader/readerSettings.ts`,
   and the theme/appearance prefs in `ThemeProvider`. `src/engine/mangaCache.ts`
@@ -399,8 +399,9 @@ When you add a new persisted store, follow the favorites pattern (in-memory stat
   `src/library/libraryUpdates.ts` (see *Update checks*): each favorite's chapter
   list is snapshotted per source, diffed on scan, and new chapters land here
   (grouped by day, per-row dismiss, clear-all, pull-to-refresh to force a scan).
-  A first-seen manga is baselined silently so the backlog doesn't flood (a title
-  you just added by hand is the exception, via `recentlyAdded.ts`). The Updates
+  A first-seen manga is baselined silently so the backlog doesn't flood, a
+  title just added by hand included: an "Added to library" entry used to show
+  up there, but only on the next scan, hours later, so it was dropped. The Updates
   tab shows an unseen badge on the bottom nav. Read chapters don't drop off the
   feed yet.
 - **Update checks** (`App.tsx` `UpdateBootstrap`): two checkers run on launch
@@ -482,7 +483,7 @@ src/
                  chapterProgress (read flags + resume), libraryUpdates
                  (new-chapters scan/feed), backgroundUpdates (closed-app
                  check settings), scanlatorFilters (hidden scan groups),
-                 recentlyAdded, downloads (queue),
+                 downloads (queue),
                  downloadQueue (queue grouping), downloadsLibrary (library
                  side of downloads),
                  storageLocation, collectionCovers, migrate (cross-source +

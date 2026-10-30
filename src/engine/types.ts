@@ -86,7 +86,7 @@ export interface BackgroundUpdateDto {
   latestChapterName: string;
   latestChapterUrl: string;
   foundAt: number;
-  kind?: 'new' | 'added';
+  kind?: 'new';
 }
 
 /** What background checks found since the app last asked. */

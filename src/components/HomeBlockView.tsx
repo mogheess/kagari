@@ -141,7 +141,6 @@ function NewChaptersBlock({ onOpenManga }: { onOpenManga: (m: MangaDto) => void 
     const seen = new Set<string>();
     const out: LibraryUpdate[] = [];
     for (const u of feed) {
-      if (u.kind === 'added') continue;
       const key = favoriteKey(u.sourceId, u.mangaUrl);
       if (seen.has(key)) continue;
       seen.add(key);
