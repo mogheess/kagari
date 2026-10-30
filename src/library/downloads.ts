@@ -46,6 +46,14 @@ const pausedStore = makePersistence<boolean>('@kagari/downloads/paused/v1');
 let entries: DownloadEntry[] = [];
 let hydrated = false;
 let running = false;
+/** Brings the running chapter back up to PAGE_CONCURRENCY workers (after a resume). */
+let topUpWorkers: (() => void) | null = null;
+/**
+ * Bumped when a chapter's entry is removed, so a run still finishing its last
+ * pages can tell its own entry from the one made by queueing it again.
+ */
+const removals = new Map<string, number>();
+const chapterId = (sourceId: string, chapterUrl: string) => `${sourceId}\u0000${chapterUrl}`;
 /** Queue paused by the user. Persisted: a paused queue stays paused after a restart. */
 let paused = false;
 const listeners = new Set<() => void>();
@@ -135,45 +143,120 @@ export async function migrateDownloadsToStorage(
   return { moved, failed };
 }
 
-/** Processes queued chapters one at a time. */
+/**
+ * Pages of a chapter downloaded at once. The source's own rate limit still
+ * applies on top: pages go through its HTTP client.
+ */
+const PAGE_CONCURRENCY = 4;
+
+/** Processes queued chapters one at a time, several pages at once. */
 async function pump(): Promise<void> {
   if (running || !hydrated || paused) return;
   const next = entries.find(e => e.status === 'queued');
   if (!next) return;
   running = true;
   const { sourceId, chapterUrl } = next;
-  patch(sourceId, chapterUrl, { status: 'downloading', downloaded: 0, error: undefined });
+  // This run's entry. Cancelling removes it, and queueing the chapter again
+  // makes a new one that this run must leave alone.
+  const id = chapterId(sourceId, chapterUrl);
+  const generation = removals.get(id) ?? 0;
+  const ours = (e: DownloadEntry) =>
+    sameChapter(e, sourceId, chapterUrl) && (removals.get(id) ?? 0) === generation;
+  const live = () => entries.some(ours);
+  const update = (changes: Partial<DownloadEntry>, save = true) => {
+    if (!live()) return;
+    entries = entries.map(e => (ours(e) ? { ...e, ...changes } : e));
+    emit();
+    if (save) persist();
+  };
+  update({ status: 'downloading', downloaded: 0, error: undefined });
+  let cancelledMidway = false;
   try {
     const engine = getEngine();
     const pages = await loadPages(sourceId, chapterUrl, next.memo);
-    if (!entries.some(e => sameChapter(e, sourceId, chapterUrl))) return; // cancelled
+    if (!live()) return; // cancelled before any page was written
     if (pages.length === 0) {
       // A "done" download with zero pages is useless and can't be re-queued
       // (enqueueDownload skips non-error entries), so surface it as a failure.
-      patch(sourceId, chapterUrl, { status: 'error', error: 'The source returned no pages' });
+      update({ status: 'error', error: 'The source returned no pages' });
       return;
     }
-    patch(sourceId, chapterUrl, { pageCount: pages.length });
-    for (let i = 0; i < pages.length; i += 1) {
-      if (!entries.some(e => sameChapter(e, sourceId, chapterUrl))) return; // cancelled mid-run
-      if (paused) {
-        // Stop after the page in flight. Pages already saved are skipped on
-        // resume (downloadPage is idempotent), so nothing is fetched twice.
-        patch(sourceId, chapterUrl, { status: 'queued' });
-        return;
+    update({ pageCount: pages.length });
+    // The next chapter's page list loads meanwhile (it's cached), so the queue
+    // doesn't sit idle between chapters while a page list is fetched.
+    const after = entries.find(e => e.status === 'queued' && !ours(e));
+    if (after) loadPages(after.sourceId, after.chapterUrl, after.memo).catch(() => {});
+    // Several pages at once: one at a time left most of the connection idle.
+    // Each worker takes the next page until none are left or the chapter
+    // stops; a failure stops the others after their page in flight.
+    let cursor = 0;
+    let saved = 0;
+    let failure: unknown;
+    const more = () => cursor < pages.length && failure === undefined && !paused && live();
+    const worker = async (): Promise<void> => {
+      while (more()) {
+        const page = pages[cursor++];
+        try {
+          await engine.downloadPage(sourceId, chapterUrl, page, downloadMeta(next));
+        } catch (e) {
+          if (failure === undefined) failure = e;
+          return;
+        }
+        saved += 1;
+        // Progress isn't saved: a chapter cut off mid-way starts over anyway.
+        update({ downloaded: saved }, false);
       }
-      await engine.downloadPage(sourceId, chapterUrl, pages[i], downloadMeta(next));
-      patch(sourceId, chapterUrl, { downloaded: i + 1 });
+    };
+    // Workers come and go: a pause lets them run out, and a resume while some
+    // are still going adds new ones here (the queue is still busy with this
+    // chapter, so resume can't start another run). Once the last one ends the
+    // chapter is settled; closing first keeps a late resume from adding one.
+    let active = 0;
+    let closed = false;
+    let settle!: () => void;
+    const settled = new Promise<void>(resolve => {
+      settle = resolve;
+    });
+    const spawn = () => {
+      while (!closed && active < PAGE_CONCURRENCY && more()) {
+        active += 1;
+        worker().finally(() => {
+          active -= 1;
+          if (active === 0) {
+            closed = true;
+            settle();
+          }
+        });
+      }
+      if (active === 0) {
+        closed = true;
+        settle();
+      }
+    };
+    topUpWorkers = spawn;
+    spawn();
+    await settled;
+    topUpWorkers = null;
+    if (failure !== undefined) throw failure;
+    if (!live()) {
+      cancelledMidway = true;
+      return;
     }
-    if (entries.some(e => sameChapter(e, sourceId, chapterUrl))) {
-      patch(sourceId, chapterUrl, { status: 'done' });
+    if (saved < pages.length) {
+      // Paused. Pages already saved are skipped on resume (downloadPage is
+      // idempotent), so nothing is fetched twice.
+      update({ status: 'queued' });
+      return;
     }
+    update({ status: 'done' });
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    if (entries.some(e2 => sameChapter(e2, sourceId, chapterUrl))) {
-      patch(sourceId, chapterUrl, { status: 'error', error: message });
-    }
+    update({ status: 'error', error: e instanceof Error ? e.message : String(e) });
   } finally {
+    // removeDownload deleted the files while pages were still landing, and
+    // those can bring the folder back. Done before the next run starts, which
+    // may be this chapter queued again.
+    if (cancelledMidway) await getEngine().deleteDownloadedChapter(sourceId, chapterUrl).catch(() => {});
+    topUpWorkers = null;
     running = false;
     void pump();
   }
@@ -256,6 +339,8 @@ export function enqueueDownloads(manga: MangaDto, chapters: readonly ChapterDto[
 
 /** Removes a chapter from the queue/library and deletes its files. */
 export function removeDownload(sourceId: string, chapterUrl: string): void {
+  const id = chapterId(sourceId, chapterUrl);
+  removals.set(id, (removals.get(id) ?? 0) + 1);
   entries = entries.filter(e => !sameChapter(e, sourceId, chapterUrl));
   emit();
   persist();
@@ -314,6 +399,8 @@ export function resumeDownloads(): void {
   paused = false;
   pausedStore.save(false);
   emit();
+  // Paused mid-chapter with pages still landing, the run is still going.
+  topUpWorkers?.();
   void pump();
 }
 

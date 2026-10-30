@@ -8,6 +8,7 @@ import androidx.documentfile.provider.DocumentFile
 import com.manhwa.engine.dto.DownloadMetaDto
 import com.manhwa.engine.dto.StorageLocationDto
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * The user-chosen storage location, Mihon style: one folder picked through the
@@ -35,7 +36,15 @@ class StorageManager(context: Context) {
      */
     private val chapterDirs = appContext.getSharedPreferences(CHAPTER_DIRS, Context.MODE_PRIVATE)
 
-    private val listings = HashMap<String, Map<String, DocumentFile>>()
+    /** A file in a cached folder listing, with its size read once at listing time. */
+    private class Listed(val file: DocumentFile, val length: Long)
+
+    private val listings = ConcurrentHashMap<String, Map<String, Listed>>()
+
+    /** One lock per folder: listing a long chapter mustn't hold up every other folder. */
+    private val listingLocks = ConcurrentHashMap<String, Any>()
+
+    private fun lockFor(key: String): Any = listingLocks.computeIfAbsent(key) { Any() }
 
     // --- location ----------------------------------------------------------
 
@@ -51,7 +60,7 @@ class StorageManager(context: Context) {
             // the choice anyway; describe() reports it unwritable if it is.
         }
         prefs.edit().putString(KEY_TREE_URI, uri.toString()).apply()
-        synchronized(listings) { listings.clear() }
+        listings.clear()
     }
 
     fun clearTreeUri() {
@@ -66,7 +75,7 @@ class StorageManager(context: Context) {
             }
         }
         prefs.edit().remove(KEY_TREE_URI).apply()
-        synchronized(listings) { listings.clear() }
+        listings.clear()
     }
 
     fun describe(): StorageLocationDto? {
@@ -158,28 +167,62 @@ class StorageManager(context: Context) {
         chapterDirs.edit().putString(chapterKey(sourceId, chapterUrl), uri.toString()).apply()
     }
 
+    /**
+     * A folder's files by name. Listed once, then kept up to date by
+     * [recordFile] and [forgetFile]: listing a SAF folder costs a query per
+     * file, and doing it after every page made long chapters crawl. Built
+     * under the folder's lock, so a file recorded meanwhile can't be lost to
+     * a listing taken before it.
+     */
+    private fun listing(dir: DocumentFile): Map<String, Listed> {
+        val key = dir.uri.toString()
+        return synchronized(lockFor(key)) {
+            listings[key] ?: HashMap<String, Listed>().also { fresh ->
+                for (file in dir.listFiles()) {
+                    val name = file.name ?: continue
+                    if (file.isFile) fresh[name] = Listed(file, file.length())
+                }
+                listings[key] = fresh
+            }
+        }
+    }
+
     /** Page files in a chapter folder by index, from a cached listing. */
     fun pages(dir: DocumentFile): Map<Int, DocumentFile> {
-        val key = dir.uri.toString()
-        val listing = synchronized(listings) { listings[key] } ?: run {
-            val fresh = HashMap<String, DocumentFile>()
-            for (file in dir.listFiles()) {
-                val name = file.name ?: continue
-                if (file.isFile && file.length() > 0L) fresh[name] = file
-            }
-            synchronized(listings) { listings[key] = fresh }
-            fresh
-        }
         val byIndex = HashMap<Int, DocumentFile>()
-        for ((name, file) in listing) {
+        for ((name, listed) in listing(dir)) {
+            if (listed.length <= 0L) continue
             val index = DownloadNaming.pageIndexOf(name) ?: continue
-            byIndex[index] = file
+            byIndex[index] = listed.file
         }
         return byIndex
     }
 
+    /** A file in a folder by name, from the cached listing (`findFile` lists the folder each time). */
+    fun file(dir: DocumentFile, name: String): DocumentFile? = listing(dir)[name]?.file
+
+    /** Adds a file just written to the folder's cached listing. */
+    fun recordFile(dir: DocumentFile, name: String, file: DocumentFile, length: Long) {
+        val key = dir.uri.toString()
+        synchronized(lockFor(key)) {
+            // Not listed yet: the first lookup will list it, this file included.
+            val current = listings[key] ?: return
+            listings[key] = current + (name to Listed(file, length))
+        }
+    }
+
+    /** Drops a file just deleted from the folder's cached listing. */
+    fun forgetFile(dir: DocumentFile, name: String) {
+        val key = dir.uri.toString()
+        synchronized(lockFor(key)) {
+            val current = listings[key] ?: return
+            listings[key] = current - name
+        }
+    }
+
     fun invalidate(dir: DocumentFile) {
-        synchronized(listings) { listings.remove(dir.uri.toString()) }
+        val key = dir.uri.toString()
+        synchronized(lockFor(key)) { listings.remove(key) }
     }
 
     // --- helpers -----------------------------------------------------------

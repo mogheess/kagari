@@ -614,8 +614,15 @@ class EngineFacade private constructor(context: Context) {
         val src = sourceOrNull(sourceId) ?: return null
         // Mihon names the folder after HttpSource.toString(): "<name> (<LANG>)".
         val lang = (src as? CatalogueSource)?.lang ?: ""
-        return storage.chapterDir(sourceId, src.name, lang, chapterUrl, meta, create)
+        if (!create) return storage.chapterDir(sourceId, src.name, lang, chapterUrl, meta, false)
+        // A chapter's pages download in parallel, and each would otherwise find
+        // no folder and make its own ("Chapter (1)", "Chapter (2)", ...).
+        return synchronized(chapterDirLock) {
+            storage.chapterDir(sourceId, src.name, lang, chapterUrl, meta, true)
+        }
     }
+
+    private val chapterDirLock = Any()
 
     /**
      * Downloads one page to persistent storage; returns its uri (`file://` in
@@ -669,20 +676,41 @@ class EngineFacade private constructor(context: Context) {
 
         if (external != null) {
             val name = DownloadNaming.pageFileName(page.index, extension)
-            external.findFile(name)?.delete()
+            storage.file(external, name)?.let { old ->
+                old.delete()
+                storage.forgetFile(external, name)
+            }
             val doc = external.createFile(mimeFor(extension), name)
                 ?: run {
                     temp.delete()
                     throw EngineException("storage", "Could not create $name in the storage location")
                 }
+            // The listing is cached, so a file it doesn't know about (put there
+            // from outside) can still hold the name, and SAF then picks
+            // "009 (1).jpg", which reads skip. Replace the old one instead,
+            // and give up on the page if that doesn't work.
+            val created = doc.name
+            if (created != null && created != name) {
+                external.findFile(name)?.delete()
+                if (!doc.renameTo(name) || doc.name != name) {
+                    doc.delete()
+                    temp.delete()
+                    throw EngineException("storage", "Could not save $name in the storage location")
+                }
+            }
+            val length = temp.length()
             try {
                 appContext.contentResolver.openOutputStream(doc.uri, "w")?.use { sink ->
                     temp.inputStream().use { it.copyTo(sink) }
                 } ?: throw EngineException("storage", "Could not write $name to the storage location")
+            } catch (error: Throwable) {
+                // Leave no empty page behind for the cached listing to miss.
+                doc.delete()
+                throw error
             } finally {
                 temp.delete()
             }
-            storage.invalidate(external)
+            storage.recordFile(external, name, doc, length)
             return doc.uri.toString()
         }
 
@@ -773,8 +801,9 @@ class EngineFacade private constructor(context: Context) {
     /** Removes all downloaded pages for a chapter, wherever they live. */
     fun deleteDownloadedChapter(sourceId: String, chapterUrl: String) {
         externalChapterDir(sourceId, chapterUrl, meta = null, create = false)?.let { dir ->
-            storage.invalidate(dir)
             dir.delete()
+            // After the delete: a page landing meanwhile could list it again.
+            storage.invalidate(dir)
             storage.forgetChapterDir(sourceId, chapterUrl)
         }
         internalChapterDir(sourceId, chapterUrl).deleteRecursively()
