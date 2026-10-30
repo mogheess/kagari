@@ -253,7 +253,8 @@ when its signing key is trusted (`SignatureTrust`):
   `<root>/downloads/<Source (LANG)>/<Title>/<[scanlator_]Chapter_<md5(url):6>>/001.jpg`,
   with the same FAT-safe names and length cap, plus `.nomedia`. Exported
   backups are also copied to `<root>/backups/`. Pages are staged in
-  `cacheDir/download_tmp` and verified before they're committed. Reads check
+  `noBackupFilesDir/download_tmp` and verified before they're committed (not
+  the cache: Android clears that when storage runs low, mid-copy included). Reads check
   the folder first, then app storage; existing app-storage downloads can be
   moved over from the same row.
 - **Other locations:** gallery saves go to MediaStore `Pictures/Kagari`; caches

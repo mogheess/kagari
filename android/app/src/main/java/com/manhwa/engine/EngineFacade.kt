@@ -603,6 +603,20 @@ class EngineFacade private constructor(context: Context) {
 
     fun clearStorageLocation() = storage.clearTreeUri()
 
+    /**
+     * Where pages for a storage folder wait until they're verified and copied
+     * in. Not the cache: Android clears app caches when storage runs low, and
+     * took a page from under an in-flight copy that way. Leftovers from a
+     * download the app was killed during are cleared the first time it's used.
+     */
+    private val stagingDir: File by lazy {
+        File(appContext.noBackupFilesDir, "download_tmp").apply {
+            mkdirs()
+            val cutoff = System.currentTimeMillis() - STALE_STAGING_MS
+            listFiles()?.forEach { if (it.lastModified() < cutoff) it.delete() }
+        }
+    }
+
     private fun externalChapterDir(
         sourceId: String,
         chapterUrl: String,
@@ -652,7 +666,7 @@ class EngineFacade private constructor(context: Context) {
 
         // Always fetch into a private temp file first: the image is verified
         // before it is committed, and SAF has no atomic rename to lean on.
-        val scratch = if (external != null) File(appContext.cacheDir, "download_tmp").apply { mkdirs() }
+        val scratch = if (external != null) stagingDir.apply { mkdirs() }
                       else internalChapterDir(sourceId, chapterUrl).apply { mkdirs() }
         val temp = File(scratch, "${hashKey("$sourceId|$chapterUrl")}_${page.index}.tmp")
         val contentType = try {
@@ -1307,6 +1321,8 @@ class EngineFacade private constructor(context: Context) {
         private const val READER_IMAGE_TAG = "KagariReaderImage"
         private const val MAX_TILE_HEIGHT = 4096
         private const val MAX_EXPORT_PIXELS = 12_000_000L
+        /** A staged page this old belongs to no download still running. */
+        private const val STALE_STAGING_MS = 60 * 60 * 1000L
     }
 }
 
