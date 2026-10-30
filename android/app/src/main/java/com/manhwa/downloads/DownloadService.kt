@@ -11,6 +11,7 @@ import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -38,8 +39,9 @@ class DownloadService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_PAUSE) {
             pauseListener?.invoke()
-            // Tapped on a notification left from before a crash: nothing runs here.
-            if (!running) stopSelf()
+            // Tapped on a notification left from before a crash: nothing runs
+            // here. stopSelf(startId) leaves an instance a newer start is due at.
+            if (!running) stopSelf(startId)
             return START_NOT_STICKY
         }
         // Same lock as update(), which runs on the bridge's thread: an update
@@ -48,44 +50,86 @@ class DownloadService : Service() {
             val activity = current
             val content = activity ?: shown
             if (content == null) {
-                stopSelf()
+                stopSelf(startId)
                 return START_NOT_STICKY
             }
             // Started with startForegroundService, it has to reach the foreground
             // even when the queue emptied in the meantime: stopping first crashes
             // the app.
-            ServiceCompat.startForeground(
-                this,
-                NOTIFICATION_ID,
-                notification(this, content),
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0,
-            )
+            try {
+                ServiceCompat.startForeground(
+                    this,
+                    NOTIFICATION_ID,
+                    notification(this, content),
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0,
+                )
+            } catch (e: Exception) {
+                // Android 15 refuses once the day's data-sync time is used up,
+                // and 12+ in some background states. The queue keeps going
+                // while the app is alive; it's only less protected.
+                Log.w(TAG, "Couldn't go to the foreground: ${e.message}")
+                stopSelf(startId)
+                return START_NOT_STICKY
+            }
             if (activity == null) {
                 ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-                stopSelf()
+                stopSelf(startId)
             } else {
                 running = true
+                holdWakeLock()
             }
         }
         // Not sticky: restarted without the app, there'd be no queue to run.
         return START_NOT_STICKY
     }
 
-    /** Android 15 caps data-sync services at six hours a day. */
+    /**
+     * Android 15 allows data-sync services six hours a day in the background.
+     * Starting again would be refused until Kagari is opened, so the queue
+     * pauses and a notice says why.
+     */
     override fun onTimeout(startId: Int, fgsType: Int) {
+        synchronized(Companion) {
+            timedOut = true
+            running = false
+        }
+        pauseListener?.invoke()
+        showPausedNotice(this)
         stopSelf()
     }
 
     override fun onDestroy() {
-        running = false
-        cancelNotification(this)
+        // Under the lock: an update that saw running could otherwise post its
+        // notification after this took it down, leaving one with no service.
+        synchronized(Companion) {
+            running = false
+            cancelNotification(this)
+        }
+        wakeLock?.let { if (it.isHeld) it.release() }
+        wakeLock = null
         super.onDestroy()
+    }
+
+    private var wakeLock: PowerManager.WakeLock? = null
+
+    /** A foreground service doesn't keep the CPU awake; with the screen off downloads stalled between pages. */
+    private fun holdWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        wakeLock = getSystemService(PowerManager::class.java)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Kagari:downloads")
+            .apply {
+                setReferenceCounted(false)
+                // Bounded by the longest a data-sync service may run anyway.
+                acquire(WAKE_LOCK_TIMEOUT_MS)
+            }
     }
 
     companion object {
         private const val TAG = "DownloadService"
         private const val CHANNEL_ID = "downloads"
         private const val NOTIFICATION_ID = 0x0D0A
+        private const val PAUSED_NOTICE_ID = 0x0D0B
+        private const val WAKE_LOCK_TIMEOUT_MS = 6 * 60 * 60 * 1000L
         private const val ACTION_PAUSE = "app.kagari.downloads.PAUSE"
         private const val QUEUE_URL = "kagari://downloads"
 
@@ -93,6 +137,10 @@ class DownloadService : Service() {
         // The last thing shown, for a start that finds the queue already empty.
         @Volatile private var shown: DownloadActivityDto? = null
         @Volatile private var running = false
+        // Set when Android's background time limit ran out; cleared once the
+        // queue stops, so a resume from the app starts the service afresh.
+        @Volatile private var timedOut = false
+        @Volatile private var channelReady = false
 
         /** Called when Pause is tapped on the notification; the bridge forwards it to JS. */
         @Volatile var pauseListener: (() -> Unit)? = null
@@ -108,18 +156,21 @@ class DownloadService : Service() {
             if (activity != null) shown = activity
             val intent = Intent(context, DownloadService::class.java)
             if (activity == null) {
+                timedOut = false
                 if (running) {
                     // Cleared here, not only in onDestroy: work queued again
                     // before the service is gone has to start a new one.
                     running = false
                     context.stopService(intent)
                 }
-                // Progress updates re-post it as a plain notification, which
-                // Android doesn't take down with the service. It's ongoing, so
-                // left behind it couldn't be swiped away either.
+                // Also when the service is already gone: one left from before
+                // a crash would otherwise stay up with nothing behind it.
                 cancelNotification(context)
                 return
             }
+            // Pages already on their way before the pause lands.
+            if (timedOut) return
+            NotificationManagerCompat.from(context).cancel(PAUSED_NOTICE_ID)
             if (running) {
                 // Already in the foreground: the notification is all that changes.
                 try {
@@ -169,6 +220,27 @@ class DownloadService : Service() {
             NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
         }
 
+        private fun showPausedNotice(context: Context) {
+            val notice = NotificationCompat.Builder(context, ensureChannel(context))
+                .setSmallIcon(R.drawable.ic_notification)
+                .setContentTitle("Downloads paused")
+                .setContentText("Android limits how long apps download in the background. Open Kagari to carry on.")
+                .setStyle(
+                    NotificationCompat.BigTextStyle()
+                        .bigText("Android limits how long apps download in the background. Open Kagari to carry on."),
+                )
+                .setContentIntent(openQueue(context))
+                .setAutoCancel(true)
+                .setCategory(NotificationCompat.CATEGORY_STATUS)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .build()
+            try {
+                NotificationManagerCompat.from(context).notify(PAUSED_NOTICE_ID, notice)
+            } catch (e: SecurityException) {
+                // Notifications not allowed; the queue screen shows it's paused.
+            }
+        }
+
         private fun openQueue(context: Context): PendingIntent {
             val open = Intent(context, MainActivity::class.java).apply {
                 action = Intent.ACTION_VIEW
@@ -192,7 +264,8 @@ class DownloadService : Service() {
             )
 
         private fun ensureChannel(context: Context): String {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // Checked once per process: it's called for every page's update.
+            if (!channelReady && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val manager = context.getSystemService(NotificationManager::class.java)
                 if (manager.getNotificationChannel(CHANNEL_ID) == null) {
                     manager.createNotificationChannel(
@@ -203,6 +276,7 @@ class DownloadService : Service() {
                     )
                 }
             }
+            channelReady = true
             return CHANNEL_ID
         }
     }

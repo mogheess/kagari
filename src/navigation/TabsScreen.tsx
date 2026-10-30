@@ -80,7 +80,8 @@ export function TabsScreen() {
   useEffect(() => {
     const open = (url: string | null) => {
       if (url?.startsWith('kagari://downloads')) {
-        navigation.dispatch(CommonActions.navigate('DownloadQueue'));
+        // pop: back to the queue if it's already open, rather than a second copy.
+        navigation.dispatch(CommonActions.navigate('DownloadQueue', undefined, { pop: true }));
         return;
       }
       if (!url?.startsWith('kagari://updates')) return;

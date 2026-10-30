@@ -45,3 +45,43 @@ describe('downloadActivity', () => {
     expect(downloadActivity([entry('2', 'queued'), entry('3', 'queued')], false)?.chapterName).toBe('Chapter 2');
   });
 });
+
+describe('syncDownloadService', () => {
+  const setDownloadActivity = jest.fn(async (_activity: unknown) => undefined);
+  let sync: typeof import('../downloadActivity').syncDownloadService;
+
+  beforeEach(() => {
+    jest.resetModules();
+    setDownloadActivity.mockClear();
+    jest.doMock('../../engine', () => ({ getEngine: () => ({ setDownloadActivity }) }));
+    sync = require('../downloadActivity').syncDownloadService;
+  });
+
+  const sentChapters = () =>
+    setDownloadActivity.mock.calls.map(([a]) => {
+      const activity = a as { chapterName: string; downloaded: number } | null;
+      return activity ? `${activity.chapterName} ${activity.downloaded}` : null;
+    });
+
+  test('the first sync always goes, even with nothing to do', () => {
+    sync([], false, 0);
+    sync([], false, 10);
+    expect(sentChapters()).toEqual([null]);
+  });
+
+  test('page progress goes at most once a second', () => {
+    sync([entry('1', 'downloading', 1, 10)], false, 0);
+    sync([entry('1', 'downloading', 2, 10)], false, 300);
+    sync([entry('1', 'downloading', 3, 10)], false, 900);
+    sync([entry('1', 'downloading', 4, 10)], false, 1000);
+    expect(sentChapters()).toEqual(['Chapter 1 1', 'Chapter 1 4']);
+  });
+
+  test('a new chapter, a paused or an empty queue goes straight away', () => {
+    sync([entry('1', 'downloading', 9, 10), entry('2', 'queued')], false, 0);
+    sync([entry('1', 'done'), entry('2', 'downloading', 0, 5)], false, 100);
+    sync([entry('2', 'downloading', 1, 5)], true, 200);
+    sync([entry('2', 'done')], false, 300);
+    expect(sentChapters()).toEqual(['Chapter 1 9', 'Chapter 2 0', null]);
+  });
+});

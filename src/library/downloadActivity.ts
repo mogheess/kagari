@@ -26,16 +26,40 @@ export function downloadActivity(
   };
 }
 
+/** Page progress alone goes out at most this often; Android drops notification updates past a few a second. */
+export const PROGRESS_INTERVAL_MS = 1000;
+
 // Undefined until the first send, which always goes through: it also takes
 // down a notification left from before a crash.
-let sent: string | undefined;
+let sent: DownloadActivity | null | undefined;
+let sentAt = 0;
 
-/** Tells the service what the queue is doing, only when that changed. */
-export function syncDownloadService(entries: readonly DownloadEntry[], paused: boolean): void {
+/** Same chapter and queue, only the page count moved. */
+function onlyProgress(a: DownloadActivity | null, b: DownloadActivity | null | undefined): boolean {
+  return (
+    a != null &&
+    b != null &&
+    a.title === b.title &&
+    a.chapterName === b.chapterName &&
+    a.pageCount === b.pageCount &&
+    a.remaining === b.remaining
+  );
+}
+
+/**
+ * Tells the service what the queue is doing, only when that changed. Timed with
+ * Date.now() rather than a timer: React Native pauses timers in the background.
+ */
+export function syncDownloadService(
+  entries: readonly DownloadEntry[],
+  paused: boolean,
+  now: number = Date.now(),
+): void {
   const activity = downloadActivity(entries, paused);
-  const key = activity ? JSON.stringify(activity) : '';
-  if (key === sent) return;
-  sent = key;
+  if (sent !== undefined && JSON.stringify(activity) === JSON.stringify(sent)) return;
+  if (onlyProgress(activity, sent) && now - sentAt < PROGRESS_INTERVAL_MS) return;
+  sent = activity;
+  sentAt = now;
   getEngine()
     .setDownloadActivity(activity)
     .catch(() => {});

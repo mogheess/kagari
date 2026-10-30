@@ -91,7 +91,11 @@ async function hydrate(): Promise<void> {
   hydrated = true;
   // Pause on the download notification pauses the queue, as the button in the
   // app does. Registered here rather than at import, once the engine is up.
-  getEngine().onDownloadsPauseRequested(pauseDownloads);
+  // Ignored once the queue has emptied: a tap that lands just after the last
+  // chapter would leave the next download waiting on a pause nobody sees.
+  getEngine().onDownloadsPauseRequested(() => {
+    if (entries.some(e => e.status === 'queued' || e.status === 'downloading')) pauseDownloads();
+  });
   emit();
   persist();
   void pump();
