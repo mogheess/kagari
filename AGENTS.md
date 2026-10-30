@@ -267,8 +267,8 @@ when its signing key is trusted (`SignatureTrust`):
 Local state persists via `@react-native-async-storage/async-storage`, wrapped by
 `src/store/persist.ts` (`makePersistence<T>(key)` → `{ load, save }`, error-swallowing).
 AsyncStorage 3 runs each write on its own background task, so writes of one key
-could land out of order; `save` writes one at a time and skips to the newest
-value. Keep one `makePersistence` per key, or two queues race again.
+could land out of order; `save` writes one at a time per key and skips to the
+newest value. Write through it rather than calling `setItem` on a store's key.
 
 - **`src/library/favorites.ts`**: the library. Reactive via
   `useSyncExternalStore`. Identity `(sourceId, url)`. Hydration is **merge-safe**:
