@@ -502,21 +502,25 @@ export function ReaderScreen() {
     if (menuPage) retryPage(menuPage);
   }, [menuPage, retryPage]);
 
+  // At a chapter boundary the menu's page can belong to the other chapter.
+  const menuItem = items.find(i => i.key === menuPage);
+  const menuChapter = menuItem?.kind === 'page' ? menuItem.chapter : activeChapter;
+
   const onDownloadChapter = useCallback(() => {
     setMenuOpen(false);
     const manga: MangaDto = {
       sourceId: params.sourceId,
       url: params.mangaUrl,
-      title: params.mangaTitle ?? activeChapter.name,
+      title: params.mangaTitle ?? menuChapter.name,
       thumbnailUrl: params.mangaThumbnailUrl,
       genres: [],
       status: 'unknown',
       initialized: false,
     };
-    enqueueDownload(manga, activeChapter);
+    enqueueDownload(manga, menuChapter);
     notify('Chapter queued for download');
     offerToAddToLibrary(manga);
-  }, [params, activeChapter]);
+  }, [params, menuChapter]);
 
   // Track the FURTHEST visible page, not the topmost: at the bottom of a
   // webtoon strip the previous page still occupies the top of the viewport, so
@@ -900,8 +904,8 @@ export function ReaderScreen() {
   // toward the tapped point or back out. The handlers are plain functions, not
   // inline arrows, so they run as ordinary JS (`runOnJS(true)`) with their refs
   // intact instead of being turned into worklets.
-  const zoomGeometry = useRef({ width, height, paged });
-  zoomGeometry.current = { width, height, paged };
+  const zoomGeometry = useRef({ width, height, paged, horizontal });
+  zoomGeometry.current = { width, height, paged, horizontal };
   const zoomedRef = useRef(zoomed);
   zoomedRef.current = zoomed;
   const markZoomed = useCallback((value: boolean) => {
@@ -909,17 +913,21 @@ export function ReaderScreen() {
   }, []);
 
   /**
-   * The page at a point on screen (its y), as an item key. Paged modes show
-   * one page; in the strip it's found from the scroll offset, undoing the zoom.
+   * The page at a gesture's y, as an item key, or '' on a chapter transition.
+   * Gesture Handler reports the point in the zoom layer's own coordinates,
+   * with the zoom already undone, so in the strip it's the scroll offset plus
+   * y. Paged modes show one item: the offset over the page size.
    */
   const pageAt = useCallback((y: number): string => {
-    const { height: h, paged: pagedNow } = zoomGeometry.current;
-    if (pagedNow) return currentRef.current;
-    const zoom = zoomNow.current;
-    const at = scrollOffset.current + (y - h / 2 - zoom.ty) / zoom.scale + h / 2;
+    const { width: w, height: h, paged: pagedNow, horizontal: sideways } = zoomGeometry.current;
     const order = itemsRef.current;
     let index = -1;
-    while (index + 1 < order.length && offsetOf.current(index + 1) <= at) index++;
+    if (pagedNow) {
+      index = Math.round(scrollOffset.current / (sideways ? w : h));
+    } else {
+      const at = scrollOffset.current + y;
+      while (index + 1 < order.length && offsetOf.current(index + 1) <= at) index++;
+    }
     const item = order[index];
     return item?.kind === 'page' ? item.key : '';
   }, []);
@@ -1246,7 +1254,14 @@ export function ReaderScreen() {
             <Pressable
               hitSlop={10}
               onPress={() => {
-                setMenuPage(currentRef.current);
+                // Viewability may not have reported yet (opened on page 1).
+                setMenuPage(
+                  currentRef.current ||
+                    (items.find(
+                      i => i.kind === 'page' && i.chapter.url === activeUrl && i.pageIndex === activePage,
+                    )?.key ??
+                      ''),
+                );
                 setMenuOpen(true);
               }}
             >
@@ -1299,7 +1314,7 @@ export function ReaderScreen() {
 
       <ReaderMenuSheet
         visible={menuOpen}
-        downloadStatus={getDownloadEntry(params.sourceId, activeUrl)?.status}
+        downloadStatus={getDownloadEntry(params.sourceId, menuChapter.url)?.status}
         onReload={onReloadPage}
         onSave={onSavePage}
         onShare={onSharePage}
