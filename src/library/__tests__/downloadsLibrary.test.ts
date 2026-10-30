@@ -13,6 +13,8 @@ const mockEngine = {
   getPages: jest.fn(() => Promise.resolve([])),
   downloadPage: jest.fn(() => Promise.resolve('file:///x')),
   deleteDownloadedChapter: jest.fn(() => Promise.resolve()),
+  setDownloadActivity: jest.fn(() => Promise.resolve()),
+  onDownloadsPauseRequested: jest.fn(() => () => {}),
 };
 jest.mock('../../engine', () => ({ getEngine: () => mockEngine }));
 

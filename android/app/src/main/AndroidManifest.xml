@@ -22,6 +22,9 @@
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
     <!-- New-chapter notifications from the background library check (Android 13+ asks). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Keeps downloads running while the app is in the background. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <application
       android:name=".MainApplication"
@@ -45,6 +48,11 @@
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
       </activity>
+
+      <service
+        android:name="com.manhwa.downloads.DownloadService"
+        android:exported="false"
+        android:foregroundServiceType="dataSync" />
 
       <!-- In-app browser for manual Cloudflare clearance (shares the cookie jar). -->
       <activity

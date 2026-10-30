@@ -111,6 +111,18 @@ export interface DownloadMeta {
   scanlator?: string;
 }
 
+/** What the download queue is doing, for the notification that keeps it running. */
+export interface DownloadActivity {
+  title: string;
+  chapterName: string;
+  /** Pages saved of the chapter downloading now. */
+  downloaded: number;
+  /** 0 until its page list is known. */
+  pageCount: number;
+  /** Chapters still to download, this one included. */
+  remaining: number;
+}
+
 /** The User-Agent every request goes out with. */
 export interface UserAgentInfo {
   current: string;
@@ -438,6 +450,13 @@ export interface Engine {
   // background updates
   /** Schedules the closed-app new-chapters check; `intervalHours` 0 turns it off. */
   setBackgroundUpdates(intervalHours: number, wifiOnly: boolean, chargingOnly: boolean): Promise<void>;
+  /**
+   * Keeps a foreground service (and its notification) up while downloads run,
+   * so Android doesn't kill the app mid-queue; null stops it.
+   */
+  setDownloadActivity(activity: DownloadActivity | null): Promise<void>;
+  /** Pause tapped on the download notification. Returns an unsubscribe. */
+  onDownloadsPauseRequested(listener: () => void): () => void;
   /** What background checks found since last asked; empties it. */
   takeBackgroundUpdates(): Promise<BackgroundInboxDto>;
 

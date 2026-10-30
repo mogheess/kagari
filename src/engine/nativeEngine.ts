@@ -6,7 +6,7 @@
  * Returns `null` when the native module is unavailable so the selector
  * (`engine/index.ts`) can fall back to the no-op engine — there is no mock data.
  */
-import { NativeModules } from 'react-native';
+import { DeviceEventEmitter, NativeModules } from 'react-native';
 import type {
   Engine,
   ExtensionDto,
@@ -78,6 +78,7 @@ interface ManhwaEngineNative {
   setKeepScreenOn(enabled: boolean): Promise<void>;
   setBackgroundUpdates(intervalHours: number, wifiOnly: boolean, chargingOnly: boolean): Promise<string>;
   takeBackgroundUpdates(): Promise<string>;
+  setDownloadActivity?(activityJson: string | null): Promise<string>;
   exportMihonBackup(requestJson: string, fileName: string): Promise<string>;
   shareBackup(uri: string, fileName: string): Promise<void>;
   clearCookies?(): Promise<string>;
@@ -286,6 +287,14 @@ export function createNativeEngine(): Engine | null {
     async setBackgroundUpdates(intervalHours: number, wifiOnly: boolean, chargingOnly: boolean) {
       if (typeof Native.setBackgroundUpdates !== 'function') return;
       await Native.setBackgroundUpdates(intervalHours, wifiOnly, chargingOnly);
+    },
+    async setDownloadActivity(activity) {
+      if (typeof Native.setDownloadActivity !== 'function') return;
+      await Native.setDownloadActivity(activity ? JSON.stringify(activity) : null);
+    },
+    onDownloadsPauseRequested(listener) {
+      const sub = DeviceEventEmitter.addListener('KagariDownloadsPause', listener);
+      return () => sub.remove();
     },
     async takeBackgroundUpdates() {
       if (typeof Native.takeBackgroundUpdates !== 'function') return { updates: [], snapshots: {} };

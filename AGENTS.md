@@ -234,6 +234,13 @@ when its signing key is trusted (`SignatureTrust`):
   bulk sheet (All / Unread) enqueue in batches. `DownloadQueueScreen` (Profile →
   Download queue, or the pill in the Library header while it runs) shows only
   what's waiting or failed.
+- **Background:** the queue runs in JS, so while it has work a foreground
+  service (`com/manhwa/downloads/DownloadService`, type `dataSync`) keeps the
+  process alive with a progress notification. `downloadActivity.ts` reports
+  each change; empty or paused stops it. Pause on the notification comes back
+  as the `KagariDownloadsPause` event, and tapping it opens the queue
+  (`kagari://downloads`). Updates must reach the service in order, so
+  `setDownloadActivity` runs on the module thread, not the IO pool.
 - **Downloads live with their titles (Mihon-style):** there's no screen of
   downloaded chapters. Library covers carry a download badge and a virtual
   "Downloaded" collection (folders card / shelf chip) lists library titles with
@@ -520,6 +527,8 @@ android/app/src/main/java/
   com/manhwa/updates/    LibraryUpdateWorker (closed-app new-chapters check),
                          BackgroundUpdates (schedule, inbox, notification),
                          AsyncStorageReader
+  com/manhwa/downloads/  DownloadService (foreground service while the
+                         download queue runs)
 android/app/src/androidTest/   On-device tests (see Testing)
 android/app/src/debug/         Debug-only test host (BlankActivity)
 patches/                       patch-package patches (react-native-screens)
