@@ -17,7 +17,6 @@
 import { useSyncExternalStore } from 'react';
 import { makePersistence } from '../store/persist';
 import { getFavorites, subscribeFavorites, favoritesHydrated } from './favorites';
-import { takeRecentlyAdded } from './recentlyAdded';
 import {
   getHiddenScanlators,
   scanlatorFiltersReady,
@@ -38,11 +37,11 @@ export interface LibraryUpdate {
   /** Epoch millis the new chapter(s) were detected. */
   foundAt: number;
   /**
-   * 'new' = freshly published chapters for a followed title (default when
-   * absent, for back-compat with already-stored feeds); 'added' = a title the
-   * user just added to the library, surfaced once so they know it's there.
+   * Always 'new' (freshly published chapters) when present. Feeds from older
+   * versions also held 'added' entries for titles just added to the library;
+   * those are dropped on load.
    */
-  kind?: 'new' | 'added';
+  kind?: 'new';
 }
 
 interface UpdatesMeta {
@@ -87,7 +86,12 @@ const hydrated = new Promise<void>(resolve => {
 
 async function hydrate(): Promise<void> {
   const [f, s, m] = await Promise.all([feedStore.load(), snapStore.load(), metaStore.load()]);
-  if (Array.isArray(f)) feed = f;
+  if (Array.isArray(f)) {
+    // "Added to library" entries turned up hours after the add (on the next
+    // scan) and said nothing the library doesn't, so they're gone.
+    feed = f.filter(u => (u as { kind?: string }).kind !== 'added');
+    if (feed.length !== f.length) feedStore.save(feed);
+  }
   if (s && typeof s === 'object') snapshots = s;
   if (m && typeof m === 'object') meta = { lastChecked: m.lastChecked ?? 0, lastSeen: m.lastSeen ?? 0 };
   emit();
@@ -221,43 +225,15 @@ export async function checkLibraryUpdates(engine: Engine, opts?: { force?: boole
       }
       const hasChapters = !!chapters && chapters.length > 0;
 
-      // If the user just manually added this title, surface it once so they can
-      // confirm it's in the library — even for completed series and even when
-      // the source can't return chapters right now (offline, blocked, not
-      // installed). This is checked *before* the empty/baseline early-returns and
-      // *regardless* of whether a snapshot exists: a non-forced launch scan can
-      // baseline a title before the recentlyAdded set finishes hydrating, so the
-      // flag must still win on a later scan instead of being swallowed forever.
-      if (takeRecentlyAdded(f.sourceId, f.url)) {
-        const newest = hasChapters ? chapters!.slice().sort(byNewest)[0] : undefined;
-        found.push({
-          sourceId: f.sourceId,
-          mangaUrl: f.url,
-          title: f.title,
-          thumbnailUrl: f.thumbnailUrl,
-          newCount: hasChapters ? chapters!.length : 0,
-          latestChapterName: newest?.name ?? '',
-          latestChapterUrl: newest?.url ?? `kagari:added\u0000${key}`,
-          foundAt: Date.now(),
-          kind: 'added',
-        });
-        // Baseline so the (now-known) backlog doesn't re-flood as "new" later.
-        if (hasChapters) {
-          snapshots[key] = snapshotUrls(chapters!);
-          snapChanged = true;
-        }
-        continue;
-      }
-
-      // Nothing fetched and not a manual add — leave the snapshot untouched.
+      // Nothing fetched — leave the snapshot untouched.
       if (!hasChapters) continue;
 
       const prev = snapshots[key];
       snapshots[key] = mergedSnapshot(prev, chapters!);
       snapChanged = true;
 
-      // First time we've seen this manga and it wasn't a manual add: baseline
-      // silently so the backlog doesn't flood the feed.
+      // First time we've seen this manga: baseline silently so the backlog
+      // doesn't flood the feed.
       if (!prev) continue;
 
       // Counted from what the title page shows: chapters from a group hidden

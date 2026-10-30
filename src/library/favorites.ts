@@ -11,7 +11,6 @@
  */
 import { useMemo, useSyncExternalStore } from 'react';
 import { makePersistence } from '../store/persist';
-import { markRecentlyAdded, clearRecentlyAdded } from './recentlyAdded';
 import type { MangaDto, MangaStatus } from '../engine/types';
 
 export interface FavoriteManga {
@@ -144,7 +143,6 @@ export function removeFavorite(sourceId: string, url: string): void {
   if (!isFavorited(sourceId, url)) return;
   favorites = favorites.filter(f => !(f.sourceId === sourceId && f.url === url));
   if (!hydrated) removedBeforeHydrate.add(keyOf(sourceId, url));
-  clearRecentlyAdded(sourceId, url);
   emit();
   persist();
 }
@@ -155,7 +153,6 @@ export function toggleFavorite(m: MangaDto, categoryIds: string[] = []): boolean
   if (exists) {
     favorites = favorites.filter(f => !(f.sourceId === m.sourceId && f.url === m.url));
     if (!hydrated) removedBeforeHydrate.add(keyOf(m.sourceId, m.url));
-    clearRecentlyAdded(m.sourceId, m.url);
   } else {
     favorites = [
       {
@@ -171,8 +168,6 @@ export function toggleFavorite(m: MangaDto, categoryIds: string[] = []): boolean
       ...favorites,
     ];
     removedBeforeHydrate.delete(keyOf(m.sourceId, m.url));
-    // Surface this manual add in the Updates feed on the next scan.
-    markRecentlyAdded(m.sourceId, m.url);
   }
   emit();
   persist();
