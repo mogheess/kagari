@@ -276,6 +276,9 @@ when its signing key is trusted (`SignatureTrust`):
 
 Local state persists via `@react-native-async-storage/async-storage`, wrapped by
 `src/store/persist.ts` (`makePersistence<T>(key)` → `{ load, save }`, error-swallowing).
+AsyncStorage 3 runs each write on its own background task, so writes of one key
+could land out of order; `save` writes one at a time per key and skips to the
+newest value. Write through it rather than calling `setItem` on a store's key.
 
 - **`src/library/favorites.ts`**: the library. Reactive via
   `useSyncExternalStore`. Identity `(sourceId, url)`. Hydration is **merge-safe**:
@@ -646,7 +649,7 @@ With no extensions installed you'll see empty states. Install a repo + extension
 
 - **JS:** `npm test` (jest). Suites live in `__tests__/` next to the code in
   `src/engine`, `src/library`, `src/reader`, `src/app`, `src/components`,
-  `src/sources` and `src/theme`. Also run `npx tsc --noEmit` and `npm run lint` (warnings are
+  `src/sources`, `src/store` and `src/theme`. Also run `npx tsc --noEmit` and `npm run lint` (warnings are
   tolerated; don't add new ones).
 - **On-device:** `android/app/src/androidTest` runs on a device or emulator
   against a `MockWebServer` (`mockwebserver3`). Today it covers the Cloudflare
