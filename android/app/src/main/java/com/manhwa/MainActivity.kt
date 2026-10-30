@@ -5,6 +5,7 @@ import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
 import com.facebook.react.defaults.DefaultReactActivityDelegate
+import com.swmansion.rnscreens.fragment.restoration.RNScreensFragmentFactory
 
 class MainActivity : ReactActivity() {
 
@@ -22,6 +23,13 @@ class MainActivity : ReactActivity() {
       DefaultReactActivityDelegate(this, mainComponentName, fabricEnabled)
 
   override fun onCreate(savedInstanceState: Bundle?) {
+    // After Android kills the app in the background, coming back recreates
+    // this activity from saved state, and the fragment manager tries to
+    // restore react-native-screens' fragments, which throw ("Screen fragments
+    // should never be restored") and crash the app on the way back in. This
+    // factory, from their README, gives it placeholders that remove
+    // themselves; React Native draws the screens again from JS.
+    supportFragmentManager.fragmentFactory = RNScreensFragmentFactory()
     super.onCreate(savedInstanceState)
     ModalEscapeFix.install(this)
   }
