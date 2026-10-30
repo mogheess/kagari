@@ -23,6 +23,7 @@ import {
   Gesture,
   GestureDetector,
   type GestureUpdateEvent,
+  type LongPressGestureHandlerEventPayload,
   type PanGestureHandlerEventPayload,
   type PinchGestureHandlerEventPayload,
   type TapGestureHandlerEventPayload,
@@ -142,18 +143,21 @@ export function ReaderScreen() {
   const series = `${params.sourceId}|${params.mangaUrl}`;
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  // The page the menu acts on: the one long-pressed, or the current one when
+  // the menu is opened from the top bar. Keyed like the list's items.
+  const [menuPage, setMenuPage] = useState('');
   // Flips only when a gesture ends, never during one: a React render of this
   // screen mid-pinch is what made zooming stutter.
   const [zoomed, setZoomed] = useState(false);
-  // Controlled per-page reload counters so a long-press (or the error Retry
-  // button) can force a fresh fetch of a specific page. Keyed by the item key,
+  // Controlled per-page reload counters so the page menu's Reload (or the
+  // error Retry button) can force a fresh fetch of a specific page. Keyed by the item key,
   // which is chapter-scoped — page indices repeat across chapters.
   const [reloadTokens, setReloadTokens] = useState<Record<string, number>>({});
   const retryPage = useCallback(
     (key: string) => setReloadTokens(m => ({ ...m, [key]: (m[key] ?? 0) + 1 })),
     [],
   );
-  /** Reloads whichever page is currently in view (long-press gesture). */
+  /** Reloads whichever page is currently in view (after a WebView check). */
   const retryCurrentPage = useCallback(() => {
     if (currentRef.current) retryPage(currentRef.current);
   }, [retryPage]);
@@ -449,24 +453,24 @@ export function ReaderScreen() {
     }
   }, [engine, params.sourceId, params.mangaUrl, params.chapter, loadError, ensureChapter, retryCurrentPage]);
 
-  // Resolve the current page to a local file:// uri (cache-backed, so this is
+  // Resolve the menu's page to a local file:// uri (cache-backed, so this is
   // cheap once the page has rendered) for the save/share actions.
-  const resolveCurrentUri = useCallback(async (): Promise<string | null> => {
-    const page = activeEntry?.pages[current];
-    if (!page) return null;
+  const resolveMenuPageUri = useCallback(async (): Promise<string | null> => {
+    const item = itemsRef.current.find(i => i.key === menuPage);
+    if (item?.kind !== 'page') return null;
     try {
-      const image = activeEntry?.offline
-        ? await engine.fetchDownloadedImage(params.sourceId, activeUrl, page.index)
-        : await engine.fetchImage(params.sourceId, page);
+      const image = item.offline
+        ? await engine.fetchDownloadedImage(params.sourceId, item.chapter.url, item.page.index)
+        : await engine.fetchImage(params.sourceId, item.page);
       return image.uri;
     } catch {
       return null;
     }
-  }, [activeEntry, current, engine, params.sourceId, activeUrl]);
+  }, [menuPage, engine, params.sourceId]);
 
   const onSavePage = useCallback(async () => {
     setMenuOpen(false);
-    const uri = await resolveCurrentUri();
+    const uri = await resolveMenuPageUri();
     if (!uri) {
       notify('This page has not loaded yet');
       return;
@@ -477,11 +481,11 @@ export function ReaderScreen() {
     } catch (e) {
       notify(e instanceof Error ? e.message : 'Could not save the page');
     }
-  }, [resolveCurrentUri, engine]);
+  }, [resolveMenuPageUri, engine]);
 
   const onSharePage = useCallback(async () => {
     setMenuOpen(false);
-    const uri = await resolveCurrentUri();
+    const uri = await resolveMenuPageUri();
     if (!uri) {
       notify('This page has not loaded yet');
       return;
@@ -491,23 +495,32 @@ export function ReaderScreen() {
     } catch (e) {
       notify(e instanceof Error ? e.message : 'Could not share the page');
     }
-  }, [resolveCurrentUri, engine]);
+  }, [resolveMenuPageUri, engine]);
+
+  const onReloadPage = useCallback(() => {
+    setMenuOpen(false);
+    if (menuPage) retryPage(menuPage);
+  }, [menuPage, retryPage]);
+
+  // At a chapter boundary the menu's page can belong to the other chapter.
+  const menuItem = items.find(i => i.key === menuPage);
+  const menuChapter = menuItem?.kind === 'page' ? menuItem.chapter : activeChapter;
 
   const onDownloadChapter = useCallback(() => {
     setMenuOpen(false);
     const manga: MangaDto = {
       sourceId: params.sourceId,
       url: params.mangaUrl,
-      title: params.mangaTitle ?? activeChapter.name,
+      title: params.mangaTitle ?? menuChapter.name,
       thumbnailUrl: params.mangaThumbnailUrl,
       genres: [],
       status: 'unknown',
       initialized: false,
     };
-    enqueueDownload(manga, activeChapter);
+    enqueueDownload(manga, menuChapter);
     notify('Chapter queued for download');
     offerToAddToLibrary(manga);
-  }, [params, activeChapter]);
+  }, [params, menuChapter]);
 
   // Track the FURTHEST visible page, not the topmost: at the bottom of a
   // webtoon strip the previous page still occupies the top of the viewport, so
@@ -891,12 +904,32 @@ export function ReaderScreen() {
   // toward the tapped point or back out. The handlers are plain functions, not
   // inline arrows, so they run as ordinary JS (`runOnJS(true)`) with their refs
   // intact instead of being turned into worklets.
-  const zoomGeometry = useRef({ width, height, paged });
-  zoomGeometry.current = { width, height, paged };
+  const zoomGeometry = useRef({ width, height, paged, horizontal });
+  zoomGeometry.current = { width, height, paged, horizontal };
   const zoomedRef = useRef(zoomed);
   zoomedRef.current = zoomed;
   const markZoomed = useCallback((value: boolean) => {
     if (zoomedRef.current !== value) setZoomed(value);
+  }, []);
+
+  /**
+   * The page at a gesture's y, as an item key, or '' on a chapter transition.
+   * Gesture Handler reports the point in the zoom layer's own coordinates,
+   * with the zoom already undone, so in the strip it's the scroll offset plus
+   * y. Paged modes show one item: the offset over the page size.
+   */
+  const pageAt = useCallback((y: number): string => {
+    const { width: w, height: h, paged: pagedNow, horizontal: sideways } = zoomGeometry.current;
+    const order = itemsRef.current;
+    let index = -1;
+    if (pagedNow) {
+      index = Math.round(scrollOffset.current / (sideways ? w : h));
+    } else {
+      const at = scrollOffset.current + y;
+      while (index + 1 < order.length && offsetOf.current(index + 1) <= at) index++;
+    }
+    const item = order[index];
+    return item?.kind === 'page' ? item.key : '';
   }, []);
 
   /** Largest translation that keeps the scaled page covering the screen. */
@@ -1001,7 +1034,18 @@ export function ReaderScreen() {
     [setZoom, zoomBounds, markZoomed],
   );
   const onSingleTap = useCallback(() => toggleChrome(), [toggleChrome]);
-  const onLongPress = useCallback(() => retryCurrentPage(), [retryCurrentPage]);
+  // Opens the page menu for the page under the finger. It used to reload a
+  // page straight away: a finger resting on the screen blanked a page, and in
+  // the strip it was whichever page counted as current, often a neighbour.
+  const onLongPress = useCallback(
+    (e: GestureStateChangeEvent<LongPressGestureHandlerEventPayload>) => {
+      const key = pageAt(e.y);
+      if (!key) return;
+      setMenuPage(key);
+      setMenuOpen(true);
+    },
+    [pageAt],
+  );
 
   // The list's own scrolling, as a gesture that pinch and pan may take over. A
   // plain scroll view that starts dragging makes Gesture Handler cancel every
@@ -1207,7 +1251,20 @@ export function ReaderScreen() {
             {activeChapter.name}
           </Text>
           <View style={styles.topActions}>
-            <Pressable hitSlop={10} onPress={() => setMenuOpen(true)}>
+            <Pressable
+              hitSlop={10}
+              onPress={() => {
+                // Viewability may not have reported yet (opened on page 1).
+                setMenuPage(
+                  currentRef.current ||
+                    (items.find(
+                      i => i.kind === 'page' && i.chapter.url === activeUrl && i.pageIndex === activePage,
+                    )?.key ??
+                      ''),
+                );
+                setMenuOpen(true);
+              }}
+            >
               <Icon name="more" size={22} color="#fff" />
             </Pressable>
             <Pressable hitSlop={10} onPress={() => setSettingsOpen(true)}>
@@ -1257,7 +1314,8 @@ export function ReaderScreen() {
 
       <ReaderMenuSheet
         visible={menuOpen}
-        downloadStatus={getDownloadEntry(params.sourceId, activeUrl)?.status}
+        downloadStatus={getDownloadEntry(params.sourceId, menuChapter.url)?.status}
+        onReload={onReloadPage}
         onSave={onSavePage}
         onShare={onSharePage}
         onDownload={onDownloadChapter}
@@ -1770,6 +1828,7 @@ function ReaderSettingsSheet({
 function ReaderMenuSheet({
   visible,
   downloadStatus,
+  onReload,
   onSave,
   onShare,
   onDownload,
@@ -1777,6 +1836,7 @@ function ReaderMenuSheet({
 }: {
   visible: boolean;
   downloadStatus?: DownloadStatus;
+  onReload: () => void;
   onSave: () => void;
   onShare: () => void;
   onDownload: () => void;
@@ -1808,17 +1868,24 @@ function ReaderMenuSheet({
     disabled?: boolean;
   }[] = [
     {
+      key: 'reload',
+      icon: 'refresh',
+      label: 'Reload page',
+      hint: 'Fetch this page again if it looks broken',
+      onPress: onReload,
+    },
+    {
       key: 'save',
       icon: 'image',
       label: 'Save page to gallery',
-      hint: 'Save the current page as an image',
+      hint: 'Save this page as an image',
       onPress: onSave,
     },
     {
       key: 'share',
       icon: 'share',
       label: 'Share page',
-      hint: 'Send the current page to another app',
+      hint: 'Send this page to another app',
       onPress: onShare,
     },
     {

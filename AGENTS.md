@@ -377,8 +377,14 @@ When you add a new persisted store, follow the favorites pattern (in-memory stat
   read from storage. An optional **keep screen on** toggle holds the display
   awake while reading. Pages
   load via the native `fetchImage` cache (queued, retried) and render tall
-  webtoon images as stitched tiles. A failed page shows a **Retry** button and any
-  page can be **long-pressed to refresh** it; retry passes `forceRefresh` to
+  webtoon images as stitched tiles. A failed page shows a **Retry** button, and
+  **long-press** opens the page menu (Reload page, Save, Share, Download chapter)
+  for the page under the finger (in the strip, the scroll offset plus the
+  touch point: Gesture Handler reports it in the zoom layer's own
+  coordinates, zoom already undone; paged modes, the offset over the page
+  size, so a transition screen gets no menu). It used to reload straight away, so a resting
+  finger blanked a page, and it reloaded the current page, often a neighbour.
+  Reload passes `forceRefresh` to
   `EngineFacade.fetchImage`, which busts the disk cache and re-downloads.
   Freshly-downloaded files that don't decode are rejected (not cached) so a
   truncated download can't keep rendering black. Opening a chapter records history.
