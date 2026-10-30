@@ -236,11 +236,14 @@ when its signing key is trusted (`SignatureTrust`):
   what's waiting or failed.
 - **Background:** the queue runs in JS, so while it has work a foreground
   service (`com/manhwa/downloads/DownloadService`, type `dataSync`) keeps the
-  process alive with a progress notification. `downloadActivity.ts` reports
-  each change; empty or paused stops it. Pause on the notification comes back
-  as the `KagariDownloadsPause` event, and tapping it opens the queue
+  process alive (plus a partial wake lock) with a progress notification.
+  `downloadActivity.ts` reports each change, page progress at most once a
+  second; empty or paused stops it. Pause on the notification comes back as
+  the `KagariDownloadsPause` event, and tapping it opens the queue
   (`kagari://downloads`). Updates must reach the service in order, so
-  `setDownloadActivity` runs on the module thread, not the IO pool.
+  `setDownloadActivity` runs on the module thread, not the IO pool. When
+  Android 15's six-hour data-sync limit runs out, `onTimeout` pauses the
+  queue and posts a "Downloads paused" notice.
 - **Downloads live with their titles (Mihon-style):** there's no screen of
   downloaded chapters. Library covers carry a download badge and a virtual
   "Downloaded" collection (folders card / shelf chip) lists library titles with
