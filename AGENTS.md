@@ -233,7 +233,10 @@ when its signing key is trusted (`SignatureTrust`):
   chapter at a time and `PAGE_CONCURRENCY` (4) of its pages at once, and loads
   the next chapter's page list meanwhile (re-queues anything mid-download on
   launch). The source's own rate limit still applies: pages go through its
-  client, so some sources stay near one page a second. MangaDetail multi-select and the
+  client, so some sources stay near one page a second. A run checks its own
+  entry (`removals` counts removals per chapter), since a chapter cancelled
+  and queued again has a new one; a cancelled run deletes the chapter again
+  once its last pages land. Resume tops up a running chapter's workers. MangaDetail multi-select and the
   bulk sheet (All / Unread) enqueue in batches. `DownloadQueueScreen` (Profile →
   Download queue, or the pill in the Library header while it runs) shows only
   what's waiting or failed.

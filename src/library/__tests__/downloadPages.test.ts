@@ -6,6 +6,7 @@ import {
   enqueueDownload,
   getDownloadEntry,
   pauseDownloads,
+  removeDownload,
   resumeDownloads,
   whenDownloadsHydrated,
 } from '../downloads';
@@ -107,4 +108,35 @@ test('pausing lets the pages in flight land, then waits', async () => {
   expect(mockInFlight).toHaveLength(4);
   while (mockInFlight.length > 0) await finishOne();
   expect(entry(3)?.status).toBe('done');
+});
+
+test('a pause lifted while pages are still landing goes back to four at a time', async () => {
+  enqueueDownload(manga, chapter(4));
+  await settle();
+  pauseDownloads();
+  // Three of the four run out; one page is still landing when the pause lifts.
+  await finishOne();
+  await finishOne();
+  await finishOne();
+  expect(mockInFlight).toHaveLength(1);
+  resumeDownloads();
+  await settle();
+  expect(mockInFlight).toHaveLength(4);
+  while (mockInFlight.length > 0) await finishOne();
+  expect(entry(4)).toMatchObject({ status: 'done', downloaded: 10 });
+});
+
+test('cancelled mid-chapter and queued again, the new download starts clean', async () => {
+  mockEngine.deleteDownloadedChapter.mockClear();
+  enqueueDownload(manga, chapter(5));
+  await settle();
+  removeDownload('1', '/m/5');
+  enqueueDownload(manga, chapter(5));
+  // The old run's four pages land; they mustn't count for the new entry.
+  for (let i = 0; i < 4; i += 1) await finishOne();
+  // Removing deletes once; the run deletes again for pages that landed after.
+  expect(mockEngine.deleteDownloadedChapter).toHaveBeenCalledTimes(2);
+  expect(entry(5)).toMatchObject({ status: 'downloading', downloaded: 0 });
+  while (mockInFlight.length > 0) await finishOne();
+  expect(entry(5)).toMatchObject({ status: 'done', downloaded: 10, pageCount: 10 });
 });

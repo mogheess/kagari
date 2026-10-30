@@ -676,7 +676,10 @@ class EngineFacade private constructor(context: Context) {
 
         if (external != null) {
             val name = DownloadNaming.pageFileName(page.index, extension)
-            storage.file(external, name)?.delete()
+            storage.file(external, name)?.let { old ->
+                old.delete()
+                storage.forgetFile(external, name)
+            }
             val doc = external.createFile(mimeFor(extension), name)
                 ?: run {
                     temp.delete()
@@ -684,10 +687,16 @@ class EngineFacade private constructor(context: Context) {
                 }
             // The listing is cached, so a file it doesn't know about (put there
             // from outside) can still hold the name, and SAF then picks
-            // "009 (1).jpg". Replace the old one rather than keep both.
-            if (doc.name != name) {
+            // "009 (1).jpg", which reads skip. Replace the old one instead,
+            // and give up on the page if that doesn't work.
+            val created = doc.name
+            if (created != null && created != name) {
                 external.findFile(name)?.delete()
-                doc.renameTo(name)
+                if (!doc.renameTo(name) || doc.name != name) {
+                    doc.delete()
+                    temp.delete()
+                    throw EngineException("storage", "Could not save $name in the storage location")
+                }
             }
             val length = temp.length()
             try {
@@ -792,8 +801,9 @@ class EngineFacade private constructor(context: Context) {
     /** Removes all downloaded pages for a chapter, wherever they live. */
     fun deleteDownloadedChapter(sourceId: String, chapterUrl: String) {
         externalChapterDir(sourceId, chapterUrl, meta = null, create = false)?.let { dir ->
-            storage.invalidate(dir)
             dir.delete()
+            // After the delete: a page landing meanwhile could list it again.
+            storage.invalidate(dir)
             storage.forgetChapterDir(sourceId, chapterUrl)
         }
         internalChapterDir(sourceId, chapterUrl).deleteRecursively()
