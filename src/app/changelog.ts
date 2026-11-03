@@ -13,8 +13,20 @@ export interface ChangelogEntry {
 export const CHANGELOG: ChangelogEntry[] = [
   {
     version: '0.7.1',
-    date: '2026-10-25',
+    date: '2026-11-03',
     highlights: [
+      'Downloads keep going in the background. A notification shows progress and has a Pause button, and tapping it opens the download queue.',
+      'Downloads are faster: several pages of a chapter download at once. Some sources limit how fast apps can download, so not every source gets quicker.',
+      'Fixed a crash when coming back to Kagari after Android closed it in the background.',
+      'Fixed pages flashing black while reading. Holding a page now opens its menu, with Reload page, Save and Share, instead of reloading it straight away, and it acts on the page you are holding.',
+      'Fixed empty source lists in Discover and global search when your extensions are all in languages other than English.',
+      "Sources behind Cloudflare get stuck less: an old Cloudflare check is cleared and solved again instead of failing every time, and sources now identify as your phone's current browser rather than an old one Cloudflare is quicker to challenge.",
+      'Profile → Advanced: clear cookies or WebView data when a source is stuck, see your WebView version, set your own user agent, and find out how to stop your phone from blocking background checks.',
+      'Language lists put your phone’s languages first, then English, then the ones you turned on, so you no longer scroll past dozens of others to reach yours.',
+      'Fixed changes sometimes going back to an older version after a restart, such as deleted downloads coming back.',
+      'Fixed downloads to a storage folder failing when the phone is low on space.',
+      'The Updates tab no longer shows "Added to library" entries.',
+      'Fixed a crash on Android 7 the first time a source hit a Cloudflare check.',
       'Titles with chapters from more than one scan group no longer read on into another copy of the same chapter. Reading continues with the group of the chapter you opened, or a downloaded copy.',
       'Hide a scan group on a title: when its chapters come from more than one group, tap a group under Chapters to hide its chapters from the list, Resume, downloads, the reader and new-chapter alerts. Kagari remembers it for that title.',
       'With a title showing only downloaded chapters, the reader keeps to downloaded chapters as you read on.',
